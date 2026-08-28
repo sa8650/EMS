@@ -1,4 +1,4 @@
-# EMS V1 — powered by DoxTox
+# EMS — powered by DoxTox
 
 Multi-shop management system for Cloudflare Pages Functions and Supabase PostgreSQL.
 
