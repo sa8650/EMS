@@ -2404,3 +2404,52 @@ html body .shell.dash2 .main .salesTrendCard .tgrid{stroke:#BDB9CE!important}
 .salEmpty{text-align:center;color:#7a94b0;padding:22px 10px;font-size:13px}
 @media (max-width:1024px){.salGrid{grid-template-columns:1fr}.salSide{max-height:300px}.salAdjGrid{grid-template-columns:1fr 1fr}.salSummary{grid-template-columns:1fr 1fr}}
 @media (max-width:640px){.salWrap{padding:14px}.salFormGrid{grid-template-columns:1fr}.salProfileLeft{flex-wrap:wrap}.salSummary{grid-template-columns:1fr 1fr}.salCards{grid-template-columns:1fr 1fr}.salToggles{flex-direction:column;gap:10px}.salActions{justify-content:stretch}.salActions .salGhost,.salActions .salSave{flex:1;justify-content:center}.salAttRow{flex-direction:column;align-items:flex-start}.salPaidRow{flex-direction:column;align-items:stretch}.salPaidRow input{width:100%}}
+
+/* =====================================================================
+   License plan cards — "Plan" card design from Uiverse.io by Yaya12085
+   Used on the landing page (#pricing) and the administrator
+   Purchase license page. Scoped under .plan / .planGrid on purpose:
+   these class names appear nowhere else, so no legacy theme layer
+   (ocean / classic / rust / professional-flat) can override them.
+   ===================================================================== */
+.planGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:18px;align-items:stretch;margin:26px 0 20px;text-align:left}
+.planGrid>.panel{grid-column:1/-1}
+.plan{border-radius:16px;box-shadow:0 30px 30px -25px rgba(0,38,255,.205);padding:10px;background-color:#fff;color:#697e91;max-width:100%;min-width:0;transition:transform .18s ease,box-shadow .18s ease}
+.plan:hover{transform:translateY(-3px);box-shadow:0 34px 34px -25px rgba(0,38,255,.3)}
+.plan strong{font-weight:600;color:#425275}
+.plan .inner{align-items:center;padding:20px;padding-top:40px;background-color:#ecf0ff;border-radius:12px;position:relative;display:flex;flex-direction:column;height:100%}
+.plan .pricing{position:absolute;top:0;right:0;background-color:#bed6fb;border-radius:99em 0 0 99em;display:flex;align-items:center;padding:.625em .75em;font-size:1.25rem;font-weight:600;color:#425475;line-height:1.15;max-width:100%}
+.plan .pricing small{color:#707a91;font-size:.75em;margin-left:.25em;font-weight:600}
+.plan .plantag{position:absolute;top:12px;left:20px;font-style:normal;background:#1FCAC5;color:#fff;border-radius:99em;padding:.35em .85em;font-size:10px;font-weight:800;letter-spacing:.8px;text-transform:uppercase}
+.plan .title{font-weight:600;font-size:1.25rem;color:#425675;margin:0;padding-right:20px}
+.plan .title+*{margin-top:.75rem}
+.plan .info{margin:0;font-size:.9rem;line-height:1.55}
+.plan .info+*{margin-top:1rem}
+.plan .features{display:flex;flex-direction:column;list-style:none;margin:0;padding:0}
+.plan .features li{display:flex;align-items:center;gap:.5rem;font-size:.875rem;line-height:1.35}
+.plan .features li+*{margin-top:.75rem}
+.plan .features .icon{background-color:#1FCAC5;display:inline-flex;align-items:center;justify-content:center;color:#fff;border-radius:50%;width:20px;height:20px;flex:0 0 auto}
+.plan .features .icon svg{width:14px;height:14px}
+.plan .features li.off .icon{background-color:#c8d2df}
+.plan .features li.off>span:last-of-type{color:#93a1b4}
+.plan .features+*{margin-top:1.25rem}
+.plan .action{width:100%;display:flex;align-items:center;justify-content:end;margin-top:auto;padding-top:1.25rem}
+.plan .action .button{background-color:#6558d3;border-radius:6px;color:#fff;font-weight:500;font-size:1.125rem;text-align:center;border:0;outline:0;width:100%;padding:.625em .75em;text-decoration:none;min-height:0;box-shadow:none;cursor:pointer;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan .action .button:hover,.plan .action .button:focus{background-color:#4133B7}
+.plan.featured{border:2px solid #6558d3;padding:8px}
+.plan.featured .inner{background-color:#e2ebff}
+.plan.featured .pricing{background-color:#6558d3;color:#fff}
+.plan.featured .pricing small{color:#e4e0ff}
+.plan.featured .plantag{background:#4133B7}
+.plan.featured .action .button{background-color:#4133B7}
+.plan.featured .action .button:hover,.plan.featured .action .button:focus{background-color:#32269e}
+/* Dark appearance safety (EMS dark-mode layers key off [data-theme=dark]) */
+[data-theme=dark] .plan{background-color:#1e293b;color:#9fabbe;box-shadow:0 30px 30px -25px rgba(0,0,0,.55)}
+[data-theme=dark] .plan .inner{background-color:#16202f}
+[data-theme=dark] .plan .title{color:#dbe4f3}
+[data-theme=dark] .plan strong{color:#c7d4ea}
+[data-theme=dark] .plan .pricing{background-color:#3c4c6b;color:#e8eefc}
+[data-theme=dark] .plan .pricing small{color:#aab8d6}
+[data-theme=dark] .plan .features li.off .icon{background-color:#3a465c}
+[data-theme=dark] .plan .features li.off>span:last-of-type{color:#7787a2}
+@media(max-width:600px){.planGrid{grid-template-columns:1fr;gap:14px}.plan .action .button{font-size:1rem}}
