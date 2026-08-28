@@ -1,0 +1,11 @@
+name = "ems-v1"
+compatibility_date = "2026-08-05"
+pages_build_output_dir = "."
+
+[ai]
+binding = "AI"
+
+# R2 bucket for Vaultium file storage
+[[r2_buckets]]
+binding = "VAULTIUM"
+bucket_name = "emsvaultium"
