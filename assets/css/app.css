@@ -2453,3 +2453,7 @@ html body .shell.dash2 .main .salesTrendCard .tgrid{stroke:#BDB9CE!important}
 [data-theme=dark] .plan .features li.off .icon{background-color:#3a465c}
 [data-theme=dark] .plan .features li.off>span:last-of-type{color:#7787a2}
 @media(max-width:600px){.planGrid{grid-template-columns:1fr;gap:14px}.plan .action .button{font-size:1rem}}
+
+/* Zudo loader inside add-on cards */
+.addonArt .zudoLoader{margin:0}
+.addonArt .zudoLoader .loader{--size:.8}
