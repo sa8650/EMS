@@ -713,11 +713,12 @@ function zudoOrb(canvas){
     const yaw=t*.1*spin,sy=Math.sin(yaw),cyw=Math.cos(yaw);
     const P=(x,y,z)=>{const x1=x*cyw+z*sy,z1=-x*sy+z*cyw,y1=y*CT-z1*ST,z2=y*ST+z1*CT;return[cx+x1,cy-y1,z2]};
     const rs=Math.pow(SIZE/300,BASE.rsPow);
+    const boost=SIZE<48?Math.min(2.2,48/SIZE):1; /* keeps dot presence at 20-30px */
     const dots=[];
     /* ghost sphere */
     for(let i=0;i<BASE.ghostN;i++){
       const d=fibDir(i,BASE.ghostN),p=P(d[0]*R,d[1]*R,d[2]*R),depth=(p[2]/R+1)/2;
-      dots.push({x:p[0],y:p[1],z:p[2],r:.8*rs,white:.78,a:.1+.22*depth});
+      dots.push({x:p[0],y:p[1],z:p[2],r:.8*rs*boost,white:.78,a:.1+.22*depth});
     }
     /* ribbon plane */
     const ya=t*.24*spin,ta=.55+.3*Math.sin(t*.18)*spin;
@@ -737,7 +738,7 @@ function zudoOrb(canvas){
         const z=uz*Math.cos(a)+vz*Math.sin(a)+nz*off;
         const l=Math.sqrt(x*x+y*y+z*z)||1,rr=baseR;
         const p=P(x/l*rr,y/l*rr,z/l*rr),depth=(p[2]/R+1)/2;
-        const radius=Math.max(BASE.rMin,(rBase+rDepth*depth)*(1-.25*edge)*rs);
+        const radius=Math.max(BASE.rMin,(rBase+rDepth*depth)*(1-.25*edge)*rs*boost);
         const white=.52-.44*depth+.18*edge;
         dots.push({x:p[0],y:p[1],z:p[2],r:radius,white,a:.4+.6*depth});
       }
