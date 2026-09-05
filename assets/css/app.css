@@ -2460,12 +2460,13 @@ html body .shell.dash2 .main .salesTrendCard .tgrid{stroke:#BDB9CE!important}
 
 /* ==== Zudo "Thinking…" animated orb (compact · no card behind) ==== */
 .zudoMsg.thinking>span{display:none!important}
-.zudoMsg.thinking>div{display:flex!important;flex-direction:row!important;align-items:center!important;gap:8px!important;background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;border-radius:0!important;width:max-content;max-width:82%}
-.zudoOrb{width:26px;height:26px;flex:0 0 auto;display:block}
-.zudoThinkingText{font-style:italic;font-weight:700;font-size:12px;letter-spacing:.3px;color:#64748b;display:inline-flex;align-items:baseline;white-space:nowrap}
+.zudoMsg.thinking>div{background:transparent!important;border:none!important;box-shadow:none!important;padding:0!important;border-radius:0!important}
+.zudoMsg.thinking .zudoThinking{display:flex!important;flex-direction:row!important;flex-wrap:nowrap!important;align-items:center!important;justify-content:flex-start!important;gap:8px!important;margin:0!important;padding:0!important;background:transparent!important;border:none!important;box-shadow:none!important;width:max-content!important;max-width:100%!important}
+.zudoOrb{width:26px!important;height:26px!important;flex:0 0 auto!important;display:block!important}
+.zudoThinkingText{font-style:italic;font-weight:700;font-size:12px;letter-spacing:.3px;color:#64748b;display:inline-flex!important;align-items:baseline;white-space:nowrap;flex:0 0 auto!important}
 .zudoDots{display:inline-flex;align-items:baseline;margin-left:1px}
 .zudoDots i{width:3px;height:3px;margin-left:2px;border-radius:50%;background:#6366f1;animation:zudoDotPulse 1.2s ease-in-out infinite}
 .zudoDots i:nth-child(2){animation-delay:.15s}
 .zudoDots i:nth-child(3){animation-delay:.3s}
 @keyframes zudoDotPulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
-@media(max-width:700px){.zudoOrb{width:22px;height:22px}.zudoMsg.thinking>div{gap:7px}}
+@media(max-width:700px){.zudoOrb{width:22px!important;height:22px!important}.zudoMsg.thinking .zudoThinking{gap:7px!important}}
