@@ -2457,3 +2457,14 @@ html body .shell.dash2 .main .salesTrendCard .tgrid{stroke:#BDB9CE!important}
 /* Zudo loader inside add-on cards */
 .addonArt .zudoLoader{margin:0}
 .addonArt .zudoLoader .loader{--size:.8}
+
+/* ==== Zudo "Thinking…" animated orb pill ==== */
+.zudoMsg.thinking>div{display:flex!important;align-items:center!important;gap:12px!important;padding:6px 20px 6px 8px!important;border-radius:999px!important;width:max-content;max-width:82%}
+.zudoOrb{width:46px;height:46px;flex:0 0 auto;display:block;background:radial-gradient(circle at 50% 46%,rgba(99,102,241,.16),rgba(99,102,241,0) 68%)}
+.zudoThinkingText{font-style:italic;font-weight:700;font-size:13px;letter-spacing:.4px;color:#64748b;display:inline-flex;align-items:baseline;white-space:nowrap}
+.zudoDots{display:inline-flex;align-items:baseline;margin-left:2px}
+.zudoDots i{width:4px;height:4px;margin-left:3px;border-radius:50%;background:#6366f1;animation:zudoDotPulse 1.2s ease-in-out infinite}
+.zudoDots i:nth-child(2){animation-delay:.15s}
+.zudoDots i:nth-child(3){animation-delay:.3s}
+@keyframes zudoDotPulse{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-3px)}}
+@media(max-width:700px){.zudoOrb{width:40px;height:40px}.zudoMsg.thinking>div{gap:9px;padding:5px 16px 5px 7px}}
