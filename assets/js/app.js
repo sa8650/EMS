@@ -152,50 +152,855 @@ const lucide=n=>`<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="cur
 const menus=[['Dashboard','dashboard','dashboard'],['Suppliers','supplier','truck'],['Customers','customer','users'],['Inventory','inventory','package'],['Purchases','purchase','cart'],['Sales','sales','receipt'],['Expense','expense','wallet'],['Due Recover','due_recover','coins'],['Staff Manager','staff','user-check'],['Report','report','chart'],['Settings','settings','settings'],['ConnectX','connectx','mail'],['Zudo','zudo','sparkles'],['Vaultium','vaultium','file']];const canAccess=(section,action='view')=>{if(state?.role==='admin'||state?.adminAccess)return true;if(state?.readOnly&&action!=='view'&&!((section==='connectx'&&action==='add')||(section==='zudo'&&action==='add')))return false;if(section==='dashboard'&&action==='view')return true;let p=state?.permissions||{};return (p[section]||[]).includes(action)};function home(){if(state?.role==='staff'&&permissionSyncedFor!==state.token){Promise.all([api('me'),api('connectx/availability').catch(()=>({enabled:false})),api('zudo/availability').catch(()=>({enabled:false})),api('business-health/availability').catch(()=>({enabled:false,ever:false})),api('vaultium/availability').catch(()=>({enabled:false,ever:false}))]).then(([m,cx,zudo,bh,vault])=>{state.permissions=m.permissions||{};state.readOnly=!!m.readOnly;state.licenseExpired=!!m.licenseExpired;state.connectxEnabled=!!cx.enabled;state.connectxHistory=!!cx.history;state.zudoEnabled=!!zudo.enabled;state.zudoHistory=!!zudo.history;state.businessHealthEnabled=!!bh.enabled;state.businessHealthEver=!!bh.ever;state.vaultiumEnabled=!!vault.enabled;state.vaultiumEver=!!vault.ever;permissionSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state?.role==='admin'&&entitlementSyncedFor!==state.token){api('admin/entitlement').then(x=>{state.licenseExpired=!!x.hasActivatedLicense&&!x.active;state.entitlement=x;entitlementSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state.role==='owner')return ownerHome();let admin=state.role==='admin', visibleMenus=menus.filter(([,section])=>canAccess(section,'view')&&(section!=='connectx'||state.connectxEnabled||state.connectxHistory)&&(section!=='zudo'||state.zudoEnabled||state.zudoHistory)&&(section!=='vaultium'||state.vaultiumEnabled||state.vaultiumEver));app.innerHTML=`<div class="shell${admin?'':' dash2'}"><aside class="sidebar ${admin?'adminSidebar':''}"><div class="sidebarBrand"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small>${admin?'':`<em class="sidebarStore">${esc(state.store?.name||'')}</em>`}</div><nav class="nav">${admin?`<button data-page="profile"><span class="menuicon">${lucide('user')}</span>My Profile</button><button data-page="stores"><span class="menuicon">${lucide('store')}</span>Store Manage</button><button data-page="licenses"><span class="menuicon">${lucide('key')}</span>Licenses</button><button data-page="devices"><span class="menuicon">${lucide('devices')}</span>Devices</button><button data-page="helpdesk"><span class="menuicon">${lucide('msg')}</span>HelpDesk<span class="hdbadge" id="hbBadge" hidden></span></button><button data-page="addons"><span class="menuicon">${lucide('gem')}</span>Premium Add-Ons</button>`:visibleMenus.map(([x,,icon])=>`<button data-page="${x.toLowerCase().replaceAll(' ','-')}"><span class="menuicon">${lucide(icon)}</span>${x}</button>`).join('')}</nav>${admin?'':`<div class="sidebottom">${state.adminAccess?'<button class="secondary" id="returnAdmin">Return to admin</button>':''}<button class="logoutmenu" id="out">Logout</button></div>`}</aside><main class="main"><header class="top"><div class="topHeaderSpacer"></div><div class="shopTopActions"><span class="topUser"><span class="headerProfile">${esc(state.user.name).slice(0,1).toUpperCase()}</span>${esc(state.user.name)}</span>${!admin&&state.zudoEnabled&&canAccess('zudo','view')?'<button class="zudoTopButton" id="zudoTopButton" type="button" title="Open Zudo" aria-label="Open Zudo">✦</button>':''}${!admin&&canAccess('attendance','view')?'<button class="zudoTopButton" id="attTopButton" type="button" title="Attendance" aria-label="Attendance">✓</button>':''}${!admin&&(state.vaultiumEnabled||state.vaultiumEver)?'<button class="zudoTopButton" id="vaultTopButton" type="button" title="Vaultium" aria-label="Vaultium">🗄</button>':''}${admin?'<button class="secondary" id="out">Logout</button>':''}</div></header><section class="page" id="page"></section></main></div>`;$('#out').onclick=logout;api('public/branding').then(b=>{document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});if($('#zudoTopButton'))$('#zudoTopButton').onclick=()=>page('zudo');if($('#attTopButton'))$('#attTopButton').onclick=()=>page('attendance');if($('#vaultTopButton'))$('#vaultTopButton').onclick=()=>page('vaultium');if($('#returnAdmin'))$('#returnAdmin').onclick=()=>{let r=JSON.parse(localStorage.getItem('ems.admin.return')||'null');if(r){save(r);localStorage.removeItem('ems.admin.return');home()}};document.querySelectorAll('[data-page]').forEach(x=>x.onclick=()=>page(x.dataset.page));page(admin?'stores':(visibleMenus[0]?.[0]||'dashboard').toLowerCase().replaceAll(' ','-'));if(state.readOnly||state.licenseExpired)readOnlyNotice()}
 function readOnlyNotice(){if(document.querySelector('.licenseExpiryModal'))return;let isAdmin=state?.role==='admin',exp=!!state.licenseExpired,e=document.createElement('div');e.className='modal licenseExpiryModal';e.innerHTML=`<section class="modalbox expiryNotice"><div class="expiryIcon">${exp?'!':'ⓘ'}</div><h2>${exp?'License expired':'Read-Only mode'}</h2><p>${exp?'Your administrator license has expired. To continue operating shops, creating invoices, changing data, or using ConnectX, purchase and activate a new license.':'This shop is currently in Read-Only mode. You can view records but cannot add, edit, or delete data.'}</p><p class="muted">${exp?'Your shop data and license history are safely preserved. Shops are currently operating in Read-Only mode.':'Contact your administrator to restore full access.'}</p>${isAdmin?'<button id="goLicenses">View license plans</button>':'<button id="closeExpiry">Continue</button>'}</section>`;document.body.append(e);if(isAdmin)$('#goLicenses').onclick=()=>{e.remove();page('licenses')};else $('#closeExpiry').onclick=()=>e.remove()}
 function title(t,button='',middle=''){return `<div class="head"><div><h1>${t}</h1></div>${middle}${button}</div>`}async function page(p){document.querySelectorAll('[data-page]').forEach(x=>x.classList.toggle('active',x.dataset.page===p));let el=$('#page');el.innerHTML='<p class="muted">Loading…</p>';try{if(p==='dashboard')return await dashboard();if(p==='profile')return await profile();if(p==='stores')return await stores();if(p==='licenses')return await licenses();if(p==='devices')return await devices();if(p==='helpdesk')return await helpdeskAdmin();if(p==='addons')return await premiumAddons();if(['suppliers','customers','inventory','expense','staff-manager'].includes(p))return await entity(p);if(p==='attendance')return await attendancePage();if(p==='salary')return await salaryPage();if(p==='vaultium')return await vaultiumPage();if(['purchases','sales'].includes(p))return await invoices(p);if(p==='due-recover')return await dueRecover();if(p==='report')return await report();if(p==='connectx')return await connectX();if(p==='zudo')return await zudo();if(p==='settings')return await settings();el.innerHTML=title(p.replaceAll('-',' '))+`<section class="panel"><p>This module is reserved for the next EMS update. It is intentionally not represented with fabricated records.</p></section>`}catch(e){el.innerHTML=`<section class="panel"><h2>Could not load this page</h2><p>${esc(e.message)}</p></section>`}}
-function ownerHome(){app.innerHTML=`<div class="shell"><aside class="sidebar ownerSidebar"><div class="sidebarBrand"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><nav class="nav"><button data-owner-page="overview"><span class="menuicon">${lucide('grid')}</span>Overview</button><button data-owner-page="licenses"><span class="menuicon">${lucide('shield')}</span>License control</button><button data-owner-page="plans"><span class="menuicon">${lucide('list')}</span>License plans</button><button data-owner-page="administrators"><span class="menuicon">${lucide('users')}</span>Administrators</button><button data-owner-page="shops"><span class="menuicon">${lucide('store')}</span>Shops</button><button data-owner-page="branding"><span class="menuicon">${lucide('palette')}</span>Website branding</button><button data-owner-page="website-pages"><span class="menuicon">${lucide('file')}</span>Website pages</button><button data-owner-page="blogs"><span class="menuicon">${lucide('rss')}</span>Blogs</button><button data-owner-page="contact-messages"><span class="menuicon">${lucide('inbox')}</span>Contact messages</button><button data-owner-page="connectx"><span class="menuicon">${lucide('mail')}</span>ConnectX</button><button data-owner-page="zudo"><span class="menuicon">${lucide('sparkles')}</span>Zudo AI</button><button data-owner-page="truebill"><span class="menuicon">${lucide('qr')}</span>TrueBill</button><button data-owner-page="vaultium"><span class="menuicon">${lucide('file')}</span>Vaultium</button><button data-owner-page="helpdesk"><span class="menuicon">${lucide('msg')}</span>HelpDesk<span class="hdbadge" id="ohbBadge" hidden></span></button><button data-owner-page="addons"><span class="menuicon">${lucide('gem')}</span>Premium Add-Ons</button><button data-owner-page="factory-reset"><span class="menuicon">${lucide('refresh')}</span>Factory reset</button></nav></aside><main class="main"><header class="top"><div class="topHeaderSpacer"></div><div class="shopTopActions"><span class="topUser"><span class="headerProfile">${esc(state.user.name).slice(0,1).toUpperCase()}</span>${esc(state.user.name)}</span><button class="secondary" id="out">Logout</button></div></header><section class="page" id="page"></section></main></div>`;$('#out').onclick=logout;api('public/branding').then(b=>{document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});document.querySelectorAll('[data-owner-page]').forEach(x=>x.onclick=()=>ownerPage(x.dataset.ownerPage));api('platform/helpdesk').then(list=>{const n=list.reduce((t,a)=>t+(a.unread||0),0),b=$('#ohbBadge');if(b){b.textContent=n;b.hidden=n===0}}).catch(()=>{});ownerPage('overview')}
+/* ================================================================
+   EMS OWNER CONSOLE — BaseCN-style UI (UI-only redesign)
+   Replaces the legacy owner panel rendering. Every API call,
+   endpoint, payload, permission and workflow is unchanged.
+   ================================================================ */
+const OC_PAGES=['overview','claims','shops','licenses','plans','administrators','connectx','zudo','truebill','vaultium','helpdesk','addons','branding','website-pages','blogs','contact-messages','factory-reset'];
+const OC_NAV=[
+ {h:'Overview',items:[['overview','Dashboard','dashboard']]},
+ {h:'Business',items:[['claims','Payments & Claims','coins'],['shops','Shops','store'],['licenses','Licenses','shield'],['plans','Plans','list']]},
+ {h:'Access',items:[['administrators','Administrators','users']]},
+ {h:'Services',items:[['connectx','ConnectX','mail'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','file'],['helpdesk','HelpDesk','msg'],['addons','Premium Add-Ons','gem']]},
+ {h:'Settings',items:[['branding','Branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox'],['factory-reset','Factory reset','refresh']]}
+];
+const OC_LABEL=Object.fromEntries(OC_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
+const OC_SVG={
+ x:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+ plus:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+ alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+ info:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+ out:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5"/><path d="M21 12H9"/></svg>',
+ chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+ sun:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>',
+ moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>',
+ search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>',
+ eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
+ user:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+ send:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>',
+ refresh:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/></svg>',
+ key:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>',
+ mail:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>',
+ msg:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+ circle:'<circle cx="12" cy="12" r="10"/>'
+};
+const ocIcon=n=>`<svg class="oc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${OC_SVG[n]||LUCIDE[n]||OC_SVG.circle||''}</svg>`;
+const ocAvTone=s=>{const tones=['','purple','blue','green','orange','rose','teal'];let h=0;for(const c of String(s))h=(h*31+c.charCodeAt(0))>>>0;return tones[h%tones.length]};
+const ocAv=s=>`<span class="oc-ava2 ${ocAvTone(s)}">${esc(String(s||'?').trim().slice(0,1).toUpperCase()||'?')}</span>`;
+const ocPill=(cls,txt)=>({cls,txt});
+const ocLicPill=st=>st==='active'?ocPill('ok','Active'):st==='pending'?ocPill('warn','Pending'):st==='rejected'?ocPill('err','Rejected'):ocPill('neu',String(st||'—'));
+const ocAddonPill=st=>st==='active'?ocPill('ok','Active'):st==='pending'?ocPill('warn','Pending'):st==='rejected'?ocPill('err','Rejected'):st==='expired'?ocPill('neu','Expired'):ocPill('neu',String(st||'—'));
+const ocDate=v=>{if(!v)return '—';try{return new Date(v).toLocaleDateString(undefined,{day:'numeric',month:'short',year:'numeric'})}catch{return '—'}};
+const ocDT=v=>{if(!v)return '—';try{return new Date(v).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}catch{return '—'}};
+const ocView=html=>`<div class="oc-inner">${html}</div>`;
+const ocHead=(title,sub='',actions='')=>`<div class="oc-ph"><div style="min-width:0"><h1>${title}</h1>${sub?`<p class="oc-psub">${sub}</p>`:''}</div>${actions?`<div class="oc-pacts">${actions}</div>`:''}</div>`;
+const ocStat=(lbl,val,foot,icon,tone='accent',click='')=>`<div class="oc-stat${click?' clickable':''}"${click?` data-oc-go="${click}"`:''}><div class="oc-st"><span class="oc-lbl">${lbl}</span>${icon?`<span class="oc-sicon" style="background:var(--oc-${tone==='accent'?'accent-soft':tone==='ok'?'ok-soft':tone==='warn'?'warn-soft':tone==='err'?'err-soft':tone==='info'?'info-soft':'neu-soft'});color:var(--oc-${tone==='accent'?'accent':tone})">${icon}</span>`:''}</div><strong>${val}</strong>${foot?`<div class="oc-sfoot">${foot}</div>`:''}</div>`;
+const ocEmpty=(ic,t,sub='')=>`<div class="oc-empty"><div class="oc-ebox">${ic||ocIcon('info')}</div><b>${t}</b>${sub?`<p>${sub}</p>`:''}</div>`;
+const ocLoading=t=>`<div class="oc-loading"><span class="oc-spin"></span>${t||'Loading…'}</div>`;
+const ocCall=(kind,html)=>`<div class="oc-call ${kind}"><span class="oc-cic">${kind==='warn'?ocIcon('alert'):kind==='danger'?ocIcon('alert'):kind==='ok'?ocIcon('check'):ocIcon('info')}</span><div>${html}</div></div>`;
+const ocTblWrap=inner=>`<div class="oc-tblwrap">${inner}</div>`;
+const ocSearch=(ph,extra='')=>`<div class="oc-search">${ocIcon('search')}<input class="oc-input" type="search" placeholder="${esc(ph)}"${extra}></div>`;
+const ocEmptyTd=(n,html)=>`<tr><td colspan="${n}">${html||ocEmpty(ocIcon('search'),'Nothing found','Try a different filter or search term.')}</td></tr>`;
 
-async function ownerPage(p){document.querySelectorAll('[data-owner-page]').forEach(x=>x.classList.toggle('active',x.dataset.ownerPage===p));let el=$('#page');el.innerHTML='<p class="muted">Loading platform data…</p>';try{let d=await api('platform/overview');if(p==='overview')return ownerOverview(d);if(p==='licenses')return ownerLicenses(d);if(p==='plans')return ownerPlans();if(p==='administrators')return ownerAdmins(d);if(p==='shops')return ownerShops(d);if(p==='branding')return ownerBranding();if(p==='website-pages')return ownerWebsitePages();if(p==='blogs')return ownerBlogs();if(p==='contact-messages')return ownerContactMessages();if(p==='connectx')return ownerConnectX();if(p==='zudo')return ownerZudo();if(p==='truebill')return await ownerTrueBill();if(p==='vaultium')return await ownerVaultium();if(p==='helpdesk')return await ownerHelpdesk();if(p==='addons')return await ownerAddons();if(p==='factory-reset')return ownerFactoryReset()}catch(e){el.innerHTML=`<section class="panel"><h2>Could not load platform control</h2><p>${esc(e.message)}</p></section>`}}
-function ownerOverview(d){let active=d.licenses.filter(x=>x.status==='active').length,pending=d.licenses.filter(x=>x.status==='pending').length;$('#page').innerHTML=title('EMS platform overview')+`<div class="cards"><section class="card"><small>Administrators</small><strong>${d.admins.length}</strong></section><section class="card"><small>Shops</small><strong>${d.stores.length}</strong></section><section class="card"><small>Active licenses</small><strong>${active}</strong></section><section class="card"><small>Pending verification</small><strong>${pending}</strong></section></div><section class="panel"><h2>Pending license payments</h2>${table(d.licenses.filter(x=>x.status==='pending').map(x=>({shop:x.stores?.name,method:x.payment_method,amount:money(x.amount),transaction:x.transaction_id,submitted:x.created_at})),['shop','method','amount','transaction','submitted'])}</section>`}
-function ownerLicenses(d){$('#page').innerHTML=title('License control')+`<section class="panel"><p class="muted">Approve only after verifying the transaction in the official bKash/Nagad merchant portal. Approval activates the related shop and sets its expiry date.</p><div class="tablewrap"><table><thead><tr><th>Administrator ID</th><th>Administrator</th><th>Shop</th><th>Type</th><th>Period</th><th>ConnectX</th><th>Zudo</th><th>AIBH</th><th>TrueBill</th><th>Vaultium</th><th>Amount</th><th>Payment</th><th>Number</th><th>Transaction ID</th><th>Status</th><th>Action</th></tr></thead><tbody>${d.licenses.map(x=>`<tr><td><code class="shopid">${esc(x.administrators?.admin_code||'—')}</code></td><td>${esc(x.administrators?.name||'—')}</td><td>${esc(x.stores?.name||'License capacity')}</td><td><span class="logaction">${esc(x.transaction_type||'new')}</span></td><td>${x.duration_months} months</td><td>${x.connectx_enabled?`${x.connectx_daily_limit}/shop/day`:'Not included'}</td><td>${x.zudo_enabled?'Yes':'No'}</td><td>${x.business_health_enabled?'Yes':'No'}</td><td>${x.truebill_enabled?'Yes':'No'}</td><td>${Number(x.vaultium_gb||0)>0?x.vaultium_gb+' GB':'No'}</td><td>${money(x.amount)}</td><td>${esc(x.payment_method)}</td><td>${esc(x.payment_number)}</td><td>${esc(x.transaction_id)}</td><td><span class="statuspill ${x.status==='active'?'active':'inactive'}">${esc(x.status)}${x.transaction_type==='downgrade'&&x.starts_at&&new Date(x.starts_at)>new Date()?' · scheduled':''}</span></td><td class="actions">${x.status==='pending'?`<button data-approve="${x.id}">Approve</button><button class="danger" data-reject="${x.id}">Reject</button>`:'Reviewed'}</td></tr>`).join('')}</tbody></table></div></section>`;document.querySelectorAll('[data-approve]').forEach(b=>b.onclick=()=>reviewLicense(b.dataset.approve,'active'));document.querySelectorAll('[data-reject]').forEach(b=>b.onclick=()=>reviewLicense(b.dataset.reject,'rejected'))}
-async function reviewLicense(id,status){let label=status==='active'?'approve and activate':'reject';if(!confirm(`Are you sure you want to ${label} this license payment request?`))return;try{await api('platform/license/'+id,{method:'PATCH',body:JSON.stringify({status,reviewNote:''})});toast(status==='active'?'License approved and activated.':'License rejected.');await ownerPage('licenses')}catch(e){console.error(e);toast('License action failed: '+e.message)}}
-async function ownerPlans(){let rows=await api('platform/license-plans');$('#page').innerHTML=title('License plan catalogue','<button id="addPlan">+ Post license plan</button>')+`<section class="panel"><p class="muted">Publish the plans administrators see in their Purchase License tab. A price of 0 creates an instant free license with no payment form.</p><div class="tablewrap"><table><thead><tr><th>Title</th><th>Duration</th><th>Shop slots</th><th>Price</th><th>ConnectX</th><th>Zudo</th><th>AIBH</th><th>TrueBill</th><th>Vaultium</th><th>Active</th><th>Benefits</th><th>Action</th></tr></thead><tbody>${rows.map(p=>`<tr><td>${esc(p.title)}</td><td>${p.duration_months} months</td><td>${p.max_stores}</td><td>${money(p.price)}</td><td>${p.connectx_enabled?`${p.connectx_daily_limit}/shop/day`:'No'}</td><td>${p.zudo_enabled?'Yes':'No'}</td><td>${p.business_health_enabled?'Yes':'No'}</td><td>${p.truebill_enabled?'Yes':'No'}</td><td>${Number(p.vaultium_gb||0)>0?p.vaultium_gb+' GB':'No'}</td><td>${p.active?'Yes':'No'}</td><td>${esc(p.benefits)}</td><td><button class="secondary" data-edit-plan="${p.id}">Edit</button></td></tr>`).join('')}</tbody></table></div></section>`;$('#addPlan').onclick=()=>planModal();document.querySelectorAll('[data-edit-plan]').forEach(x=>x.onclick=()=>planModal(rows.find(p=>p.id===x.dataset.editPlan)))}
-function planModal(plan=null){let add=!plan,e=document.createElement('div');e.className='modal';e.innerHTML=`<form class="modalbox fields"><div class="modalhead"><h2>${add?'Post license plan':'Edit license plan'}</h2><button type="button">×</button></div><label>Plan title<input name="title" required value="${esc(plan?.title||'')}"></label><div class="grid2"><label>Duration (months)<input name="duration_months" type="number" min="1" required value="${esc(plan?.duration_months||'')}"></label><label>Total shop create limit<input name="max_stores" type="number" min="1" required value="${esc(plan?.max_stores||1)}"></label><label>Price (BDT; enter 0 for free)<input name="price" type="number" min="0" step="0.01" required value="${esc(plan?.price??0)}"></label><label>Availability<select name="active"><option value="true" ${plan?.active!==false?'selected':''}>Published</option><option value="false" ${plan?.active===false?'selected':''}>Hidden</option></select></label></div><section class="cxPlanEntitlement"><label class="toggleEntitlement"><span>Include ConnectX</span><span class="planFeatureToggle"><b>Off</b><input name="connectx_enabled" type="checkbox" ${plan?.connectx_enabled?'checked':''}><i></i><b>On</b></span></label><label>ConnectX emails per shop / day<input name="connectx_daily_limit" type="number" min="0" value="${esc(plan?.connectx_daily_limit??0)}"></label></section><section class="cxPlanEntitlement"><label class="toggleEntitlement"><span>Include Zudo</span><span class="planFeatureToggle"><b>Off</b><input name="zudo_enabled" type="checkbox" ${plan?.zudo_enabled?'checked':''}><i></i><b>On</b></span></label><label>Zudo requests per shop / day<input name="zudo_daily_limit" type="number" min="0" value="${esc(plan?.zudo_daily_limit??0)}"></label></section><section class="cxPlanEntitlement"><label class="toggleEntitlement"><span>Include Business AI Health</span><span class="planFeatureToggle"><b>Off</b><input name="business_health_enabled" type="checkbox" ${plan?.business_health_enabled?'checked':''}><i></i><b>On</b></span></label><label>Business AI Health reports per shop / day<input name="business_health_daily_limit" type="number" min="0" value="${esc(plan?.business_health_daily_limit??0)}"></label></section><section class="cxPlanEntitlement"><label class="toggleEntitlement"><span>Include TrueBill</span><span class="planFeatureToggle"><b>Off</b><input name="truebill_enabled" type="checkbox" ${plan?.truebill_enabled?'checked':''}><i></i><b>On</b></span></label><p class="muted" style="margin:0">QR verification on every invoice — applies for the whole license validity, no daily limit.</p></section><section class="cxPlanEntitlement"><label>Vaultium storage (GB per administrator — shared across all shops)<input name="vaultium_gb" type="number" min="0" value="${esc(plan?.vaultium_gb??0)}"></label></section><label>Benefits / information<textarea name="benefits" required>${esc(plan?.benefits||'')}</textarea></label><label>Payment instructions/details<textarea name="payment_details">${esc(plan?.payment_details||'')}</textarea></label><button>${add?'Publish license plan':'Save plan'}</button></form>`;document.body.append(e);e.querySelector('[type=button]').onclick=()=>e.remove();e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.duration_months=+b.duration_months;b.max_stores=+b.max_stores;b.price=+b.price;b.active=b.active==='true';b.connectx_enabled=e.querySelector('[name=connectx_enabled]').checked;b.connectx_daily_limit=+b.connectx_daily_limit||0;b.zudo_enabled=e.querySelector('[name=zudo_enabled]').checked;b.zudo_daily_limit=+b.zudo_daily_limit||0;b.business_health_enabled=e.querySelector('[name=business_health_enabled]').checked;b.business_health_daily_limit=+b.business_health_daily_limit||0;b.truebill_enabled=e.querySelector('[name=truebill_enabled]').checked;b.vaultium_gb=+b.vaultium_gb||0;await api(add?'platform/license-plans':'platform/license-plan/'+plan.id,{method:add?'POST':'PATCH',body:JSON.stringify(b)});e.remove();toast('License plan saved.');ownerPlans()}catch(x){toast(x.message)}}}
-function ownerAdmins(d){$('#page').innerHTML=title('Administrator control')+`<section class="panel"><p class="muted">Deactivating an administrator blocks new administrator sign-ins. Existing sessions expire automatically.</p><div class="tablewrap"><table><thead><tr><th>Administrator ID</th><th>Name</th><th>Email</th><th>Phone</th><th>Created</th><th>Status</th><th>Action</th></tr></thead><tbody>${d.admins.map(x=>`<tr><td><code class="shopid">${esc(x.admin_code)}</code></td><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(x.phone)}</td><td>${esc(x.created_at)}</td><td><span class="statuspill ${x.active?'active':'inactive'}">${x.active?'Active':'Inactive'}</span></td><td><button class="secondary" data-admin-state="${x.id}" data-active="${x.active}">${x.active?'Deactivate':'Activate'}</button></td></tr>`).join('')}</tbody></table></div></section>`;document.querySelectorAll('[data-admin-state]').forEach(b=>b.onclick=async()=>{try{await api('platform/administrator/'+b.dataset.adminState,{method:'PATCH',body:JSON.stringify({active:b.dataset.active!=='true'})});toast('Administrator status changed.');ownerPage('administrators')}catch(e){toast(e.message)}})}
-function ownerShops(d){$('#page').innerHTML=title('All shops')+`<section class="panel"><div class="tablewrap"><table><thead><tr><th>Shop</th><th>Shop ID</th><th>Administrator</th><th>Administrator ID</th><th>Email</th><th>Status</th><th>Created</th></tr></thead><tbody>${d.stores.map(x=>`<tr><td>${esc(x.name)}</td><td><code class="shopid">${esc(x.shop_code)}</code></td><td>${esc(x.administrators?.name)}</td><td><code class="shopid">${esc(x.administrators?.admin_code)}</code></td><td>${esc(x.administrators?.email)}</td><td><span class="statuspill ${x.status==='active'?'active':'inactive'}">${x.status}</span></td><td>${esc(x.created_at)}</td></tr>`).join('')}</tbody></table></div></section>`}
-async function ownerBranding(){let b=await api('platform/settings');$('#page').innerHTML=title('Website branding')+`<form class="panel fields" id="brandForm"><p class="muted">These fields are reserved for the EMS public website identity. They do not alter customer shop records.</p><label>Website name<input name="website_name" required value="${esc(b.website_name||'EMS V1')}"></label><label>Product name<input name="product_name" required value="${esc(b.product_name||'EMS V1')}"></label><label>Powered by<input name="powered_by" required value="${esc(b.powered_by||'DoxTox')}"></label><button>Save website details</button></form>`;$('#brandForm').onsubmit=async e=>{e.preventDefault();try{await api('platform/settings',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});toast('Website branding saved.')}catch(x){toast(x.message)}}}
+/* ---------- shared UI factories (dialogs, menus, confirm) ---------- */
+function ocDialog(o){const root=document.createElement('div');root.className='oc-mask';
+root.innerHTML=`<div class="oc-dlg ${o.size||''}" role="dialog" aria-modal="true"><div class="oc-dh">${o.icon?`<span class="oc-dic ${o.tone||'info'}">${o.icon}</span>`:''}<h2>${o.title}</h2><button type="button" class="oc-dx" aria-label="Close">×</button></div>${o.body!==undefined?`<div class="oc-db">${o.body}</div>`:''}<div class="oc-df ${o.footerLeft?'left':''}">${o.footer||''}</div></div>`;
+document.body.appendChild(root);
+const close=()=>{root.remove();document.removeEventListener('keydown',onKey)};
+const onKey=e=>{if(e.key==='Escape')close()};
+document.addEventListener('keydown',onKey);
+root.querySelector('.oc-dx').onclick=()=>{close();o.onClose&&o.onClose()};
+root.addEventListener('mousedown',e=>{if(e.target===root){close();o.onClose&&o.onClose()}});
+return {root,close,el:root.querySelector('.oc-dlg'),body:root.querySelector('.oc-db')};
+}
+function ocConfirm(o){return new Promise(res=>{const d=ocDialog({title:o.title||'Are you sure?',icon:ocIcon(o.tone==='danger'||o.danger?'alert':'info'),tone:o.danger?'danger':'warn',size:'sm',
+ body:`<p class="oc-dsub" style="margin:0">${o.message||''}</p>${o.detail?`<div style="margin-top:10px">${o.detail}</div>`:''}`,
+ footer:`<button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-c="1">${o.cancelText||'Cancel'}</button><button type="button" class="oc-btn ${o.danger?'oc-btn-danger':'oc-btn-primary'} oc-btn-sm" data-oc-y="1">${o.confirmText||'Continue'}</button>`,
+ onClose:()=>res(false)});
+ d.el.querySelector('[data-oc-y]').onclick=()=>{d.close();res(true)};
+ d.el.querySelector('[data-oc-c]').onclick=()=>{d.close();res(false)};
+})}
+function ocPop(anchor,html,align){const p=document.createElement('div');p.className='oc-menu'+(align==='left'?' left':'');p.innerHTML=html;document.body.appendChild(p);
+const r=anchor.getBoundingClientRect();p.style.top=(r.bottom+6)+'px';if(align==='left')p.style.left=r.left+'px';else p.style.right=Math.max(8,window.innerWidth-r.right)+'px';
+const kill=()=>{p.remove();document.removeEventListener('mousedown',kill,true);document.removeEventListener('keydown',esc,true)};
+const esc=e=>{if(e.key==='Escape')kill()};
+document.addEventListener('mousedown',kill,true);document.addEventListener('keydown',esc,true);
+return p}
+const ocGo=el=>{const p=el.closest('[data-oc-go]');if(p)ownerPage(p.dataset.ocGo)};
+function ocBindGo(){document.querySelectorAll('[data-oc-go]').forEach(x=>{if(!x.dataset.ocBound){x.dataset.ocBound='1';x.onclick=()=>ownerPage(x.dataset.ocGo)}})}
+
+
+/* ---------- Console shell ---------- */
+function ocThemeInit(){const t=localStorage.getItem('ems.oc.theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.body.dataset.theme=t;return t}
+function ocUserMenu(anchor){const m=document.createElement('div');
+m.innerHTML=`
+ <div class="oc-mhead"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'')} · ${state?.role==='owner'?'Platform owner':'Session'}</small></div>
+ <button type="button" class="oc-mi" data-oc-u="profile">${ocIcon('user')}My profile</button>
+ <button type="button" class="oc-mi" data-oc-u="password">${ocIcon('key')}Password recovery</button>
+ <div class="oc-msep"></div>
+ <button type="button" class="oc-mi err" data-oc-u="out">${ocIcon('out')}Sign out</button>`;
+const pop=ocPop(anchor,m.innerHTML,'right');pop.dataset.ocMenu='user';
+pop.querySelectorAll('[data-oc-u]').forEach(b=>b.onclick=()=>{pop.remove();const a=b.dataset.ocU;
+ if(a==='out')logout();
+ if(a==='profile')ocProfileDialog();
+ if(a==='password'){showEmsLogin()}
+});
+}
+function ocProfileDialog(){const u=state?.user||{};const d=ocDialog({title:'My profile',icon:ocIcon('user'),tone:'info',size:'sm',
+ body:`<div style="display:flex;align-items:center;gap:13px;margin-bottom:16px"><span class="oc-ava2" style="width:46px;height:46px;font-size:18px">${esc(String(u.name||'O').slice(0,1).toUpperCase())}</span><div><b style="font-size:15.5px">${esc(u.name||'EMS Owner')}</b><div style="color:var(--oc-mut);font-size:12.6px">${esc(u.email||'')}</div></div></div>
+ <div class="oc-dl"><div class="oc-di"><small>Role</small><div><span class="oc-pill accent">Platform owner</span></div></div><div class="oc-di"><small>Access level</small><div>Full platform control</div></div><div class="oc-di"><small>Session</small><div>Active · auto-expires</div></div><div class="oc-di"><small>Account ID</small><div><code class="oc-code">${esc(String(u.id||'—').replaceAll('-','').slice(0,8).toUpperCase())}</code></div></div></div>`,
+ footer:`<button type="button" class="oc-btn oc-btn-danger oc-btn-sm" data-oc-logout="1">${ocIcon('out')}Sign out</button>`});
+d.body.querySelector('[data-oc-logout]').onclick=()=>{d.close();logout()};
+}
+function ocThemeToggle(){const cur=document.body.dataset.theme==='dark';const next=cur?'light':'dark';document.body.dataset.theme=next;localStorage.setItem('ems.oc.theme',next);const b=$('#ocTheme');if(b)b.innerHTML=next==='dark'?ocIcon('sun'):ocIcon('moon')}
+function ocSideToggle(){const shell=document.querySelector('.oc-shell');if(!shell)return;
+ if(window.innerWidth>980){const c=shell.classList.toggle('oc-c');localStorage.setItem('ems.oc.collapsed',c?'1':'0')}
+ else{const open=shell.classList.toggle('oc-m');let mask=document.querySelector('.oc-mask.mob');if(open&&!mask){mask=document.createElement('div');mask.className='oc-mask mob';mask.onclick=()=>{shell.classList.remove('oc-m');mask.remove()};document.body.appendChild(mask)}else if(!open&&mask)mask.remove()}}
+function ownerHome(){
+ ocThemeInit();
+ const collapsed=localStorage.getItem('ems.oc.collapsed')==='1';
+ document.body.classList.add('oc');
+ const navHtml=OC_NAV.map(g=>`<div class="oc-navg">${esc(g.h)}</div>`+g.items.map(([p,l,ic])=>`<button class="oc-navitem" data-owner-page="${p}" title="${esc(l)}" aria-label="${esc(l)}"><span class="oc-ico">${lucide(ic)}</span><span class="oc-lbl">${esc(l)}</span>${p==='helpdesk'?`<span class="oc-badge" id="ohbBadge" hidden></span>`:''}${p==='claims'?`<span class="oc-badge" id="ocClaimsBadge" hidden></span>`:''}</button>`).join('')).join('');
+ app.innerHTML=`<div class="oc-shell${collapsed?' oc-c':''}">
+  <aside class="oc-side"><div class="oc-brand"><span class="oc-logo" data-brand-mark="1">E</span><div class="oc-bname"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div></div>
+  <nav class="oc-nav">${navHtml}</nav>
+  <div class="oc-sidefoot"><button type="button" class="oc-user" id="ocSideUser" title="Account &amp; profile"><span class="oc-ava">${esc((state?.user?.name||'O').slice(0,1).toUpperCase())}</span><span class="oc-uinf"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'Platform owner')}</small></span><span class="oc-caret">${ocIcon('chev')}</span></button>
+  <button type="button" class="oc-sideout" id="ocSideOut" title="Sign out"><span class="oc-ico">${ocIcon('out')}</span><span class="oc-lbl">Sign out</span></button></div></aside>
+  <div class="oc-main"><header class="oc-top"><button class="oc-burger" id="ocBurger" type="button" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
+   <div class="oc-crumb"><span class="oc-sub">Owner console</span><span class="oc-sep">/</span><b id="ocCrumb">Dashboard</b></div><div class="oc-topsp"></div>
+   <div class="oc-topR"><button class="oc-theme" id="ocTheme" type="button" title="Toggle light / dark theme" aria-label="Toggle theme">${document.body.dataset.theme==='dark'?ocIcon('sun'):ocIcon('moon')}</button>
+   <button class="oc-avatar" id="ocUserBtn" type="button" title="Account menu"><span class="oc-ava">${esc((state?.user?.name||'O').slice(0,1).toUpperCase())}</span><span><span class="oc-uname">${esc(state?.user?.name||'Owner')}</span><span class="oc-urole">Platform owner</span></span><span class="oc-caret">${ocIcon('chev')}</span></button></div></header>
+  <section class="oc-page" id="page"></section></div></div>`;
+ $('#ocBurger').onclick=ocSideToggle;
+ $('#ocTheme').onclick=ocThemeToggle;
+ const openUserMenu=anchor=>{const open=document.querySelector('.oc-menu[data-oc-menu="user"]');if(open){open.remove();return}ocUserMenu(anchor)};
+ $('#ocUserBtn').onclick=e=>{e.stopPropagation();openUserMenu($('#ocUserBtn'))};
+ const su=$('#ocSideUser');if(su)su.onclick=e=>{e.stopPropagation();openUserMenu(su)};
+ $('#ocSideOut').onclick=logout;
+ document.querySelectorAll('.oc-navitem').forEach(x=>x.onclick=()=>{const p=x.dataset.ownerPage;if(window.innerWidth<=980)ocSideToggle();ownerPage(p)});
+ api('public/branding').then(b=>{if(document.title.indexOf('|')<0)document.title=(b.website_name||'EMS V1')+' | Owner';document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});
+ api('platform/helpdesk').then(list=>{const n=list.reduce((t,a)=>t+(a.unread||0),0),b=$('#ohbBadge');if(b){b.textContent=n;b.hidden=n===0}}).catch(()=>{});
+ ownerPage('overview');
+}
+
+/* ---------- Page dispatcher (same routing + API as before) ---------- */
+async function ownerPage(p){
+ if(!OC_PAGES.includes(p))p='overview';
+ document.querySelectorAll('[data-owner-page]').forEach(x=>x.classList.toggle('active',x.dataset.ownerPage===p));
+ const cr=$('#ocCrumb');if(cr)cr.textContent=OC_LABEL[p]||'Dashboard';
+ const el=$('#page');el.innerHTML=ocView(ocLoading('Loading platform data…'));
+ try{
+  const d=await api('platform/overview');
+  if(p==='overview')return ownerOverview(d);
+  if(p==='claims')return ownerClaims(d);
+  if(p==='licenses')return ownerLicenses(d);
+  if(p==='plans')return ownerPlans();
+  if(p==='administrators')return ownerAdmins(d);
+  if(p==='shops')return ownerShops(d);
+  if(p==='branding')return ownerBranding();
+  if(p==='website-pages')return ownerWebsitePages();
+  if(p==='blogs')return ownerBlogs();
+  if(p==='contact-messages')return ownerContactMessages();
+  if(p==='connectx')return ownerConnectX();
+  if(p==='zudo')return ownerZudo();
+  if(p==='truebill')return await ownerTrueBill();
+  if(p==='vaultium')return await ownerVaultium();
+  if(p==='helpdesk')return await ownerHelpdesk();
+  if(p==='addons')return await ownerAddons();
+  if(p==='factory-reset')return ownerFactoryReset();
+ }catch(e){
+  el.innerHTML=ocView(ocCall('danger',`<b>Could not load platform control</b><div>${esc(e.message||'Request failed')}</div>`)+`<div style="display:flex;gap:9px"><button type="button" class="oc-btn oc-btn-secondary" id="ocRetry">${ocIcon('refresh')}Try again</button></div>`);
+  const r=$('#ocRetry');if(r)r.onclick=()=>ownerPage(p);
+ }
+}
+
+/* ---------- Dashboard (platform overview) ---------- */
+function ownerOverview(d){
+ const lic=d.licenses||[],pending=lic.filter(x=>x.status==='pending'),active=lic.filter(x=>x.status==='active');
+ const revenue=active.reduce((t,x)=>t+Number(x.amount||0),0),pendingAmt=pending.reduce((t,x)=>t+Number(x.amount||0),0);
+ const shops=d.stores||[],activeShops=shops.filter(x=>x.status==='active').length;
+ const mon=v=>money(v);
+ $('#page').innerHTML=ocView(ocHead('Dashboard','Platform overview of administrators, shops, licenses and payment claims.')+`
+ <div class="oc-cards">
+  ${ocStat('Administrators',d.admins.length,`${d.admins.filter(a=>a.active).length} active`,ocIcon('user'),'accent','administrators')}
+  ${ocStat('Shops',shops.length,`${activeShops} active · ${shops.length-activeShops} other`,ocIcon('store'),'info','shops')}
+  ${ocStat('Active licenses',active.length,`${pending.length} pending review`,ocIcon('shield'),'ok','licenses')}
+  ${ocStat('Pending claims',pending.length,`৳ ${mon(pendingAmt)} awaiting verification`,ocIcon('alert'),pending.length?'warn':'neu','claims')}
+ </div>
+ ${pending.length?ocCall('warn',`<b>${pending.length} license payment claim${pending.length>1?'s':''} pending.</b> Approve only after verifying the bKash / Nagad transaction ID in the official merchant portal.`):ocCall('ok','<b>No pending license claims.</b> All submitted payments have been reviewed.')}
+ <div class="oc-cards">
+  ${ocStat('Collected (active)',`৳ ${mon(revenue)}`,`across ${active.length} active license${active.length===1?'':'s'}`,ocIcon('banknote'),'ok')}
+  ${ocStat('Read-only shops',shops.filter(x=>x.status==='read_only').length,'operating with read-only access','','neu')}
+  ${ocStat('Inactive shops',shops.filter(x=>x.status==='inactive').length,'blocked from sign-in','','neu')}
+  ${ocStat('Rejected claims',lic.filter(x=>x.status==='rejected').length,'visible in the Licenses register','','neu')}
+ </div>
+ <div style="display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:18px;align-items:start" class="oc-dashgrid">
+  <div class="oc-card"><div class="oc-cardhead"><div><h2>Pending license payments</h2><p>Review the queue in Payments &amp; Claims.</p></div>
+   <button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-go="claims">Open queue ${ocIcon('chev')}</button></div>
+   <div class="oc-cardbody">
+   ${pending.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Claimed</th><th>Administrator</th><th>Shop</th><th class="num">Amount</th><th>Method</th><th>Transaction ID</th><th style="text-align:right">Action</th></tr></thead><tbody>
+   ${pending.slice(0,6).map(x=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDate(x.created_at)}</td>
+   <td><div class="oc-cellstack"><b>${esc(x.administrators?.name||'—')}</b><small><code class="oc-code">${esc(x.administrators?.admin_code||'—')}</code></small></div></td>
+   <td>${esc(x.stores?.name||'<span class="oc-mut">License capacity</span>')}</td>
+   <td class="num"><b>৳ ${mon(x.amount)}</b></td><td><span class="oc-tag">${esc(x.payment_method||'—')}</span><div class="oc-mut" style="font-size:11.5px">${esc(x.payment_number||'')}</div></td>
+   <td><code class="oc-code">${esc(x.transaction_id||'—')}</code></td>
+   <td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-appr="${x.id}">${ocIcon('check')}Approve</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-rej="${x.id}">Reject</button></div></td></tr>`).join('')}
+   </tbody></table>`):ocEmpty(ocIcon('check'),'All caught up','No license payment claims are waiting for review.')}
+   </div></div>
+  <div style="display:grid;gap:18px">
+   <div class="oc-card"><div class="oc-cardhead"><h2>Recent administrators</h2></div><div class="oc-cardbody" style="padding-top:12px">
+    ${d.admins.slice(0,4).map(a=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--oc-line2)"><span class="oc-ava2">${esc((a.name||'?').slice(0,1).toUpperCase())}</span><div style="flex:1;min-width:0"><b style="font-size:13px;display:block">${esc(a.name)}</b><small style="color:var(--oc-mut)">${esc(a.email||'')}</small></div><code class="oc-code">${esc(a.admin_code||'—')}</code></div>`).join('')||'<p class="oc-mut" style="margin:0">No administrators yet.</p>'}
+   </div></div>
+   <div class="oc-card"><div class="oc-cardhead"><h2>Latest shops</h2><button type="button" class="oc-btn oc-btn-ghost oc-btn-sm" data-oc-go="shops">All shops ${ocIcon('chev')}</button></div><div class="oc-cardbody" style="padding-top:12px">
+    ${shops.slice(0,4).map(s=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--oc-line2)"><span class="oc-ava2">${esc((s.name||'?').slice(0,1).toUpperCase())}</span><div style="flex:1;min-width:0"><b style="font-size:13px;display:block">${esc(s.name)}</b><small style="color:var(--oc-mut)">${esc(s.administrators?.name||'—')}</small></div><code class="oc-code">${esc(s.shop_code||'—')}</code>${ocPill(s.status).txt?`<span class="oc-pill ${s.status==='active'?'ok':s.status==='read_only'?'warn':'neu'}">${esc(s.status==='read_only'?'read-only':s.status)}</span>`:''}</div>`).join('')||'<p class="oc-mut" style="margin:0">No shops yet.</p>'}
+   </div></div>
+  </div>
+ </div>`);
+ bindLicActions(pending.map(x=>x.id));
+ ocBindGo();
+}
+function bindLicActions(ids){document.querySelectorAll('[data-oc-appr]').forEach(b=>{const id=b.dataset.ocAppr;if(ids.includes(id))b.onclick=()=>ocLicenseReview(id,'active','claims')});document.querySelectorAll('[data-oc-rej]').forEach(b=>{const id=b.dataset.ocRej;if(ids.includes(id))b.onclick=()=>ocLicenseReview(id,'rejected','claims')})}
+
+/* ---------- Payments & Claims ---------- */
+async function ownerClaims(d){
+ let [purchases]=await Promise.all([api('platform/addon-purchases').catch(()=>[])]);
+ const lic=(d.licenses||[]),claims=lic.filter(x=>x.status==='pending'),addonPending=purchases.filter(x=>x.status==='pending');
+ const mon=v=>money(v);let tab='license';
+ const addonNameOf=x=>x.addon_key==='connectx'?'ConnectX':x.addon_key==='zudo'?'Zudo AI':x.addon_key==='business_health'?'AI Business Health':x.addon_key==='truebill'?'TrueBill':x.addon_key==='vaultium'?'Vaultium':x.addon_key||'—';
+ const licRows=()=>claims.map(x=>`<tr><td style="white-space:nowrap" class="oc-mut">${ocDT(x.created_at)}</td>
+  <td><div class="oc-cellstack"><b>${esc(x.administrators?.name||'—')}</b><small><code class="oc-code">${esc(x.administrators?.admin_code||'')}</code> · ${esc(x.administrators?.email||'')}</small></div></td>
+  <td>${esc(x.stores?.name||'<span class="oc-mut">License capacity</span>')}</td>
+  <td>${x.duration_months} months · ${x.max_stores||'—'} shop${Number(x.max_stores)>1?'s':''}</td>
+  <td class="num"><b>৳ ${mon(x.amount)}</b></td>
+  <td><span class="oc-tag">${esc(x.payment_method||'—')}</span><div class="oc-mut" style="font-size:11.5px">${esc(x.payment_number||'')}</div></td>
+  <td><code class="oc-code">${esc(x.transaction_id||'—')}</code></td>
+  <td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-appr="${x.id}">${ocIcon('check')}Approve</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-rej="${x.id}">Reject</button></div></td></tr>`).join('');
+ const addonRows=()=>addonPending.map(x=>`<tr><td style="white-space:nowrap" class="oc-mut">${ocDT(x.created_at)}</td>
+  <td><b>${esc(addonNameOf(x))}</b><div class="oc-mut" style="font-size:11.6px">${x.addon_key==='vaultium'?x.validity_days+' months · '+x.daily_limit+' GB':x.addon_key==='truebill'?x.validity_days+' days':x.validity_days+' days · '+x.daily_limit+'/day'}</div></td>
+  <td><div class="oc-cellstack"><b>${esc(x.administrators?.name||'—')}</b><small><code class="oc-code">${esc(x.administrators?.admin_code||'')}</code></small></div></td>
+  <td class="num"><b>৳ ${mon(x.amount)}</b>${Number(x.discount_amount)?`<div class="oc-mut" style="font-size:11.5px">− ${mon(x.discount_amount)} coupon</div>`:''}</td>
+  <td class="num"><b>৳ ${mon(Math.max(0,Number(x.amount)-Number(x.discount_amount)))}</b></td>
+  <td><span class="oc-tag">${esc(x.payment_method||'—')}</span><div class="oc-mut" style="font-size:11.5px">${esc(x.payment_number||'')}</div></td>
+  <td><code class="oc-code">${esc(x.transaction_id||'—')}</code>${x.coupon_code?`<div class="oc-mut" style="font-size:11.5px">coupon ${esc(x.coupon_code)}</div>`:''}</td>
+  <td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-addappr="${x.id}">${ocIcon('check')}Approve</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-addrej="${x.id}">Reject</button></div></td></tr>`).join('');
+ const render=()=>{
+  $('#page').innerHTML=ocView(ocHead('Payments & Claims','Verify submitted bKash / Nagad payments and approve or reject claims. Activation is automatic on approval — nothing else changes.',`<button type="button" class="oc-btn oc-btn-secondary" data-oc-refresh="1">${ocIcon('refresh')}Refresh</button>`)+`
+  <div class="oc-tabs">
+   <button type="button" class="oc-tab ${tab==='license'?'on':''}" data-oc-tab="license">License payments <span class="oc-cnt">${claims.length}</span></button>
+   <button type="button" class="oc-tab ${tab==='addon'?'on':''}" data-oc-tab="addon">Add-on payments <span class="oc-cnt">${addonPending.length}</span></button>
+  </div>
+  <div class="oc-cards">
+   ${ocStat('Pending license claims',claims.length,`৳ ${mon(claims.reduce((t,x)=>t+Number(x.amount),0))} total`,ocIcon('banknote'),'warn')}
+   ${ocStat('Pending add-on claims',addonPending.length,`৳ ${mon(addonPending.reduce((t,x)=>t+Math.max(0,Number(x.amount)-Number(x.discount_amount)),0))} payable`,ocIcon('gem'),'warn')}
+   ${ocStat('Approved this page','—','live register in Licenses','','ok','licenses')}
+  </div>
+  ${ocCall('warn','<b>Manual verification required.</b> Always confirm the transaction ID in the official bKash / Nagad merchant app or statement before approving. Approval activates the shop instantly and sets the license expiry date.')}
+  ${tab==='license'?`<div class="oc-card is-flush"><div class="oc-cardhead"><div><h2>License payment claims</h2><p>New, renewal, upgrade and downgrade requests submitted by administrators.</p></div></div>
+   <div class="oc-cardbody">${claims.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Claimed</th><th>Administrator</th><th>Shop</th><th>License</th><th class="num">Amount</th><th>Payment</th><th>Transaction ID</th><th style="text-align:right">Action</th></tr></thead><tbody>${licRows()}</tbody></table>`):ocEmpty(ocIcon('check'),'No pending license claims','When an administrator submits a payment claim it appears here for verification.')}</div></div>`
+  :`<div class="oc-card is-flush"><div class="oc-cardhead"><div><h2>Add-on payment claims</h2><p>Premium add-on purchases (ConnectX, Zudo AI, AI Business Health, TrueBill, Vaultium) pending review.</p></div></div>
+   <div class="oc-cardbody">${addonPending.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Claimed</th><th>Add-on</th><th>Administrator</th><th class="num">Amount</th><th class="num">Payable</th><th>Payment</th><th>Transaction ID</th><th style="text-align:right">Action</th></tr></thead><tbody>${addonRows()}</tbody></table>`):ocEmpty(ocIcon('check'),'No pending add-on claims','Add-on purchase requests from administrators appear here for review.')}</div></div>`}
+  `);
+  document.querySelectorAll('[data-oc-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.ocTab;render()});
+  const rf=$('[data-oc-refresh]');if(rf)rf.onclick=()=>ownerPage('claims');
+  document.querySelectorAll('[data-oc-appr]').forEach(b=>b.onclick=()=>ocLicenseReview(b.dataset.ocAppr,'active','claims'));
+  document.querySelectorAll('[data-oc-rej]').forEach(b=>b.onclick=()=>ocLicenseReview(b.dataset.ocRej,'rejected','claims'));
+  document.querySelectorAll('[data-oc-addappr]').forEach(b=>b.onclick=()=>ocAddonReview(b.dataset.ocAddappr,'active','claims'));
+  document.querySelectorAll('[data-oc-addrej]').forEach(b=>b.onclick=()=>ocAddonReview(b.dataset.ocAddrej,'rejected','claims'));
+  ocBindGo();
+ };
+ render();
+ const badge=$('#ocClaimsBadge');if(badge){const n=claims.length+addonPending.length;badge.textContent=n;badge.hidden=n===0}
+}
+function ocLicenseReview(id,status,refresh){
+ const approve=status==='active';
+ const label=approve?'approve and activate':'reject';
+ ocConfirm({title:approve?'Approve license payment?':'Reject license payment?',message:`Are you sure you want to ${label} this license payment request?`,danger:!approve,
+  confirmText:approve?'Approve & activate':'Reject claim',cancelText:'Cancel',
+  detail:approve?'<div class="oc-chk"><li><span class="oc-ch">'+ocIcon('check')+'</span>Transaction ID checked in the bKash / Nagad merchant portal</li><li><span class="oc-ch">'+ocIcon('check')+'</span>Sender number matches the payment number</li><li><span class="oc-ch">'+ocIcon('check')+'</span>Amount matches the requested license price</li></div>':''})
+ .then(ok=>{if(!ok)return;(async()=>{try{
+  await api('platform/license/'+id,{method:'PATCH',body:JSON.stringify({status,reviewNote:''})});
+  toast(approve?'License approved and activated.':'License rejected.');
+  ownerPage(refresh||'licenses');
+ }catch(e){console.error(e);toast('License action failed: '+e.message)}})()});
+}
+async function reviewLicense(id,status){ocLicenseReview(id,status,'licenses')}
+function ocAddonReview(id,status,refresh){
+ const approve=status==='active';
+ const label=approve?'approve':'reject';
+ ocConfirm({title:approve?'Approve add-on purchase?':'Reject add-on purchase?',message:`Are you sure you want to ${label} this add-on payment request?`,danger:!approve,confirmText:approve?'Approve purchase':'Reject request',cancelText:'Cancel'})
+ .then(ok=>{if(!ok)return;(async()=>{try{
+  await api('platform/addon-purchases',{method:'PATCH',body:JSON.stringify({id,status})});
+  toast('Add-on purchase '+(approve?'approved and activated.':'rejected.'));
+  ownerPage(refresh||'addons');
+ }catch(e){toast(e.message)}})()});
+}
+
+/* ---------- Licenses register ---------- */
+function ownerLicenses(d){
+ const lic=(d.licenses||[]);let filter='all',q='';
+ const feats=x=>`<span class="oc-mut" style="white-space:nowrap">CX ${x.connectx_enabled?`<b>${x.connectx_daily_limit}</b>/d`:'—'}</span><span class="oc-mut" style="white-space:nowrap">Zudo ${x.zudo_enabled?'<b>Yes</b>':'—'}</span><span class="oc-mut" style="white-space:nowrap">AIBH ${x.business_health_enabled?'<b>Yes</b>':'—'}</span><span class="oc-mut" style="white-space:nowrap">TrueBill ${x.truebill_enabled?'<b>Yes</b>':'—'}</span><span class="oc-mut" style="white-space:nowrap">Vault ${Number(x.vaultium_gb||0)>0?`<b>${x.vaultium_gb} GB</b>`:'—'}</span>`;
+ const counts={all:lic.length,pending:lic.filter(x=>x.status==='pending').length,active:lic.filter(x=>x.status==='active').length,rejected:lic.filter(x=>x.status==='rejected').length};
+ const rows=()=>lic.filter(x=>(filter==='all'||x.status===filter)&&(!q||JSON.stringify([x.administrators?.name,x.stores?.name,x.payment_number,x.transaction_id,x.administrators?.admin_code]).toLowerCase().includes(q)));
+ const render=()=>{
+  const data=rows();
+  $('#page').innerHTML=ocView(ocHead('Licenses','Complete license register. New, renewal, upgrade and downgrade transactions with payment and review status.',
+  `<div class="oc-fchip" style="border:0;background:transparent;cursor:default"><span class="oc-pill ${counts.pending?'warn':'ok'}">${counts.pending} pending review</span></div><button type="button" class="oc-btn oc-btn-secondary" data-oc-go="claims">Review queue ${ocIcon('chev')}</button>`)+`
+  <div class="oc-toolrow"><div class="oc-filters" style="margin:0">${[['all','All'],['pending','Pending'],['active','Active'],['rejected','Rejected']].map(([f,l])=>`<button type="button" class="oc-fchip ${filter===f?'on':''}" data-oc-f="${f}">${l} ${counts[f]||''}</button>`).join('')}</div>${ocSearch('Search administrator, shop, number or transaction ID…',' id="ocLicSearch"')}</div>
+  <div class="oc-card is-flush"><div class="oc-tblwrap clean"><table class="oc-tbl"><thead><tr><th>Administrator</th><th>Shop</th><th>Type</th><th>Period</th><th>Entitlements</th><th class="num">Amount</th><th>Payment</th><th>Transaction ID</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>
+  ${data.length?data.map(x=>{const p=ocLicPill(x.status);const scheduled=x.transaction_type==='downgrade'&&x.starts_at&&new Date(x.starts_at)>new Date();
+   return `<tr><td><div class="oc-cellstack"><b>${esc(x.administrators?.name||'—')}</b><small><code class="oc-code">${esc(x.administrators?.admin_code||'—')}</code></small></div></td>
+   <td>${esc(x.stores?.name||'<span class="oc-mut">License capacity</span>')}</td>
+   <td><span class="oc-tag">${esc(x.transaction_type||'new')}</span></td>
+   <td class="oc-mut">${x.duration_months} mo</td>
+   <td style="white-space:nowrap;font-size:12px;line-height:1.9">${feats(x)}</td>
+   <td class="num"><b>৳ ${money(x.amount)}</b></td>
+   <td><span class="oc-tag">${esc(x.payment_method||'—')}</span><div class="oc-mut" style="font-size:11.5px">${esc(x.payment_number||'')}</div></td>
+   <td><code class="oc-code">${esc(x.transaction_id||'—')}</code></td>
+   <td><span class="oc-pill ${p.cls}">${p.txt}</span>${scheduled?`<div class="oc-mut" style="font-size:11px">scheduled downgrade</div>`:''}</td>
+   <td><div class="oc-acts">${x.status==='pending'?`<button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-appr="${x.id}">${ocIcon('check')}Approve</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-rej="${x.id}">Reject</button>`:`<span class="oc-mut" style="font-size:12px">Reviewed</span>`}</div></td></tr>`}).join(''):ocEmptyTd(10,ocEmpty(ocIcon('shield'),'No licenses in this view','Try clearing the status filter or search term.'))}
+  </tbody></table></div></div>`);
+  document.querySelectorAll('[data-oc-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.ocF;render()});
+  const s=$('#ocLicSearch');if(s)s.oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+  document.querySelectorAll('[data-oc-appr]').forEach(b=>b.onclick=()=>ocLicenseReview(b.dataset.ocAppr,'active','licenses'));
+  document.querySelectorAll('[data-oc-rej]').forEach(b=>b.onclick=()=>ocLicenseReview(b.dataset.ocRej,'rejected','licenses'));
+  ocBindGo();
+ };
+ render();
+}
+
+/* ---------- License plans ---------- */
+async function ownerPlans(){
+ const rows=await api('platform/license-plans');
+ const published=rows.filter(p=>p.active!==false),free=rows.filter(p=>Number(p.price)===0);
+ const featRows=p=>[
+  [true,`<b>${p.duration_months} months</b> per license`],
+  [true,`Up to <b>${p.max_stores}</b> shop${p.max_stores>1?'s':''}`],
+  [p.connectx_enabled?true:false,p.connectx_enabled?`ConnectX <b>${p.connectx_daily_limit}</b> emails/day per shop`:'ConnectX not included'],
+  [p.zudo_enabled?true:false,p.zudo_enabled?`Zudo AI <b>${p.zudo_daily_limit}</b> requests/day per shop`:'Zudo AI not included'],
+  [p.business_health_enabled?true:false,p.business_health_enabled?`AI Business Health <b>${p.business_health_daily_limit}</b> reports/day`:'AI Business Health not included'],
+  [p.truebill_enabled?true:false,'TrueBill invoice QR verification'],
+  [Number(p.vaultium_gb||0)>0?true:false,`Vaultium <b>${p.vaultium_gb} GB</b> storage`]
+ ];
+ $('#page').innerHTML=ocView(ocHead('License plans','The catalogue administrators see in their Purchase License tab. Price 0 = instant free license with no payment form.',
+ `<button type="button" class="oc-btn" id="ocAddPlan">${ocIcon('plus')}Post license plan</button>`)+`
+ <div class="oc-cards">${ocStat('Published plans',published.length,'visible to administrators','','ok')}${ocStat('Hidden plans',rows.length-published.length,'not shown in the catalogue','','neu')}${ocStat('Free plans',free.length,'instant activation','','info')}${ocStat('Cheapest paid','৳ '+money(Math.min(...rows.filter(p=>Number(p.price)>0).map(p=>Number(p.price)),Infinity)===Infinity?0:Math.min(...rows.filter(p=>Number(p.price)>0).map(p=>Number(p.price)))),'per license period','','accent')}</div>
+ <div class="oc-plans">${rows.length?rows.map(p=>`<div class="oc-plan">
+  <div class="oc-ptop"><div><h3>${esc(p.title)}</h3><div class="oc-price"><b>${Number(p.price)===0?'Free':'৳ '+money(p.price)}</b><small>/ ${p.duration_months} mo</small></div></div><span class="oc-pill ${p.active!==false?'ok':'neu'}">${p.active!==false?'Published':'Hidden'}</span></div>
+  <div class="oc-pbody"><ul class="oc-feats">${featRows(p).map(([on,html])=>`<li class="${on?'on':'off'}">${ocIcon(on?'check':'x')}<span>${html}</span></li>`).join('')}</ul>
+  ${p.benefits?`<div class="oc-benefits">${esc(p.benefits)}</div>`:''}
+  ${p.payment_details?`<div style="font-size:11.8px;color:var(--oc-faint)">Payment details: ${esc(p.payment_details)}</div>`:''}</div>
+  <div class="oc-pfoot"><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-editplan="${p.id}">Edit plan</button></div></div>`).join(''):'<div class="oc-card" style="grid-column:1/-1">'+ocEmpty(ocIcon('tag'),'No license plans yet','Publish your first license plan to let administrators purchase licenses.')+'</div>'}</div>`);
+ $('#ocAddPlan').onclick=()=>planModal();
+ document.querySelectorAll('[data-oc-editplan]').forEach(x=>x.onclick=()=>planModal(rows.find(p=>p.id===x.dataset.ocEditplan)));
+}
+function planModal(plan=null){
+ const add=!plan;
+ const d=ocDialog({title:add?'Post license plan':'Edit license plan',icon:ocIcon('tag'),tone:'info',size:'lg',
+ body:`<form id="ocPlanForm" class="oc-formgrid">
+  <div class="oc-fgrid"><div class="oc-span3"><label class="oc-flabel">Plan title <span class="oc-freq">*</span></label><input class="oc-input" name="title" required value="${esc(plan?.title||'')}" placeholder="e.g. Standard 6-month"></div>
+  <div><label class="oc-flabel">Duration (months) <span class="oc-freq">*</span></label><input class="oc-input" type="number" min="1" required name="duration_months" value="${esc(plan?.duration_months||'')}"></div>
+  <div><label class="oc-flabel">Total shop create limit <span class="oc-freq">*</span></label><input class="oc-input" type="number" min="1" required name="max_stores" value="${esc(plan?.max_stores||1)}"></div>
+  <div><label class="oc-flabel">Price (BDT; 0 = free) <span class="oc-freq">*</span></label><input class="oc-input" type="number" min="0" step="0.01" required name="price" value="${esc(plan?.price??0)}"></div>
+  <div><label class="oc-flabel">Availability</label><select class="oc-select" name="active"><option value="true" ${plan?.active!==false?'selected':''}>Published</option><option value="false" ${plan?.active===false?'selected':''}>Hidden</option></select></div></div>
+  <hr class="oc-rule" style="margin:2px 0">
+  <div style="font-size:12px;font-weight:750;letter-spacing:.6px;text-transform:uppercase;color:var(--oc-mut)">Licensed entitlements</div>
+  ${[['connectx','ConnectX','emails per shop / day'],['zudo','Zudo AI','requests per shop / day'],['business_health','AI Business Health','reports per shop / day']].map(([k,l,h])=>`<div class="oc-fgrid" style="align-items:end"><div style="display:flex;align-items:center;gap:9px;min-height:36px"><input type="checkbox" id="ocplan_${k}" name="${k}_enabled" style="width:15px;height:15px;accent-color:var(--oc-accent);flex:0 0 auto" ${plan?.[k+'_enabled']?'checked':''}><label for="ocplan_${k}" class="oc-flabel" style="margin:0">Include ${l}</label></div><div><label class="oc-flabel">${h}</label><input class="oc-input" type="number" min="0" name="${k}_daily_limit" value="${esc(plan?.[k+'_daily_limit']??0)}"></div></div>`).join('')}
+  <div class="oc-fgrid" style="align-items:center"><div style="display:flex;align-items:center;gap:9px"><input type="checkbox" id="ocplan_truebill" name="truebill_enabled" style="width:15px;height:15px;accent-color:var(--oc-accent);flex:0 0 auto" ${plan?.truebill_enabled?'checked':''}><label for="ocplan_truebill" class="oc-flabel" style="margin:0">Include TrueBill — QR verification on every invoice, whole license validity (no daily limit)</label></div></div>
+  <div><label class="oc-flabel">Vaultium storage (GB per administrator — shared across all shops)</label><input class="oc-input" type="number" min="0" name="vaultium_gb" value="${esc(plan?.vaultium_gb??0)}"></div>
+  <div><label class="oc-flabel">Benefits / information <span class="oc-freq">*</span></label><textarea class="oc-textarea" name="benefits" rows="3" required>${esc(plan?.benefits||'')}</textarea></div>
+  <div><label class="oc-flabel">Payment instructions / details</label><textarea class="oc-textarea" name="payment_details" rows="2">${esc(plan?.payment_details||'')}</textarea></div>
+  </form>`});
+ ocPlanFormSubmit(d,plan);
+}
+function ocPlanFormSubmit(d,plan){const add=!plan,form=d.body.querySelector('#ocPlanForm');
+ const btn=document.createElement('button');btn.type='submit';btn.className='oc-btn oc-btn-sm';btn.textContent=add?'Publish license plan':'Save plan';btn.form='ocPlanForm';
+ d.el.querySelector('.oc-df').appendChild(btn);
+ form.onsubmit=async ev=>{ev.preventDefault();try{
+  const b=Object.fromEntries(new FormData(form));
+  b.duration_months=+b.duration_months;b.max_stores=+b.max_stores;b.price=+b.price;b.active=b.active==='true';
+  b.connectx_enabled=form.querySelector('[name=connectx_enabled]').checked;b.connectx_daily_limit=+b.connectx_daily_limit||0;
+  b.zudo_enabled=form.querySelector('[name=zudo_enabled]').checked;b.zudo_daily_limit=+b.zudo_daily_limit||0;
+  b.business_health_enabled=form.querySelector('[name=business_health_enabled]').checked;b.business_health_daily_limit=+b.business_health_daily_limit||0;
+  b.truebill_enabled=form.querySelector('[name=truebill_enabled]').checked;b.vaultium_gb=+b.vaultium_gb||0;
+  await api(add?'platform/license-plans':'platform/license-plan/'+plan.id,{method:add?'POST':'PATCH',body:JSON.stringify(b)});
+  d.close();toast('License plan saved.');ownerPlans();
+ }catch(x){toast(x.message)}};
+}
+
+/* ---------- Administrators ---------- */
+function ownerAdmins(d){
+ const admins=d.admins||[];let q='';
+ const rows=()=>admins.filter(a=>!q||JSON.stringify([a.name,a.email,a.phone,a.admin_code]).toLowerCase().includes(q));
+ const render=()=>{
+  const data=rows();
+  $('#page').innerHTML=ocView(ocHead('Administrators','Administrator accounts across the platform. Deactivating an administrator blocks new sign-ins; existing sessions expire automatically.')+`
+  <div class="oc-cards">${ocStat('Administrators',admins.length,`${admins.filter(a=>a.active).length} active`,ocIcon('user'),'accent')}${ocStat('Active',admins.filter(a=>a.active).length,'can sign in to their shops','','ok')}${ocStat('Deactivated',admins.filter(a=>!a.active).length,'sign-in blocked','','neu')}</div>
+  <div class="oc-toolrow">${ocSearch('Search by name, email, phone or administrator ID…',' id="ocAdmSearch"')}</div>
+  <div class="oc-card is-flush"><div class="oc-tblwrap clean"><table class="oc-tbl"><thead><tr><th>Administrator</th><th>Contact</th><th>Created</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>
+  ${data.length?data.map(a=>`<tr><td><div style="display:flex;align-items:center;gap:10px"><span class="oc-ava2">${esc((a.name||'?').slice(0,1).toUpperCase())}</span><div class="oc-cellstack"><b>${esc(a.name)}</b><small><code class="oc-code">#${esc(a.admin_code)}</code></small></div></div></td>
+  <td class="oc-mut">${esc(a.email||'—')}<div style="font-size:11.8px">${esc(a.phone||'')}</div></td>
+  <td class="oc-mut">${ocDate(a.created_at)}</td>
+  <td><span class="oc-pill ${a.active?'ok':'neu'}">${a.active?'Active':'Inactive'}</span></td>
+  <td><div class="oc-acts">${a.active?`<button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-toggle="${a.id}" data-oc-state="0">Deactivate</button>`:`<button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-toggle="${a.id}" data-oc-state="1">Activate</button>`}</div></td></tr>`).join(''):ocEmptyTd(5,ocEmpty(ocIcon('user'),'No administrators yet','Administrators appear here once they register an account.'))}
+  </tbody></table></div></div>`);
+  const s=$('#ocAdmSearch');if(s)s.oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+  document.querySelectorAll('[data-oc-toggle]').forEach(b=>b.onclick=async()=>{
+   const id=b.dataset.ocToggle,toActive=b.dataset.ocState==='1';
+   const ok=await ocConfirm({title:toActive?'Activate administrator?':'Deactivate administrator?',danger:!toActive,confirmText:toActive?'Activate account':'Deactivate',cancelText:'Cancel',message:toActive?'This administrator will be able to sign in again.':'This administrator will be blocked from signing in. Existing sessions expire automatically.'});
+   if(!ok)return;
+   try{await api('platform/administrator/'+id,{method:'PATCH',body:JSON.stringify({active:toActive})});toast('Administrator status changed.');ownerPage('administrators')}catch(e){toast(e.message)}
+  });
+ };
+ render();
+}
+
+/* ---------- Shops ---------- */
+function ownerShops(d){
+ const shops=(d.stores||[]);let q='';
+ const rows=()=>shops.filter(s=>!q||JSON.stringify([s.name,s.shop_code,s.administrators?.name,s.administrators?.email]).toLowerCase().includes(q));
+ const render=()=>{
+  const data=rows();
+  $('#page').innerHTML=ocView(ocHead('Shops','Every shop registered on the platform, with its administrator and operating status.')+`
+  <div class="oc-cards">${ocStat('Total shops',shops.length,'registered','','accent')}${ocStat('Active',shops.filter(s=>s.status==='active').length,'operating normally','','ok')}${ocStat('Read-only',shops.filter(s=>s.status==='read_only').length,'viewing only','','warn')}${ocStat('Inactive',shops.filter(s=>s.status==='inactive').length,'disabled','','neu')}</div>
+  <div class="oc-toolrow">${ocSearch('Search by shop name, Shop ID or administrator…',' id="ocShopSearch"')}</div>
+  <div class="oc-card is-flush"><div class="oc-tblwrap clean"><table class="oc-tbl"><thead><tr><th>Shop</th><th>Shop ID</th><th>Administrator</th><th>Administrator ID</th><th>Email</th><th>Status</th><th>Created</th></tr></thead><tbody>
+  ${data.length?data.map(s=>`<tr><td><div style="display:flex;align-items:center;gap:10px"><span class="oc-ava2">${esc((s.name||'?').slice(0,1).toUpperCase())}</span><b>${esc(s.name)}</b></div></td>
+  <td><code class="oc-code">${esc(s.shop_code)}</code></td>
+  <td>${esc(s.administrators?.name||'—')}</td>
+  <td><code class="oc-code">${esc(s.administrators?.admin_code||'—')}</code></td>
+  <td class="oc-mut">${esc(s.administrators?.email||'—')}</td>
+  <td><span class="oc-pill ${s.status==='active'?'ok':s.status==='read_only'?'warn':'neu'}">${esc(s.status==='read_only'?'read-only':s.status)}</span></td>
+  <td class="oc-mut">${ocDate(s.created_at)}</td></tr>`).join(''):ocEmptyTd(7,ocEmpty(ocIcon('store'),'No shops yet','Shops appear here as soon as they are registered.'))}
+  </tbody></table></div></div>`);
+  const s=$('#ocShopSearch');if(s)s.oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+ };
+ render();
+}
+
+/* ---------- Branding (platform settings) ---------- */
+async function ownerBranding(){
+ let b=await api('platform/settings');
+ $('#page').innerHTML=ocView(ocHead('Branding','Public website identity of EMS. These fields only affect the EMS public site — they never alter customer shop records.')+`
+ <div style="display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,.75fr);gap:18px;align-items:start" class="oc-dashgrid">
+  <div class="oc-card"><div class="oc-cardhead"><h2>Brand details</h2><p>Shown on the landing page, auth screens and invoice footers.</p></div>
+   <div class="oc-cardbody"><form id="ocBrandForm" class="oc-formgrid">
+    <div><label class="oc-flabel">Website name</label><input class="oc-input" name="website_name" required value="${esc(b.website_name||'EMS V1')}" data-oc-live="wname"></div>
+    <div><label class="oc-flabel">Product name</label><input class="oc-input" name="product_name" required value="${esc(b.product_name||'EMS V1')}" data-oc-live="pname"></div>
+    <div><label class="oc-flabel">Powered by</label><input class="oc-input" name="powered_by" required value="${esc(b.powered_by||'DoxTox')}" data-oc-live="pby"></div>
+    <div style="display:flex;justify-content:flex-end"><button type="submit" class="oc-btn">Save brand details</button></div>
+   </form></div></div>
+  <div class="oc-card"><div class="oc-cardhead"><h2>Preview</h2><p>How the wordmark renders.</p></div><div class="oc-cardbody">
+   <div style="border:1px dashed var(--oc-line);border-radius:10px;padding:20px 18px;background:var(--oc-surface2)">
+    <div style="display:flex;align-items:center;gap:11px"><span class="oc-logo" style="width:34px;height:34px;border-radius:9px;background:var(--oc-accent);color:#fff;display:grid;place-items:center;font-weight:800">E</span>
+    <div><div style="font-weight:800;font-size:17px" id="ocPrevName">${esc(b.product_name||'EMS V1')}</div><small style="color:var(--oc-mut)">powered by <b id="ocPrevPby">${esc(b.powered_by||'DoxTox')}</b></small></div></div>
+    <hr class="oc-rule"><div style="font-size:12px;color:var(--oc-mut)">Website name:<br><b id="ocPrevWn" style="color:var(--oc-text)">${esc(b.website_name||'EMS V1')}</b></div></div>
+   <p class="oc-hint">The wordmark already updates across the console when saved.</p></div></div>
+ </div>`);
+ const f=$('#ocBrandForm');
+ f.querySelectorAll('[data-oc-live]').forEach(i=>i.oninput=()=>{const v=i.value;$('#ocPrevName').textContent=String(v).trim()||'EMS V1'});
+ f.onsubmit=async e=>{e.preventDefault();try{
+  await api('platform/settings',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(f)))});
+  toast('Website branding saved.');
+  api('public/branding').then(br=>{document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=br.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=br.powered_by||'DoxTox')}).catch(()=>{});
+  ownerBranding();
+ }catch(x){toast(x.message)}};
+}
+
+/* ---------- Website pages ---------- */
 async function ownerWebsitePages(){
-  const pages=await api('platform/pages'),standard=[['about','About'],['terms','Terms & Conditions'],['contact','Contact Us']],bySlug=Object.fromEntries(pages.map(x=>[x.slug,x]));
-  $('#page').innerHTML=title('Website pages','<button id="addMissingPages">+ Add missing standard pages</button>')+`<section class="panel"><p class="muted">Manage the fixed public About, Terms &amp; Conditions and Contact pages.</p><div class="tablewrap"><table><thead><tr><th>Page</th><th>URL page</th><th>Status</th><th>Action</th></tr></thead><tbody>${standard.map(([slug,label])=>{const page=bySlug[slug];return `<tr><td>${esc(page?.title||label)}</td><td>/${slug}</td><td>${page?'Available':'Missing'}</td><td>${page?`<button class="secondary" data-edit-page="${slug}">Edit page</button>`:`<button data-add-page="${slug}">Add page</button>`}</td></tr>`}).join('')}</tbody></table></div></section>`;
-  const editPage=slug=>{
-    const p=bySlug[slug]||{title:standard.find(s=>s[0]===slug)?.[1]||slug,body:'',hero_image_prompt:''};
-    const e=document.createElement('div');e.className='modal';
-    e.innerHTML=`<form class="modalbox fields"><div class="modalhead"><h2>Edit ${esc(standard.find(s=>s[0]===slug)?.[1]||slug)}</h2><button type="button">×</button></div><label>Page title<input name="title" value="${esc(p.title)}"></label>${slug==='about'?`<label>Graphics prompt / note<input name="hero_image_prompt" value="${esc(p.hero_image_prompt||'')}"></label>`:''}<label>Page content<textarea name="body" rows="14">${esc(p.body)}</textarea></label><button>Save page</button></form>`;
-    document.body.append(e);e.querySelector('[type=button]').onclick=()=>e.remove();
-    e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));b.slug=slug;try{await api('platform/pages',{method:'PATCH',body:JSON.stringify(b)});e.remove();toast('Public page saved.');ownerWebsitePages()}catch(err){toast(err.message)}};
+ const pages=await api('platform/pages'),standard=[['about','About'],['terms','Terms & Conditions'],['contact','Contact Us']],bySlug=Object.fromEntries(pages.map(x=>[x.slug,x]));
+ $('#page').innerHTML=ocView(ocHead('Website pages','The fixed public pages of the EMS website — About, Terms &amp; Conditions and Contact.',`<button type="button" class="oc-btn oc-btn-secondary" id="ocAddMissing">${ocIcon('plus')}Add missing standard pages</button>`)+`
+ <div class="oc-cards">${standard.map(([slug,label])=>{const p=bySlug[slug];return `<div class="oc-card" style="margin:0"><div class="oc-cardbody">
+  <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start"><b style="font-size:14.5px">${esc(p?.title||label)}</b><span class="oc-pill ${p?'ok':'warn'}">${p?'Available':'Missing'}</span></div>
+  <div class="oc-mut" style="font-size:12.4px;margin-top:2px">/<span class="oc-code">${slug}</span></div>
+  ${p?`<p class="oc-hint">${esc(String(p.body||'').slice(0,90))}${(p.body||'').length>90?'…':''}</p>`:`<p class="oc-hint">Not created yet — the public /${slug} page currently returns 404.</p>`}
+  <div style="display:flex;gap:8px;margin-top:10px">${p?`<button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-pageedit="${slug}">Edit page</button>`:`<button type="button" class="oc-btn oc-btn-sm" data-oc-pageadd="${slug}">${ocIcon('plus')}Create page</button>`}</div>
+ </div></div>`}).join('')}</div>`);
+ const editPage=slug=>{const p=bySlug[slug]||{title:(standard.find(s=>s[0]===slug)||[])[1]||slug,body:'',hero_image_prompt:''};
+  const d=ocDialog({title:'Edit '+esc((standard.find(s=>s[0]===slug)||[])[1]||slug),icon:ocIcon('file'),tone:'info',size:'lg',
+  body:`<form id="ocPageForm" class="oc-formgrid">
+   <div><label class="oc-flabel">Page title</label><input class="oc-input" name="title" value="${esc(p.title)}"></div>
+   ${slug==='about'?`<div><label class="oc-flabel">Graphics prompt / note</label><input class="oc-input" name="hero_image_prompt" value="${esc(p.hero_image_prompt||'')}"></div>`:''}
+   <div><label class="oc-flabel">Page content</label><textarea class="oc-textarea" name="body" rows="14">${esc(p.body)}</textarea></div></form>`});
+  const form=d.body.querySelector('form');
+  const btn=document.createElement('button');btn.className='oc-btn oc-btn-sm';btn.type='submit';btn.textContent='Save page';btn.form='ocPageForm';
+  d.el.querySelector('.oc-df').appendChild(btn);
+  form.onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(form));b.slug=slug;try{
+   await api('platform/pages',{method:'PATCH',body:JSON.stringify(b)});d.close();toast('Public page saved.');ownerWebsitePages();
+  }catch(err){toast(err.message)}};
+ };
+ const addPage=async slug=>{try{await api('platform/pages',{method:'POST',body:JSON.stringify({slug})});toast('Standard page added.');ownerWebsitePages()}catch(err){toast(err.message)}};
+ $('#ocAddMissing').onclick=async()=>{const missing=standard.filter(([slug])=>!bySlug[slug]);if(!missing.length)return toast('All standard public pages already exist.');for(const [slug] of missing){await api('platform/pages',{method:'POST',body:JSON.stringify({slug})}).catch(err=>{toast(err.message);return null})}ownerWebsitePages();toast('Standard pages added.')};
+ document.querySelectorAll('[data-oc-pageedit]').forEach(x=>x.onclick=()=>editPage(x.dataset.ocPageedit));
+ document.querySelectorAll('[data-oc-pageadd]').forEach(x=>x.onclick=()=>addPage(x.dataset.ocPageadd));
+}
+
+/* ---------- Blogs ---------- */
+async function ownerBlogs(){
+ const rows=await api('platform/blogs');let q='';
+ const data=()=>rows.filter(x=>!q||JSON.stringify([x.title,x.slug]).toLowerCase().includes(q));
+ const render=()=>{
+  const list=data();
+  $('#page').innerHTML=ocView(ocHead('Blog posts','Articles published on the EMS public site.',`<button type="button" class="oc-btn" id="ocAddBlog">${ocIcon('plus')}New blog post</button>`)+`
+  <div class="oc-cards">${ocStat('Total posts',rows.length,'written so far','','accent')}${ocStat('Published',rows.filter(x=>x.published).length,'live on the website','','ok')}${ocStat('Drafts',rows.filter(x=>!x.published).length,'not visible publicly','','warn')}</div>
+  <div class="oc-toolrow">${ocSearch('Search by title…',' id="ocBlogSearch"')}</div>
+  <div class="oc-card is-flush"><div class="oc-tblwrap clean"><table class="oc-tbl"><thead><tr><th>Post</th><th>Status</th><th>Published</th><th style="text-align:right">Action</th></tr></thead><tbody>
+  ${list.length?list.map(x=>`<tr><td><div style="display:flex;align-items:center;gap:11px;min-width:0">${x.cover_image_url?`<img src="${esc(x.cover_image_url)}" alt="" style="width:44px;height:32px;object-fit:cover;border-radius:6px;border:1px solid var(--oc-line);flex:0 0 auto" onerror="this.style.display='none'">`:`<span class="oc-icob">${ocIcon('file')}</span>`}<div class="oc-cellstack"><b style="max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.title)}</b><small>/${esc(x.slug||'')}</small></div></div></td>
+  <td><span class="oc-pill ${x.published?'ok':'warn'}">${x.published?'Published':'Draft'}</span></td>
+  <td class="oc-mut">${x.published_at?ocDate(x.published_at):'—'}</td>
+  <td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-blogedit="${x.id}">Edit</button></div></td></tr>`).join(''):ocEmptyTd(4,ocEmpty(ocIcon('rss'),'No blog posts yet','Write the first post for the public EMS site.'))}
+  </tbody></table></div></div>`);
+  const s=$('#ocBlogSearch');if(s)s.oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+  $('#ocAddBlog').onclick=()=>blogModal();
+  document.querySelectorAll('[data-oc-blogedit]').forEach(b=>b.onclick=()=>blogModal(rows.find(x=>x.id===b.dataset.ocBlogedit)));
+ };
+ render();
+}
+function blogModal(post=null){
+ const d=ocDialog({title:post?'Edit blog post':'New blog post',icon:ocIcon('rss'),tone:'info',size:'lg',
+ body:`<form id="ocBlogForm" class="oc-formgrid">
+  <div><label class="oc-flabel">Title</label><input class="oc-input" name="title" required value="${esc(post?.title||'')}"></div>
+  <div><label class="oc-flabel">Excerpt</label><input class="oc-input" name="excerpt" value="${esc(post?.excerpt||'')}"></div>
+  <div><label class="oc-flabel">Cover image URL</label><input class="oc-input" name="cover_image_url" value="${esc(post?.cover_image_url||'')}" placeholder="https://…"></div>
+  <div><label class="oc-flabel">Article content</label><textarea class="oc-textarea" name="body" rows="12" required>${esc(post?.body||'')}</textarea></div>
+  <div><label class="oc-flabel">Publication status</label><select class="oc-select" name="published"><option value="false" ${!post?.published?'selected':''}>Draft</option><option value="true" ${post?.published?'selected':''}>Published</option></select></div></form>`});
+ const form=d.body.querySelector('form');
+ const btn=document.createElement('button');btn.className='oc-btn oc-btn-sm';btn.type='submit';btn.textContent='Save blog post';btn.form='ocBlogForm';
+ d.el.querySelector('.oc-df').appendChild(btn);
+ form.onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(form));b.published=b.published==='true';try{
+  await api(post?'platform/blog/'+post.id:'platform/blogs',{method:post?'PATCH':'POST',body:JSON.stringify(b)});
+  d.close();toast('Blog post saved.');ownerBlogs();
+ }catch(err){toast(err.message)}};
+}
+
+/* ---------- Contact messages ---------- */
+async function ownerContactMessages(){
+ const rows=await api('platform/contact-messages');let q='';
+ const data=()=>rows.filter(x=>!q||JSON.stringify([x.name,x.email,x.phone,x.subject,x.message]).toLowerCase().includes(q));
+ const render=()=>{
+  const list=data();
+  $('#page').innerHTML=ocView(ocHead('Contact messages','Messages submitted through the public Contact page.',`<span class="oc-pill neu">${rows.length} total</span>`)+`
+  <div class="oc-toolrow">${ocSearch('Search name, email, subject or message…',' id="ocMsgSearch"')}</div>
+  <div class="oc-card is-flush"><div class="oc-tblwrap clean"><table class="oc-tbl"><thead><tr><th>Received</th><th>Sender</th><th>Subject</th><th>Message</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>
+  ${list.length?list.map((x,i)=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDT(x.created_at)}</td>
+  <td><div style="display:flex;align-items:center;gap:9px"><span class="oc-ava2">${esc((x.name||'?').slice(0,1).toUpperCase())}</span><div class="oc-cellstack"><b>${esc(x.name)}</b><small>${esc(x.email||'')}${x.phone?' · '+esc(x.phone):''}</small></div></div></td>
+  <td><b>${esc(x.subject||'—')}</b></td>
+  <td style="max-width:300px"><span class="oc-ellip">${esc(x.message)}</span></td>
+  <td><span class="oc-pill neu">${esc(x.status||'new')}</span></td>
+  <td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-msgview="${i}">${ocIcon('eye')}View</button></div></td></tr>`).join(''):ocEmptyTd(6,ocEmpty(ocIcon('inbox'),'No messages yet','Contact form submissions appear here.'))}
+  </tbody></table></div></div>`);
+  const s=$('#ocMsgSearch');if(s)s.oninput=e=>{q=e.target.value.trim().toLowerCase();render()};
+  document.querySelectorAll('[data-oc-msgview]').forEach(b=>b.onclick=()=>{const x=list[+b.dataset.ocMsgview];if(!x)return;
+   const d=ocDialog({title:esc(x.subject||'Message')||'Message',icon:ocIcon('inbox'),tone:'info',size:'lg',
+   body:`<div class="oc-dl" style="margin-bottom:16px"><div class="oc-di"><small>From</small><div>${esc(x.name)}</div></div><div class="oc-di"><small>Email</small><div>${esc(x.email)}</div></div><div class="oc-di"><small>Phone</small><div>${esc(x.phone||'—')}</div></div><div class="oc-di"><small>Received</small><div>${ocDT(x.created_at)}</div></div><div class="oc-di span2"><small>Subject</small><div>${esc(x.subject||'—')}</div></div></div>
+   <div style="border:1px solid var(--oc-line);border-radius:9px;background:var(--oc-surface2);padding:14px 15px;white-space:pre-wrap;line-height:1.65;font-size:13.2px">${esc(x.message)}</div>`})});
+ };
+ render();
+}
+
+/* ---------- ConnectX (owner) ---------- */
+async function ownerConnectX(){
+ const x=await api('platform/connectx');
+ const cfgOk=!!x.apiConfigured,used=Number(x.usedToday||0),limit=Number(x.global_daily_limit||0);
+ $('#page').innerHTML=ocView(ocHead('ConnectX','Central provider, sender identity and daily limits for ConnectX email. Brevo credentials stay in Cloudflare encrypted secrets.')+`
+ <div class="oc-cards">
+  ${ocStat('Provider','Brevo API',cfgOk?'API key detected':'API key missing',ocIcon('mail'),cfgOk?'ok':'warn')}
+  ${ocStat('Status',x.enabled?'Enabled':'Disabled','shop sending '+(x.enabled?'allowed':'blocked'),'',x.enabled?'ok':'neu')}
+  ${ocStat('Global daily limit',limit,`used today: ${used}`,ocIcon('activity'),'accent')}
+  ${ocStat('From email',esc(x.from_email||'—'),esc(x.from_name||''),'','info')}
+ </div>
+ ${limit>0?`<div class="oc-card"><div class="oc-cardhead"><h2>Today's global usage</h2><p>${used} of ${limit} emails sent today across every shop.</p></div><div class="oc-cardbody"><div class="oc-progress ${used>=limit?'':'ok'}" style="margin:0"><i style="width:${Math.min(100,used/limit*100)}%"></i></div></div></div>`:''}
+ <div class="oc-card"><div class="oc-cardhead"><h2>Central sender and limits</h2><p>Shop users never see provider credentials.</p></div>
+  <div class="oc-cardbody"><form id="cxConfig" class="oc-formgrid">
+   <div class="oc-fgrid">
+    <div><label class="oc-flabel">From name</label><input class="oc-input" name="from_name" required value="${esc(x.from_name||'EMS ConnectX')}"></div>
+    <div><label class="oc-flabel">From email</label><input class="oc-input" name="from_email" type="email" required value="${esc(x.from_email||'')}"></div>
+    <div><label class="oc-flabel">Reply-to email</label><input class="oc-input" name="reply_to" type="email" value="${esc(x.reply_to||'')}"></div>
+    <div><label class="oc-flabel">Global daily limit</label><input class="oc-input" name="global_daily_limit" type="number" min="1" required value="${esc(x.global_daily_limit||300)}"></div>
+    <div><label class="oc-flabel">ConnectX status</label><select class="oc-select" name="enabled"><option value="true" ${x.enabled?'selected':''}>Enabled</option><option value="false" ${!x.enabled?'selected':''}>Disabled</option></select></div>
+   </div>
+   <div style="display:flex;justify-content:flex-end"><button type="submit" class="oc-btn">Save ConnectX configuration</button></div>
+  </form></div></div>
+ <div class="oc-card"><div class="oc-cardhead"><h2>Test Brevo connection</h2><p>Send one diagnostic test email. The result shows the exact provider response to you only.</p></div>
+  <div class="oc-cardbody"><div class="oc-fgrid" style="align-items:end"><div><label class="oc-flabel">Test recipient email</label><input class="oc-input" type="email" id="cxTestTo" placeholder="you@example.com"></div>
+  <div style="display:flex;align-items:flex-end"><button type="button" class="oc-btn" id="cxTest">Send test email</button></div></div><div id="cxTestResult" style="margin-top:11px"></div></div></div>
+ <div class="oc-card is-flush"><div class="oc-cardhead"><h2>Recent provider logs</h2><p>Latest 100 send attempts from all shops.</p></div><div class="oc-cardbody" id="cxOwnerLogs"><div class="oc-loading"><span class="oc-spin"></span>Loading logs…</div></div></div>`);
+ async function loadLogs(){try{
+  const logs=await api('platform/connectx/logs');
+  const box=$('#cxOwnerLogs');
+  box.innerHTML=logs.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Time</th><th>Recipient</th><th>Subject</th><th>Status</th><th>Provider result</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDT(l.created_at)}</td><td class="oc-mut">${esc(l.to_emails.join(', '))}</td><td><b>${esc(l.subject)}</b></td><td><span class="oc-pill ${l.status==='sent'?'ok':l.status==='failed'?'err':'warn'}">${esc(l.status)}</span>${l.shop_deleted_at?'<div class="oc-mut" style="font-size:11px">hidden by shop</div>':''}</td><td class="oc-mut" style="max-width:260px"><span class="oc-ellip" title="${esc(l.error_message||l.provider_message_id||'Accepted')}">${esc(l.error_message||l.provider_message_id||'Accepted')}</span></td></tr>`).join('')}</tbody></table>`):ocEmpty(ocIcon('mail'),'No ConnectX send attempts yet','Logs appear here as soon as shops send email through ConnectX.');
+ }catch(e){$('#cxOwnerLogs').innerHTML=ocEmpty(ocIcon('alert'),'Logs unavailable',esc(e.message))}}
+ loadLogs();
+ $('#cxConfig').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{
+  await api('platform/connectx',{method:'PATCH',body:JSON.stringify(b)});toast('ConnectX configuration saved.');ownerConnectX();
+ }catch(err){toast(err.message)}};
+ $('#cxTest').onclick=async()=>{const btn=$('#cxTest'),to=$('#cxTestTo').value.trim();if(!to)return toast('Enter a test recipient email.');btn.disabled=true;btn.textContent='Testing…';$('#cxTestResult').innerHTML='';try{
+  const r=await api('platform/connectx/test',{method:'POST',body:JSON.stringify({to})});
+  $('#cxTestResult').innerHTML=ocCall('ok',`<b>Brevo accepted the test email.</b><div>Message ID: ${esc(r.messageId||'received')}</div>`);
+ }catch(e){$('#cxTestResult').innerHTML=ocCall('danger',`<b>Test failed.</b><div>${esc(e.message)}</div>`)}
+ finally{btn.disabled=false;btn.textContent='Send test email'}};
+}
+
+/* ---------- Zudo AI + AI Business Health (owner) ---------- */
+async function ownerZudo(){
+ const [x,h]=await Promise.all([api('platform/zudo'),api('platform/business-health').catch(()=>({enabled:false,global_daily_limit:100,usedToday:0,aiBinding:false,models:null}))]);
+ const prov=(key,label,secret,ready)=>`<div class="oc-card" style="margin:0"><div class="oc-cardbody" style="display:flex;align-items:center;justify-content:space-between;gap:10px"><div><b style="font-size:13.6px">${label}</b><div class="oc-mut" style="font-size:12px">${ready?'API key / binding detected':'Add secret: '+esc(secret)}</div></div><span class="oc-pill ${ready?'ok':'warn'}">${ready?'Ready':'Missing'}</span></div></div>`;
+ $('#page').innerHTML=ocView(ocHead('Zudo AI','Zudo is read-only. Pick any AI model — if a provider hits a limit or fails, switch instantly.')+`
+ <div class="oc-cards">${prov('cf','Cloudflare Workers AI','AI binding',!!x.aiBinding)}${prov('gem','Google AI Studio (Gemini)','GEMINI_API_KEY',!!x.geminiBinding)}${prov('groq','Groq','GROQ_API_KEY',!!x.groqBinding)}${prov('cere','Cerebras','CEREBRAS_API_KEY',!!x.cerebrasBinding)}</div>
+ <div class="oc-cards">${ocStat('Global daily limit',x.global_daily_limit||0,`used today: ${x.usedToday||0}`,ocIcon('activity'),'accent')}${ocStat('Zudo status',x.enabled?'Enabled':'Disabled','global switch for all shops','',x.enabled?'ok':'neu')}</div>
+ <div class="oc-card"><div class="oc-cardhead"><h2>Central Zudo controls</h2><p>One model powers Zudo across the platform.</p></div><div class="oc-cardbody"><form id="zudoConfig" class="oc-formgrid">
+  <div class="oc-fgrid"><div><label class="oc-flabel">AI model</label><select class="oc-select" name="model">${modelOptions(x.models,x.model)}</select></div>
+  <div><label class="oc-flabel">Global daily request limit</label><input class="oc-input" name="global_daily_limit" type="number" min="1" value="${esc(x.global_daily_limit||500)}"></div>
+  <div><label class="oc-flabel">Zudo status</label><select class="oc-select" name="enabled"><option value="true" ${x.enabled?'selected':''}>Enabled</option><option value="false" ${!x.enabled?'selected':''}>Disabled</option></select></div></div>
+  <div style="display:flex;justify-content:flex-end"><button type="submit" class="oc-btn">Save Zudo configuration</button></div></form></div></div>
+ <div class="oc-card"><div class="oc-cardhead"><h2>Business AI Health controls</h2><p>Read-only, license-controlled report generator using the same provider connections as Zudo.</p></div><div class="oc-cardbody">
+  <div class="oc-cards" style="margin-bottom:15px">${ocStat('Global daily limit',h.global_daily_limit||0,`used today: ${h.usedToday||0}`,ocIcon('activity'),'accent')}${ocStat('Status',h.enabled?'Enabled':'Disabled','','',h.enabled?'ok':'neu')}${ocStat('License control','Plan based','per-shop daily report allowance','','info')}</div>
+  <form id="healthConfig" class="oc-formgrid">
+   <div class="oc-fgrid"><div><label class="oc-flabel">AI model</label><select class="oc-select" name="model">${modelOptions(h.models,h.model)}</select></div>
+   <div><label class="oc-flabel">Global daily report limit</label><input class="oc-input" name="global_daily_limit" type="number" min="1" value="${esc(h.global_daily_limit||100)}"></div>
+   <div><label class="oc-flabel">Business AI Health status</label><select class="oc-select" name="enabled"><option value="true" ${h.enabled?'selected':''}>Enabled</option><option value="false" ${!h.enabled?'selected':''}>Disabled</option></select></div></div>
+   <div style="display:flex;justify-content:flex-end"><button type="submit" class="oc-btn">Save Business AI Health controls</button></div></form>
+  <hr class="oc-rule"><div class="oc-cardhead" style="padding:0"><div><h2>Recent AI Business Health reports</h2><p>Latest 100 reports across all shops.</p></div></div><div id="healthOwnerLogs" style="margin-top:10px"><div class="oc-loading"><span class="oc-spin"></span>Loading reports…</div></div></div></div>
+ <div class="oc-card is-flush"><div class="oc-cardhead"><h2>Zudo conversation logs</h2><p>Latest 100 conversations. Click a row to open the conversation viewer.</p></div><div class="oc-cardbody" id="zudoOwnerLogs"><div class="oc-loading"><span class="oc-spin"></span>Loading logs…</div></div></div>`);
+ async function loadLogs(){try{
+  const logs=await api('platform/zudo/logs');
+  const box=$('#zudoOwnerLogs');
+  box.innerHTML=logs.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Created</th><th>Shop ID</th><th>User ID</th><th>Conversation</th><th>Status</th><th>Updated</th><th style="text-align:right">Action</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDT(l.created_at)}</td><td><code class="oc-code">${esc(l.shop_code||'—')}</code></td><td class="oc-mut">${esc(l.user_login_id||'—')}</td><td><b>${esc(l.title)}</b></td><td>${l.shop_deleted_at?'<span class="oc-pill warn">Hidden by shop</span>':'<span class="oc-pill ok">Visible</span>'}</td><td class="oc-mut" style="white-space:nowrap">${ocDT(l.updated_at)}</td><td><div class="oc-acts"><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-oc-zlog="${l.id}">${ocIcon('eye')}View</button></div></td></tr>`).join('')}</tbody></table>`):ocEmpty(ocIcon('msg'),'No Zudo conversations yet','When staff and administrators chat with Zudo, conversations appear here.');
+  document.querySelectorAll('[data-oc-zlog]').forEach(r=>r.onclick=()=>zudoLogModal(r.dataset.ocZlog));
+ }catch(e){$('#zudoOwnerLogs').innerHTML=ocEmpty(ocIcon('alert'),'Logs unavailable',esc(e.message))}}
+ loadLogs();
+ async function loadHealthLogs(){try{
+  const logs=await api('platform/business-health/logs');
+  const box=$('#healthOwnerLogs');
+  box.innerHTML=logs.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Created</th><th>Store ID</th><th>Period</th><th>Score</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDT(l.created_at)}</td><td><code class="oc-code">${esc(l.store_id)}</code></td><td class="oc-mut">${esc(l.start_date)} — ${esc(l.end_date)}</td><td><span class="oc-pill ${Number(l.score)>=80?'ok':Number(l.score)>=60?'warn':'err'}">${esc(l.score)}/100</span></td></tr>`).join('')}</tbody></table>`):ocEmpty(ocIcon('chart'),'No Business AI Health reports yet','Reports generated by shops appear here.');
+ }catch(e){$('#healthOwnerLogs').innerHTML=ocEmpty(ocIcon('alert'),'Reports unavailable',esc(e.message))}}
+ loadHealthLogs();
+ $('#zudoConfig').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{
+  await api('platform/zudo',{method:'PATCH',body:JSON.stringify(b)});toast('Zudo configuration saved.');ownerZudo();
+ }catch(err){toast(err.message)}};
+ $('#healthConfig').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{
+  await api('platform/business-health',{method:'PATCH',body:JSON.stringify(b)});toast('Business AI Health controls saved.');ownerZudo();
+ }catch(err){toast(err.message)}};
+}
+async function zudoLogModal(id){
+ try{
+  const d=await api('platform/zudo/conversation/'+id);
+  const dlg=ocDialog({title:'Zudo conversation',icon:ocIcon('msg'),tone:'info',size:'lg',
+  body:`<div class="oc-dl" style="margin-bottom:14px"><div class="oc-di"><small>Title</small><div>${esc(d.title||'—')}</div></div><div class="oc-di"><small>Messages</small><div>${d.messages?.length||0}</div></div></div>
+  <div style="display:flex;flex-direction:column;gap:10px;max-height:52vh;overflow-y:auto;padding-right:4px">${(d.messages||[]).map(m=>`<div style="align-self:${m.role==='assistant'?'flex-start':'flex-end'};max-width:85%"><div style="padding:9px 13px;border-radius:12px;font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word;background:${m.role==='assistant'?'var(--oc-neu-soft)':'var(--oc-accent)'};color:${m.role==='assistant'?'var(--oc-text)':'#fff'}">${esc(m.content)}</div><div class="oc-mut" style="font-size:10.6px;margin:3px 4px 0">${m.role==='assistant'?'Zudo':'User'} · ${ocDT(m.created_at)}</div></div>`).join('')||ocEmpty(ocIcon('msg'),'No messages')}</div>`});
+ }catch(e){toast('Conversation could not be loaded: '+e.message)}
+}
+
+/* ---------- TrueBill (owner) ---------- */
+async function ownerTrueBill(){
+ const [settings,scans]=await Promise.all([api('platform/addons'),api('platform/truebill/scans').catch(()=>[])]);
+ const tb=settings.find(x=>x.addon_key==='truebill');
+ $('#page').innerHTML=ocView(ocHead('TrueBill','Invoice QR verification. Scan records are written whenever an invoice QR is verified on the public site.',tb?'<button type="button" class="oc-btn oc-btn-secondary" id="tbSetup">Setup TrueBill</button>':'')+`
+ <div class="oc-cards">
+  ${ocStat('Status',tb&&tb.enabled?'Active':'Inactive','add-on visibility for shop checkout','',(tb&&tb.enabled)?'ok':'neu')}
+  ${ocStat('Price',`৳ ${Number(tb?.unit_price||0).toLocaleString('en-BD')}`,'per day of validity','','accent')}
+  ${ocStat('Validity range',tb?`${tb.min_days}–${tb.max_days} days`:'—','choose at purchase','','info')}
+  ${ocStat('Verification URL',esc(tb?.url||'Public base URL'),'used in QR codes','','info')}
+ </div>
+ ${tb&&tb.enabled?`<div class="oc-card"><div class="oc-cardhead"><h2>How it works</h2></div><div class="oc-cardbody"><ul class="oc-chk"><li><span class="oc-ch">${ocIcon('check')}</span>Every posted invoice gets a unique verification QR when TrueBill is active on the license or add-on.</li><li><span class="oc-ch">${ocIcon('check')}</span>Scanning opens the public EMS verification page — each scan is recorded below.</li><li><span class="oc-ch">${ocIcon('check')}</span>Coverage is controlled by license plans and add-on sales; no daily limit applies.</li></ul></div></div>`:''}
+ <div class="oc-card is-flush"><div class="oc-cardhead"><h2>Verification scans</h2><p>Recorded when someone scans a TrueBill QR code on an invoice.</p></div><div class="oc-cardbody">${scans.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Scanned at</th><th>Shop ID</th><th>Administrator ID</th><th>Invoice no.</th><th>Kind</th></tr></thead><tbody>${scans.map(s=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDT(s.scanned_at)}</td><td><code class="oc-code">${esc(s.shop_code||'—')}</code></td><td><code class="oc-code">${esc(s.admin_code||'—')}</code></td><td><b>${esc(s.invoice_number)}</b></td><td><span class="oc-tag">${esc(s.invoice_kind||'—')}</span></td></tr>`).join('')}</tbody></table>`):ocEmpty(ocIcon('qr'),'No scans yet','Scans appear here the first time an invoice QR code is verified.')}</div></div>`);
+ if(tb)$('#tbSetup').onclick=()=>addonSetup(tb,ownerTrueBill);
+}
+
+/* ---------- Vaultium (owner) ---------- */
+async function ownerVaultium(){
+ const d=await api('platform/vaultium');
+ const bd=d.breakdown||[];
+ $('#page').innerHTML=ocView(ocHead('Vaultium','Cloud file storage attached to invoices and expenses. Storage GB is allocated through license plans and add-ons.')+`
+ <div class="oc-cards">
+  ${ocStat('R2 binding',d.r2Binding?'Ready':'Missing',d.r2Binding?'Bucket connected':'Add VAULTIUM binding in Cloudflare','',d.r2Binding?'ok':'err')}
+  ${ocStat('Storage used',`${d.usedGB||0} GB`,'across all shops','','accent')}
+  ${ocStat('Files',d.files||0,'documents & images','','info')}
+  ${ocStat('Allocation','Add-on based','license plans / add-ons control GB','','neu')}
+ </div>
+ <div class="oc-card is-flush"><div class="oc-cardhead"><h2>Shop usage</h2><p>Storage used per shop, with administrator short ID, allowance, period and status.</p></div><div class="oc-cardbody">
+ ${bd.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Shop ID</th><th>Administrator ID</th><th>Limit</th><th>Usage</th><th>Period (expires)</th><th>Status</th></tr></thead><tbody>${bd.map(x=>{const lim=Number(x.limit||0),used=Number(x.usedGB||0),pct=lim>0?Math.min(100,used/lim*100):0;return `<tr><td><code class="oc-code">${esc(x.shop_code||'—')}</code></td><td><code class="oc-code">${esc(x.admin_code||'—')}</code></td><td>${x.limit?x.limit+' GB':'—'}</td><td><div style="min-width:140px"><b>${x.usedGB} GB</b>${lim>0?`<div class="oc-progress ${pct>=90?'':'ok'}" style="margin-top:3px"><i style="width:${pct}%"></i></div>`:''}</div></td><td class="oc-mut">${x.expires?ocDate(x.expires):'—'}</td><td><span class="oc-pill ${x.status==='Active'?'ok':'neu'}">${esc(x.status)}</span></td></tr>`}).join('')}</tbody></table>`):ocEmpty(ocIcon('file'),'No files uploaded yet','Once shops attach files through Vaultium, usage appears here.')}</div></div>
+ <div class="oc-card"><div class="oc-cardhead"><h2>Cloudflare R2 setup</h2></div><div class="oc-cardbody"><p class="oc-dsub" style="margin:0 0 8px">Create an R2 bucket in your Cloudflare account and bind it as <b>VAULTIUM</b> in this Pages project (Settings → Functions → R2 bucket bindings). No other configuration is needed — you control pricing and GB via license plans and add-on Setup.</p></div></div>`);
+}
+
+/* ---------- HelpDesk (owner) ---------- */
+async function ownerHelpdesk(){
+ const moneyT=v=>ocDT(v);
+ let list=[],currentAdmin=null;
+ const convMessages=m=>m.length?m.map(x=>`<div class="oc-hdmsg ${x.sender_type==='admin'?'them':'me'}"><div class="oc-hdbub">${esc(x.content).replace(/\n/g,'<br>')}</div><span class="oc-hdt">${moneyT(x.created_at)}</span></div>`).join(''):'';
+ const renderList=()=>{
+  const box=$('#hdList');if(!box)return;
+  box.innerHTML=list.length?list.map(a=>`<button type="button" class="oc-hditem ${currentAdmin===a.id?'on':''}" data-hd-admin="${a.id}">
+   <span class="oc-ava2">${esc((a.name||'?').slice(0,1).toUpperCase())}</span>
+   <span class="oc-hdmeta"><b>${esc(a.name)}</b><small>#${esc(a.admin_code||'—')} · ${esc(a.email||'')}</small><em>${a.last_message?esc(a.last_message.slice(0,52)):'No messages yet'}</em></span>
+   ${a.unread?`<em class="oc-hdb">${a.unread}</em>`:''}</button>`).join(''):'<div style="padding:22px 16px;text-align:center;color:var(--oc-mut)">No administrators yet.</div>';
+  document.querySelectorAll('#hdList [data-hd-admin]').forEach(x=>x.onclick=()=>openChat(x.dataset.hdAdmin));
+ };
+ const openChat=async adminId=>{
+  currentAdmin=adminId;
+  const a=list.find(x=>x.id===adminId);
+  const right=$('#hdConv');
+  right.innerHTML=`<div class="oc-hdconvhead"><span class="oc-ava2">${esc((a?.name||'?').slice(0,1).toUpperCase())}</span><div style="flex:1;min-width:0"><b>${esc(a?.name||'Administrator')}</b> <small class="oc-mut">#${esc(a?.admin_code||'—')} · ${esc(a?.email||'')}</small></div><span class="oc-pill ${a?.active!==false?'ok':'neu'}">${a?.active!==false?'Active':'Inactive'}</span></div>
+  <div class="oc-hdmsgs" id="hdConvMsgs"><div class="oc-loading"><span class="oc-spin"></span>Loading conversation…</div></div>
+  <form class="oc-hdcomp" id="hdConvForm"><textarea class="oc-textarea" id="hdConvInput" rows="1" placeholder="Reply to this administrator…"></textarea><button type="submit" class="oc-btn" aria-label="Send">${ocIcon('send')}</button></form>`;
+  renderList();
+  await api('platform/helpdesk/read',{method:'POST',body:JSON.stringify({adminId})}).catch(()=>{});
+  let c;
+  try{c=await api('platform/helpdesk/conversation/'+adminId)}catch(err){toast(err.message);return}
+  const msgs=$('#hdConvMsgs');msgs.innerHTML=convMessages(c.messages)||ocEmpty(ocIcon('msg'),'No messages yet','Say hello to this administrator.');
+  msgs.scrollTop=msgs.scrollHeight;
+  const ta=$('#hdConvInput');if(ta){const auto=()=>{ta.style.height='auto';ta.style.height=Math.min(130,ta.scrollHeight)+'px'};ta.oninput=auto}
+  $('#hdConvForm').onsubmit=async ev=>{ev.preventDefault();const input=$('#hdConvInput'),content=input.value.trim();if(!content)return;try{
+   await api('platform/helpdesk/send',{method:'POST',body:JSON.stringify({adminId,content})});
+   input.value='';input.style.height='auto';
+   const u=await api('platform/helpdesk/conversation/'+adminId);
+   const box=$('#hdConvMsgs');box.innerHTML=convMessages(u.messages);box.scrollTop=box.scrollHeight;
+   const fresh=await api('platform/helpdesk');list=fresh;renderList();updateBadge(list);
+  }catch(err){toast(err.message)}};
+ };
+ const updateBadge=arr=>{const n=arr.reduce((t,a)=>t+(a.unread||0),0),b=$('#ohbBadge');if(b){b.textContent=n;b.hidden=n===0}};
+ list=await api('platform/helpdesk');
+ $('#page').innerHTML=ocView(ocHead('HelpDesk','One continuous conversation thread with each administrator.')+`
+ <div class="oc-hd"><div class="oc-hdlist"><div class="oc-hdsearch">${ocSearch('Search administrators…',' id="hdSearch"')}</div><div class="oc-hdrows" id="hdList"></div></div>
+ <section class="oc-hdconv" id="hdConv"><div class="oc-hdempty"><span class="oc-icob" style="width:46px;height:46px;margin:0 auto 12px">${ocIcon('msg')}</span><b>Select an administrator</b><p>Choose a conversation on the left to view and reply to their messages.</p></div></section></div>`);
+ updateBadge(list);
+ const s=$('#hdSearch');if(s)s.oninput=e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('#hdList .oc-hditem').forEach(x=>x.hidden=!x.textContent.toLowerCase().includes(q))};
+ renderList();
+}
+
+/* ---------- Premium Add-Ons (owner) ---------- */
+async function ownerAddons(){
+ const [settings,purchases]=await Promise.all([api('platform/addons'),api('platform/addon-purchases')]);
+ const money=v=>Number(v||0).toLocaleString('en-BD');
+ let filter='all';
+ const pending=purchases.filter(x=>x.status==='pending');
+ const data=()=>purchases.filter(x=>filter==='all'||x.status===filter);
+ const render=()=>{
+  const rows=data();
+  $('#page').innerHTML=ocView(ocHead('Premium Add-Ons','Optional paid services — ConnectX email, Zudo AI, AI Business Health, TrueBill verification and Vaultium storage.',
+  `<button type="button" class="oc-btn oc-btn-secondary" id="addonCheckoutSetup">Payment &amp; coupon setup</button>`)+`
+  <div class="oc-cards">
+   ${ocStat('Add-ons',settings.length,'configured services','','accent')}
+   ${ocStat('Active for shops',settings.filter(x=>x.enabled).length,'purchasable right now','','ok')}
+   ${ocStat('Pending purchases',pending.length,'awaiting review','','warn')}
+   ${ocStat('Collected (active)',`৳ ${money(purchases.filter(x=>x.status==='active').reduce((t,x)=>t+Math.max(0,Number(x.amount)-Number(x.discount_amount)),0))}`,'from approved add-on sales','','info')}
+  </div>
+  <div class="oc-owneraddons" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(252px,1fr));gap:14px;margin-bottom:18px">
+   ${settings.map(x=>`<div class="oc-card" style="margin:0;display:flex;flex-direction:column"><div class="oc-cardbody" style="display:flex;flex-direction:column;gap:9px;flex:1">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div class="addonArt" style="height:56px;width:56px;border-radius:10px;background:var(--oc-surface2);border:1px solid var(--oc-line2);display:grid;place-items:center;overflow:hidden;flex:0 0 auto">${addonArt(x)}</div><span class="oc-pill ${x.enabled?'ok':'neu'}">${x.enabled?'Active':'Inactive'}</span></div>
+    <h3 style="margin:0;font-size:14.6px">${esc(addonName(x))}</h3>
+    <p style="margin:0;font-size:12.4px;color:var(--oc-mut);line-height:1.5;flex:1">${esc(x.details||'')}</p>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:11.4px"><span class="oc-tag">৳ ${money(x.unit_price)}${x.addon_key==='vaultium'?'/month':'/day'}</span><span class="oc-tag">${x.addon_key==='vaultium'?x.min_days+'–'+x.max_days+' mo':x.min_days+'–'+x.max_days+' d'}</span>${x.addon_key!=='truebill'&&x.addon_key!=='vaultium'?`<span class="oc-tag">${x.min_daily_limit}–${x.max_daily_limit}/d</span>`:''}</div>
+    <div style="display:flex;justify-content:flex-end"><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-addon-setup="${x.addon_key}">Setup</button></div></div></div>`).join('')}
+  </div>
+  <div class="oc-card is-flush"><div class="oc-cardhead"><div><h2>Purchase requests</h2><p>Approve after verifying the bKash / Nagad transaction ID in the merchant portal.</p></div></div>
+  <div class="oc-cardbody" style="padding-top:4px">
+   <div class="oc-filters" style="margin:8px 0 13px">${[['all','All'],['pending','Pending'],['active','Active'],['rejected','Rejected'],['expired','Expired']].map(([f,l])=>`<button type="button" class="oc-fchip ${filter===f?'on':''}" data-oc-f="${f}">${l}</button>`).join('')}</div>
+   ${rows.length?ocTblWrap(`<table class="oc-tbl"><thead><tr><th>Requested</th><th>Administrator</th><th>Add-on</th><th class="num">Amount</th><th class="num">Discount</th><th class="num">Payable</th><th>Payment</th><th>Transaction ID</th><th>Status</th><th style="text-align:right">Action</th></tr></thead><tbody>
+   ${rows.map(x=>`<tr><td class="oc-mut" style="white-space:nowrap">${ocDate(x.created_at)}</td>
+   <td><div class="oc-cellstack"><b>${esc(x.administrators?.name||'—')}</b><small><code class="oc-code">${x.administrators?.admin_code?('#'+esc(x.administrators.admin_code)):'—'}</code></small></div></td>
+   <td><b>${esc(ADDON_NAMES[x.addon_key]||x.addon_key)}</b><div class="oc-mut" style="font-size:11.6px">${x.addon_key==='vaultium'?x.validity_days+' months · '+x.daily_limit+' GB':x.addon_key==='truebill'?x.validity_days+' days':x.validity_days+' days · '+x.daily_limit+'/day'}</div></td>
+   <td class="num">${money(x.amount)} BDT</td>
+   <td class="num oc-mut">${Number(x.discount_amount||0)?'− '+money(x.discount_amount)+' BDT':'—'}</td>
+   <td class="num"><b>${money(Math.max(0,Number(x.amount||0)-Number(x.discount_amount||0)))} BDT</b></td>
+   <td><span class="oc-tag">${esc(x.payment_method||'—')}</span><div class="oc-mut" style="font-size:11.5px">${esc(x.payment_number||'')}</div></td>
+   <td><code class="oc-code">${esc(x.transaction_id||'—')}</code>${x.coupon_code?`<div class="oc-mut" style="font-size:11.5px">${esc(x.coupon_code)}</div>`:''}</td>
+   <td><span class="oc-pill ${x.status==='active'?'ok':x.status==='pending'?'warn':x.status==='rejected'?'err':'neu'}">${esc(x.status)}</span>${x.expires_at?`<div class="oc-mut" style="font-size:11px">${ocDate(x.expires_at)}</div>`:''}</td>
+   <td><div class="oc-acts">${x.status==='pending'?`<button type="button" class="oc-btn oc-btn-ok oc-btn-sm" data-oc-addappr="${x.id}">${ocIcon('check')}Approve</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-oc-addrej="${x.id}">Reject</button>`:`<span class="oc-mut" style="font-size:12px">Reviewed</span>`}</div></td></tr>`).join('')}</tbody></table>`):ocEmpty(ocIcon('gem'),'No purchase requests','Purchase requests from administrators appear here.')}
+  </div></div>`);
+  document.querySelectorAll('[data-oc-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.ocF;render()});
+  document.querySelectorAll('[data-addon-setup]').forEach(b=>b.onclick=()=>addonSetup(settings.find(x=>x.addon_key===b.dataset.addonSetup),ownerAddons));
+  document.querySelectorAll('[data-oc-addappr]').forEach(b=>b.onclick=()=>ocAddonReview(b.dataset.ocAddappr,'active','addons'));
+  document.querySelectorAll('[data-oc-addrej]').forEach(b=>b.onclick=()=>ocAddonReview(b.dataset.ocAddrej,'rejected','addons'));
+  $('#addonCheckoutSetup').onclick=async()=>{
+   try{
+    const c=await api('platform/addon-checkout');
+    const dlg=ocDialog({title:'Payment & coupon setup',icon:ocIcon('tag'),tone:'info',size:'lg',
+    body:`<div style="display:grid;gap:18px">
+     <form id="cpPayForm" class="oc-formgrid"><div><h3 style="margin:0 0 3px;font-size:14px">Checkout payment instructions</h3><p class="oc-hint" style="margin:2px 0 9px">Shown to administrators at add-on checkout.</p><label class="oc-flabel">Instructions</label><textarea class="oc-textarea" name="payment_info" rows="3">${esc(c.settings?.payment_info||'')}</textarea><div style="display:flex;justify-content:flex-end;margin-top:9px"><button type="submit" class="oc-btn oc-btn-secondary oc-btn-sm">Save payment instructions</button></div></div></form>
+     <div><h3 style="margin:0 0 9px;font-size:14px">Coupon codes</h3><div id="cpCouponList" class="oc-cplist"></div>
+     <form id="cpAddForm" class="oc-fgrid" style="margin-top:10px;grid-template-columns:1fr 110px auto;align-items:end"><div><label class="oc-flabel">Code</label><input class="oc-input" name="code" placeholder="OFFER20" maxlength="20" required></div><div><label class="oc-flabel">% off</label><input class="oc-input" name="percent_off" type="number" min="1" max="100" placeholder="20" required></div><button type="submit" class="oc-btn oc-btn-sm">Add coupon</button></form></div></div>`});
+    const renderCoupons=()=>{const box=dlg.body.querySelector('#cpCouponList');
+     box.innerHTML=c.coupons.length?`<div style="display:grid;gap:7px">${c.coupons.map(cp=>`<div style="display:flex;align-items:center;gap:10px;border:1px solid var(--oc-line);border-radius:8px;padding:8px 11px"><code class="oc-code">${esc(cp.code)}</code><span class="oc-pill accent">${cp.percent_off}% off</span><div style="flex:1"></div><span class="oc-pill ${cp.active?'ok':'neu'}">${cp.active?'Active':'Inactive'}</span><button type="button" class="oc-btn oc-btn-secondary oc-btn-sm" data-cp-toggle="${esc(cp.code)}">Toggle</button><button type="button" class="oc-btn oc-btn-dangerghost oc-btn-sm" data-cp-del="${esc(cp.code)}">Delete</button></div>`).join('')}</div>`:'<p class="oc-mut">No coupons yet.</p>';
+     box.querySelectorAll('[data-cp-toggle]').forEach(b=>b.onclick=async()=>{const code=b.dataset.cpToggle,cur=c.coupons.find(x=>x.code===code);try{await api('platform/addon-coupons',{method:'PATCH',body:JSON.stringify({code,active:!cur.active})});cur.active=!cur.active;renderCoupons();toast('Coupon '+(cur.active?'activated.':'deactivated.'))}catch(err){toast(err.message)}});
+     box.querySelectorAll('[data-cp-del]').forEach(b=>b.onclick=async()=>{const code=b.dataset.cpDel;const ok=await ocConfirm({title:'Delete coupon',danger:true,confirmText:'Delete',message:`Delete coupon code ${code}? This cannot be undone.`});if(!ok)return;try{await api('platform/addon-coupons?code='+encodeURIComponent(code),{method:'DELETE'});c.coupons=c.coupons.filter(x=>x.code!==code);renderCoupons();toast('Coupon deleted.')}catch(err){toast(err.message)}});
+    };
+    renderCoupons();
+    dlg.body.querySelector('#cpPayForm').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));try{await api('platform/addon-checkout',{method:'PATCH',body:JSON.stringify({payment_info:b.payment_info})});toast('Payment instructions saved.')}catch(err){toast(err.message)}};
+    dlg.body.querySelector('#cpAddForm').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));try{const x=await api('platform/addon-coupons',{method:'POST',body:JSON.stringify({code:b.code,percent_off:+b.percent_off,active:true})});c.coupons.unshift(x);renderCoupons();ev.target.reset();toast('Coupon added.')}catch(err){toast(err.message)}};
+   }catch(err){toast(err.message)}
   };
-  const addPage=async slug=>{try{await api('platform/pages',{method:'POST',body:JSON.stringify({slug})});toast('Standard page added.');ownerWebsitePages()}catch(err){toast(err.message)}};
-  $('#addMissingPages').onclick=async()=>{const missing=standard.filter(([slug])=>!bySlug[slug]);if(!missing.length)return toast('All standard public pages already exist.');for(const [slug] of missing)await addPage(slug)};
-  document.querySelectorAll('[data-edit-page]').forEach(x=>x.onclick=()=>editPage(x.dataset.editPage));
-  document.querySelectorAll('[data-add-page]').forEach(x=>x.onclick=()=>addPage(x.dataset.addPage));
+ };
+ render();
+}
+function addonSetup(x,after){
+ const noLimit=addonNoLimit(x),isVault=addonIsVault(x);
+ const d=ocDialog({title:esc(addonName(x))+' setup',icon:ocIcon('gem'),tone:'info',size:'lg',
+ body:`<form id="ocAddonForm" class="oc-formgrid">
+  <div><label class="oc-flabel">Title</label><input class="oc-input" name="title" value="${esc(x.title||'')}" placeholder="${esc(ADDON_NAMES[x.addon_key]||'')}"></div>
+  ${noLimit?`<div><label class="oc-flabel">Verification URL <span class="oc-opt">(base URL for QR codes)</span></label><input class="oc-input" name="url" type="url" value="${esc(x.url||'')}" placeholder="https://ems.example.com"></div>`:''}
+  <div><label class="oc-flabel">Image URL (PNG)</label><input class="oc-input" name="image_url" type="url" value="${esc(x.image_url||'')}" placeholder="https://example.com/addon.png"></div>
+  <div class="oc-fgrid">
+   <div><label class="oc-flabel">Status</label><select class="oc-select" name="enabled"><option value="true" ${x.enabled?'selected':''}>Active</option><option value="false" ${!x.enabled?'selected':''}>Inactive</option></select></div>
+   <div><label class="oc-flabel">Unit price${isVault?' (per month)':''}</label><input class="oc-input" name="unit_price" type="number" step=".01" value="${x.unit_price}"></div>
+   <div><label class="oc-flabel">Minimum ${isVault?'months':'days'}</label><input class="oc-input" name="min_days" type="number" value="${x.min_days}"></div>
+   <div><label class="oc-flabel">Maximum ${isVault?'months':'days'}</label><input class="oc-input" name="max_days" type="number" value="${x.max_days}"></div>
+   ${noLimit?'':`<div><label class="oc-flabel">Minimum ${isVault?'GB':'daily limit'}</label><input class="oc-input" name="min_daily_limit" type="number" value="${x.min_daily_limit}"></div>
+   <div><label class="oc-flabel">Maximum ${isVault?'GB':'daily limit'}</label><input class="oc-input" name="max_daily_limit" type="number" value="${x.max_daily_limit}"></div>`}
+  </div>
+  <div><label class="oc-flabel">Details</label><textarea class="oc-textarea" name="details" rows="3">${esc(x.details)}</textarea></div></form>`});
+ const form=d.body.querySelector('#ocAddonForm');
+ const btn=document.createElement('button');btn.type='submit';btn.className='oc-btn oc-btn-sm';btn.textContent='Save setup';btn.form='ocAddonForm';
+ d.el.querySelector('.oc-df').appendChild(btn);
+ form.onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(form));Object.assign(b,{addon_key:x.addon_key,title:b.title,url:noLimit?(b.url?String(b.url).trim():null):null,image_url:b.image_url?String(b.image_url).trim():null,enabled:b.enabled==='true',unit_price:+b.unit_price,min_days:+b.min_days,max_days:+b.max_days,min_daily_limit:noLimit?1:(+b.min_daily_limit||1),max_daily_limit:noLimit?1:(+b.max_daily_limit||1)});try{
+  await api('platform/addons',{method:'PATCH',body:JSON.stringify(b)});
+  d.close();toast('Add-on setup saved.');(after||ownerAddons)();
+ }catch(err){toast(err.message)}};
+}
+
+/* ---------- Factory reset ---------- */
+async function ownerFactoryReset(){
+ $('#page').innerHTML=ocView(ocHead('Factory reset','Danger zone — permanently wipes the entire EMS platform.')+`
+ <div class="oc-card" style="border-color:var(--oc-err-line);max-width:760px"><div class="oc-cardhead"><h2 style="color:var(--oc-err)">Factory reset EMS</h2></div>
+ <div class="oc-cardbody">
+  ${ocCall('danger','<b>This permanently deletes ALL data</b> — administrators, shops, invoices, inventory, customers, suppliers, expenses, staff, licenses, add-ons, TrueBill scans, HelpDesk messages, Vaultium files and all platform settings — then re-seeds the defaults. This cannot be undone.')}
+  <div class="oc-formgrid"><div><label class="oc-flabel">Type <code class="oc-code" style="font-size:12px">FACTORY RESET EMS</code> to confirm</label><input class="oc-input" id="frConfirm" placeholder="FACTORY RESET EMS" autocomplete="off" style="max-width:320px"></div>
+  <div style="display:flex;gap:9px"><button type="button" class="oc-btn oc-btn-danger" id="frGo">${ocIcon('alert')}Factory reset EMS</button><button type="button" class="oc-btn oc-btn-secondary" data-oc-go="overview">Cancel</button></div></div>
+ </div></div>`);
+ const go=$('#frGo');
+ const upd=()=>{go.disabled=$('#frConfirm').value.trim()!=='FACTORY RESET EMS'};
+ $('#frConfirm').oninput=upd;upd();
+ go.onclick=async()=>{
+  const c=$('#frConfirm').value.trim();
+  const ok=await ocConfirm({title:'Factory reset EMS',danger:true,confirmText:'Reset everything',message:'This permanently deletes ALL data. Continue?',detail:'<div class="oc-chk"><li><span class="oc-ch">'+ocIcon('x')+'</span>All administrators, shops, invoices and business records will be deleted</li><li><span class="oc-ch">'+ocIcon('x')+'</span>Default platform settings will be re-seeded</li><li><span class="oc-ch">'+ocIcon('x')+'</span>You will be signed out</li></div>'});
+  if(!ok)return;
+  try{await api('platform/factory-reset',{method:'POST',body:JSON.stringify({confirmation:c})});toast('Factory reset complete.');logout()}catch(e){toast(e.message)}
+ };
 }
 
 
-async function ownerBlogs(){let rows=await api('platform/blogs');$('#page').innerHTML=title('Blog posts','<button id="addBlog">+ New blog post</button>')+`<section class="panel"><div class="tablewrap"><table><thead><tr><th>Title</th><th>Status</th><th>Published</th><th>Action</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${esc(x.title)}</td><td>${x.published?'Published':'Draft'}</td><td>${x.published_at?new Date(x.published_at).toLocaleDateString():'—'}</td><td><button class="secondary" data-blog-edit="${x.id}">Edit</button></td></tr>`).join('')}</tbody></table></div></section>`;$('#addBlog').onclick=()=>blogModal();document.querySelectorAll('[data-blog-edit]').forEach(b=>b.onclick=()=>blogModal(rows.find(x=>x.id===b.dataset.blogEdit)))}
-function blogModal(post=null){let e=document.createElement('div');e.className='modal';e.innerHTML=`<form class="modalbox fields"><div class="modalhead"><h2>${post?'Edit':'New'} blog post</h2><button type="button">×</button></div><label>Title<input name="title" required value="${esc(post?.title||'')}"></label><label>Excerpt<input name="excerpt" value="${esc(post?.excerpt||'')}"></label><label>Cover image URL<input name="cover_image_url" value="${esc(post?.cover_image_url||'')}"></label><label>Article content<textarea name="body" rows="14" required>${esc(post?.body||'')}</textarea></label><label>Publication status<select name="published"><option value="false" ${!post?.published?'selected':''}>Draft</option><option value="true" ${post?.published?'selected':''}>Published</option></select></label><button>Save blog post</button></form>`;document.body.append(e);e.querySelector('[type=button]').onclick=()=>e.remove();e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));b.published=b.published==='true';try{await api(post?'platform/blog/'+post.id:'platform/blogs',{method:post?'PATCH':'POST',body:JSON.stringify(b)});e.remove();toast('Blog post saved.');ownerBlogs()}catch(err){toast(err.message)}}}
-async function ownerContactMessages(){let rows=await api('platform/contact-messages');$('#page').innerHTML=title('Contact messages')+`<section class="panel"><div class="tablewrap"><table><thead><tr><th>Date</th><th>Name</th><th>Email</th><th>Phone</th><th>Subject</th><th>Message</th><th>Status</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.created_at).toLocaleString()}</td><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(x.phone||'—')}</td><td>${esc(x.subject||'—')}</td><td>${esc(x.message)}</td><td>${esc(x.status)}</td></tr>`).join('')}</tbody></table></div></section>`}
-async function ownerZudo(){let [x,h]=await Promise.all([api('platform/zudo'),api('platform/business-health').catch(()=>({enabled:false,global_daily_limit:100,usedToday:0,aiBinding:false,models:null}))]);
-const prov=(ready,label,secret)=>`<section class="card"><small>${label}</small><strong>${ready?'Ready':'Missing'}</strong><span class="muted">${ready?'API key / binding detected':'Add secret: '+secret}</span></section>`;
-$('#page').innerHTML=title('Zudo AI configuration')+`<div class="cards">${prov(x.aiBinding,'Cloudflare Workers AI','AI binding')}${prov(x.geminiBinding,'Google AI Studio (Gemini)','GEMINI_API_KEY')}${prov(x.groqBinding,'Groq','GROQ_API_KEY')}${prov(x.cerebrasBinding,'Cerebras','CEREBRAS_API_KEY')}</div><div class="cards"><section class="card"><small>Global daily limit</small><strong>${x.global_daily_limit||0}</strong><span class="muted">Used today: ${x.usedToday||0}</span></section></div>
-<form class="panel fields" id="zudoConfig"><h2>Central Zudo controls</h2><p class="muted">Zudo is read-only. Pick any AI model below — if a provider hits a limit or fails, switch instantly.</p><label>AI model<select name="model">${modelOptions(x.models,x.model)}</select></label><div class="grid2"><label>Global daily request limit<input name="global_daily_limit" type="number" min="1" value="${esc(x.global_daily_limit||500)}"></label><label>Zudo status<select name="enabled"><option value="true" ${x.enabled?'selected':''}>Enabled</option><option value="false" ${!x.enabled?'selected':''}>Disabled</option></select></label></div><button>Save Zudo configuration</button></form>
-<section class="panel businessHealthOwner"><h2>Business AI Health controls</h2><p class="muted">This is a read-only, license-controlled report generator. It uses the same provider connections as Zudo.</p><div class="cards"><section class="card"><small>Global daily limit</small><strong>${h.global_daily_limit||0}</strong><span class="muted">Used today: ${h.usedToday||0}</span></section><section class="card"><small>License control</small><strong>Plan based</strong><span class="muted">Per-shop daily report allowance</span></section></div><form class="fields" id="healthConfig"><label>AI model<select name="model">${modelOptions(h.models,h.model)}</select></label><div class="grid2"><label>Global daily report limit<input name="global_daily_limit" type="number" min="1" value="${esc(h.global_daily_limit||100)}"></label><label>Business AI Health status<select name="enabled"><option value="true" ${h.enabled?'selected':''}>Enabled</option><option value="false" ${!h.enabled?'selected':''}>Disabled</option></select></label></div><button>Save Business AI Health controls</button></form><div id="healthOwnerLogs" class="muted">Loading Business AI Health logs…</div></section>
-<section class="panel"><h2>Zudo conversation logs</h2><div id="zudoOwnerLogs" class="muted">Loading logs…</div></section>`;
-async function loadLogs(){try{let logs=await api('platform/zudo/logs');$('#zudoOwnerLogs').innerHTML=logs.length?`<div class="tablewrap"><table><thead><tr><th>Created</th><th>Shop ID</th><th>User ID</th><th>Conversation</th><th>Status</th><th>Updated</th></tr></thead><tbody>${logs.map(l=>`<tr class="zudoLogRow" data-zudo-log="${l.id}"><td>${new Date(l.created_at).toLocaleString()}</td><td><code class="shopid">${esc(l.shop_code||'—')}</code></td><td>${esc(l.user_login_id||'—')}</td><td>${esc(l.title)}</td><td>${l.shop_deleted_at?'Hidden by shop':'Visible'}</td><td>${new Date(l.updated_at).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`:'No Zudo conversations yet.';document.querySelectorAll('[data-zudo-log]').forEach(r=>r.onclick=()=>zudoLogModal(r.dataset.zudoLog))}catch(e){$('#zudoOwnerLogs').textContent=e.message}}loadLogs();
-$('#zudoConfig').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{await api('platform/zudo',{method:'PATCH',body:JSON.stringify(b)});toast('Zudo configuration saved.');ownerZudo()}catch(err){toast(err.message)}};
-async function loadHealthLogs(){try{let logs=await api('platform/business-health/logs');$('#healthOwnerLogs').innerHTML=logs.length?`<div class="tablewrap"><table><thead><tr><th>Created</th><th>Shop ID</th><th>Period</th><th>Score</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.store_id)}</td><td>${esc(l.start_date)} — ${esc(l.end_date)}</td><td>${esc(l.score)}/100</td></tr>`).join('')}</tbody></table></div>`:'No Business AI Health reports yet.'}catch(e){$('#healthOwnerLogs').textContent=e.message}}loadHealthLogs();
-$('#healthConfig').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{await api('platform/business-health',{method:'PATCH',body:JSON.stringify(b)});toast('Business AI Health controls saved.');ownerZudo()}catch(err){toast(err.message)}}}
 
 
-async function ownerConnectX(){let x=await api('platform/connectx');$('#page').innerHTML=title('ConnectX configuration')+`<div class="cards"><section class="card"><small>Provider</small><strong>Brevo API</strong><span class="muted">${x.apiConfigured?'API key detected':'API key missing'}</span></section><section class="card"><small>Daily global limit</small><strong>${x.global_daily_limit||0}</strong><span class="muted">Used today: ${x.usedToday||0}</span></section><section class="card"><small>License control</small><strong>Plan based</strong><span class="muted">Per-shop daily email allowance</span></section></div><form class="panel fields" id="cxConfig"><h2>Central sender and limits</h2><p class="muted">Brevo credentials remain in Cloudflare encrypted secrets. Shop users never see provider credentials.</p><div class="grid2"><label>From name<input name="from_name" required value="${esc(x.from_name||'EMS ConnectX')}"></label><label>From email<input name="from_email" type="email" required value="${esc(x.from_email||'')}"></label><label>Reply-to email<input name="reply_to" type="email" value="${esc(x.reply_to||'')}"></label><label>Provider<input readonly value="Brevo API"></label><label>Global daily limit<input name="global_daily_limit" type="number" min="1" required value="${esc(x.global_daily_limit||300)}"></label></div><label>ConnectX status<select name="enabled"><option value="true" ${x.enabled?'selected':''}>Enabled</option><option value="false" ${!x.enabled?'selected':''}>Disabled</option></select></label><button>Save ConnectX configuration</button></form><section class="panel cxOwnerTest"><h2>Test Brevo connection</h2><p class="muted">Send one diagnostic test email. The result will show the exact provider response to EMS Owner only.</p><div class="grid2"><label>Test recipient email<input id="cxTestTo" type="email" placeholder="you@example.com"></label><div><label>&nbsp;</label><button id="cxTest">Send test email</button></div></div><div id="cxTestResult"></div></section><section class="panel"><h2>Recent ConnectX provider logs</h2><div id="cxOwnerLogs" class="muted">Loading logs…</div></section>`;async function loadLogs(){try{let logs=await api('platform/connectx/logs');$('#cxOwnerLogs').innerHTML=logs.length?`<div class="tablewrap"><table><thead><tr><th>Time</th><th>Recipient</th><th>Subject</th><th>Status</th><th>Provider result</th></tr></thead><tbody>${logs.map(l=>`<tr><td>${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.to_emails.join(', '))}</td><td>${esc(l.subject)}</td><td>${esc(l.status)}${l.shop_deleted_at?' · hidden by shop':''}</td><td>${esc(l.error_message||l.provider_message_id||'Accepted')}</td></tr>`).join('')}</tbody></table></div>`:'No ConnectX send attempts yet.'}catch(e){$('#cxOwnerLogs').textContent=e.message}}loadLogs();$('#cxConfig').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{await api('platform/connectx',{method:'PATCH',body:JSON.stringify(b)});toast('ConnectX configuration saved.');ownerConnectX()}catch(err){toast(err.message)}};$('#cxTest').onclick=async()=>{let b=$('#cxTest');b.disabled=true;$('#cxTestResult').textContent='Testing Brevo…';try{let r=await api('platform/connectx/test',{method:'POST',body:JSON.stringify({to:$('#cxTestTo').value})});$('#cxTestResult').innerHTML='<p class="cxTestSuccess">✓ Brevo accepted the test email. Message ID: '+esc(r.messageId||'received')+'</p>'}catch(e){$('#cxTestResult').innerHTML='<p class="cxTestError">✕ '+esc(e.message)+'</p>'}finally{b.disabled=false}}}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 async function report(){
   const [salesRows,purchaseRows,expenseRows]=await Promise.all([
     api('invoices?kind=sale'), api('invoices?kind=purchase'), api('expense')
@@ -532,10 +1337,7 @@ function vaultTable(files){
   const fmt=v=>{const n=Number(v||0);return n>=GB2?((n/GB2).toFixed(2)+' GB'):n>=MB2?((n/MB2).toFixed(1)+' MB'):(n>=KB2?((n/KB2).toFixed(0)+' KB'):n+' B')};
   return `<div class="tablewrap"><table><thead><tr><th>File</th><th>Invoice</th><th>Type</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead><tbody>${files.map(f=>`<tr><td>${esc(f.filename)}</td><td><code class="shopid">${esc(f.invoice_number||'—')}</code></td><td>${esc(f.content_type||'—')}</td><td>${fmt(f.size_bytes)}</td><td>${new Date(f.created_at).toLocaleString()}</td><td class="actions"><button class="secondary" data-vault-view="${f.id}">View</button><button class="secondary" data-vault-dl="${f.id}">Download</button><button class="danger" data-vault-del="${f.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>`;
 }
-async function ownerVaultium(){
-  const d=await api('platform/vaultium');
-  $('#page').innerHTML=title('Vaultium')+`<div class="cards"><section class="card"><small>Cloudflare R2 binding</small><strong>${d.r2Binding?'Ready':'Missing'}</strong><span class="muted">${d.r2Binding?'Bucket connected':'Add the VAULTIUM binding in Cloudflare'}</span></section><section class="card"><small>Total storage used</small><strong>${d.usedGB} GB</strong><span class="muted">${d.files} file(s) across all shops</span></section><section class="card"><small>Setup</small><strong>Add-on based</strong><span class="muted">License plans / add-ons control GB</span></section></div><section class="panel"><h2>Shop usage</h2><p class="muted">Storage used per shop, with administrator short ID, allowance, period and status.</p>${d.breakdown&&d.breakdown.length?`<div class="tablewrap"><table><thead><tr><th>Shop ID</th><th>Administrator ID</th><th>Limit</th><th>Usage</th><th>Period (expires)</th><th>Status</th></tr></thead><tbody>${d.breakdown.map(x=>`<tr><td><code class="shopid">${esc(x.shop_code||'—')}</code></td><td><code class="shopid">${esc(x.admin_code||'—')}</code></td><td>${x.limit?x.limit+' GB':'—'}</td><td>${esc(x.usedGB)} GB</td><td>${x.expires?new Date(x.expires).toLocaleDateString():'—'}</td><td><span class="attBadge ${x.status==='Active'?'present':'absent'}">${esc(x.status)}</span></td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No files uploaded yet.</p>'}</section><section class="panel"><h2>Cloudflare R2 setup</h2><p class="muted">Create an R2 bucket in your Cloudflare account and bind it as <b>VAULTIUM</b> in your Pages project (Settings → Functions → R2 bucket bindings). No other configuration is needed — the EMS Owner controls pricing and GB via the add-on Setup and license plans.</p></section>`;
-}
+
 async function dashboard(){let [d,snapshots,trend]=await Promise.all([api('dashboard'),api('dashboard/activity-snapshot'),api('dashboard/sales-trend').catch(e=>{console.error('sales-trend failed:',e);return null})]),values=[['Sales',d.sales.today,'#6366f1'],['Purchase',d.purchase.today,'#f59e0b'],['Expense',d.expense.today,'#f43f5e'],['Sales due',d.sales.dueToday,'#0ea5e9']],max=Math.max(1,...values.map(x=>Number(x[1])));$('#page').innerHTML=`<div class="cards">${[['Sales',d.sales,'#6366f1'],['Purchase',d.purchase,'#f59e0b'],['Expense',d.expense,'#f43f5e'],['Sales due',{lifetime:d.sales.dueLifetime,today:d.sales.dueToday},'#0ea5e9']].map(([n,v,c])=>`<section class="card dashboard-glass"><span class="kpiicon" style="background:${c}18;color:${c}">${n==='Sales'?'↗':n==='Purchase'?'↓':n==='Expense'?'−':n==='Sales due'?'⌁':'!'}</span><small>${n} · Lifetime / Today</small><strong>${n==='Low stock'?v.lifetime:money(v.lifetime)}</strong><span class="muted">Today: ${n==='Low stock'?v.today:money(v.today)}</span></section>`).join('')}</div><div class="dashcolumns"><section class="financialCard dashboard-glass"><div class="financialHead"><span class="financialIcon">↗</span><h2>Today’s Financial Chart</h2></div><hr><div class="financialTotal"><small>Total Transaction</small><strong>${money(values.slice(0,3).reduce((n,x)=>n+Number(x[1]),0))}</strong></div><div class="financialChart"><div class="financeYAxis">${[100,75,50,25,0].map(t=>`<span>${money(max*t/100)}</span>`).join('')}</div><div class="financeBody"><div class="financeGrid">${[1,2,3,4,5].map(()=>'<i></i>').join('')}</div><div class="financeBars">${values.map(([name,value,color])=>`<div class="financeBarGroup"><div class="financeTrack"><b>${money(value)}</b><i class="financeBar ${name==='Sales'?'sales':name==='Purchase'?'purchase':name==='Expense'?'expense':'due'}" style="height:${Math.max(3,Number(value)/max*100)}%"></i></div><span>${name}</span></div>`).join('')}</div><div class="financeXAxis"><span>0</span><span>${money(max/4)}</span><span>${money(max/2)}</span><span>${money(max*0.75)}</span><span>${money(max)}</span></div><small class="financeAxisLabel">Amount</small></div></div></section><section class="panel activitypanel dashboard-glass"><h2>Recent activity · last 24 hours</h2><div class="activitytable">${snapshots.length?`<div class="tablewrap"><table><thead><tr><th>Label</th><th>ID</th><th>Total</th><th>Paid</th><th>Due</th><th>Submitted by</th><th>Time</th></tr></thead><tbody>${snapshots.map(x=>`<tr><td><span class="activitytag ${x.label.toLowerCase()}">${esc(x.label)}</span></td><td>${esc(x.id)}</td><td>${x.total==='—'?'—':money(x.total)}</td><td>${x.paid==='—'?'—':money(x.paid)}</td><td>${x.due==='—'?'—':money(x.due)}</td><td>${esc(x.submittedBy)}</td><td>${ago(x.createdAt)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No sales, purchases, expenses, or inventory activity during the last 24 hours.</p>'}</div></section>${trend?salesTrendChart(trend):''}</div>`} 
 function table(rows,cols){if(!rows.length)return '<p class="muted">No records found.</p>';return `<div class="tablewrap"><table><thead><tr>${cols.map(c=>`<th>${c.replaceAll('_',' ')}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${cols.map(c=>`<td>${esc(r[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`}
 async function profile(){let p=await api('admin/profile');$('#page').innerHTML=title('My administrator profile')+`<form class="panel fields" id="profileForm"><div class="grid2"><label>Full name<input name="name" required value="${esc(p.name)}"></label><label>Phone<input name="phone" required value="${esc(p.phone)}"></label></div><label>Address<textarea name="address">${esc(p.address||'')}</textarea></label><label>Email<input name="email" type="email" required value="${esc(p.email)}"></label><label>New password <span class="muted">Leave blank to keep the existing password.</span><input name="password" type="password" minlength="10"></label><button>Save profile</button></form>`;$('#profileForm').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));if(!b.password)delete b.password;try{let x=await api('admin/profile',{method:'PATCH',body:JSON.stringify(b)});state.user.name=x.name;save(state);toast('Administrator profile updated.')}catch(x){toast(x.message)}}}
@@ -827,56 +1629,8 @@ function addonCartModal(x,refresh){
 }
 
 
-async function ownerTrueBill(){
-  const [settings,scans]=await Promise.all([api('platform/addons'),api('platform/truebill/scans').catch(()=>[])]);
-  const tb=settings.find(x=>x.addon_key==='truebill');
-  $('#page').innerHTML=title('TrueBill',tb?'<button id="tbSetup">Setup TrueBill</button>':'')+
-  `<div class="cards"><section class="card"><small>Status</small><strong>${tb&&tb.enabled?'Active':'Inactive'}</strong></section><section class="card"><small>Price per day</small><strong>${Number(tb?.unit_price||0).toLocaleString('en-BD')} BDT</strong></section><section class="card"><small>Validity range</small><strong>${tb?(tb.min_days+' – '+tb.max_days+' days'):'—'}</strong></section><section class="card"><small>Verification URL</small><strong class="muted">${esc(tb?.url||'Public base URL')}</strong></section></div>`+
-  `<section class="panel addonHistory"><h2>Verification scans</h2><p class="muted">Recorded when someone scans a TrueBill QR code on an invoice.</p>${scans.length?`<div class="tablewrap"><table><thead><tr><th>Scanned at</th><th>Shop ID</th><th>Administrator ID</th><th>Invoice no.</th><th>Kind</th></tr></thead><tbody>${scans.map(s=>`<tr><td>${new Date(s.scanned_at).toLocaleString()}</td><td><code class="shopid">${esc(s.shop_code||'—')}</code></td><td><code class="shopid">${esc(s.admin_code||'—')}</code></td><td>${esc(s.invoice_number)}</td><td>${esc(s.invoice_kind||'—')}</td></tr>`).join('')}</tbody></table></div>`:'<p class="muted">No scans yet.</p>'}</section>`;
-  if(tb)$('#tbSetup').onclick=()=>addonSetup(tb);
-}
-async function ownerAddons(){
-  const [settings,purchases]=await Promise.all([api('platform/addons'),api('platform/addon-purchases')]);
-  const money=v=>Number(v||0).toLocaleString('en-BD');
-  $('#page').innerHTML=title('Premium Add-Ons','<button id="addonCheckoutSetup">Payment & coupon setup</button>')+`<section class="addonGrid owner">${settings.map(x=>`<article class="addonCard">${addonArt(x)}<h2>${esc(addonName(x))}</h2><p>${esc(x.details||'Configure this add-on.')}</p><small>${x.enabled?'Active':'Inactive'}</small><button data-addon-setup="${x.addon_key}">Setup</button></article>`).join('')}</section><section class="panel addonHistory"><h2>Purchase requests</h2>${purchases.length?`<div class="tablewrap"><table><thead><tr><th>Admin</th><th>Add-on</th><th>Days</th><th>Daily limit</th><th>Amount</th><th>Discount</th><th>Payable</th><th>Payment</th><th>Transaction ID</th><th>Coupon</th><th>Requested</th><th>Status</th><th>Action</th></tr></thead><tbody>${purchases.map(x=>`<tr><td>${esc(x.administrators?.name||'—')}<br><small class="muted">${x.administrators?.admin_code?('#'+esc(x.administrators.admin_code)):''}</small></td><td>${esc(ADDON_NAMES[x.addon_key]||x.addon_key)}</td><td>${x.validity_days}</td><td>${x.addon_key==='vaultium'?x.daily_limit+' GB':x.daily_limit}</td><td>${money(x.amount)} BDT</td><td>${Number(x.discount_amount||0)?'−'+money(x.discount_amount)+' BDT':'—'}</td><td><b>${money(Math.max(0,Number(x.amount||0)-Number(x.discount_amount||0)))} BDT</b></td><td>${esc(x.payment_method)}<br><small>${esc(x.payment_number)}</small></td><td>${esc(x.transaction_id)}</td><td>${esc(x.coupon_code||'—')}</td><td>${new Date(x.created_at).toLocaleDateString()}</td><td><span class="statusBadge ${addonBadgeCls(x.status)}">${esc(x.status)}</span></td><td>${x.status==='pending'?`<button data-addon-review="${x.id}" data-status="active">Approve</button> <button class="danger" data-addon-review="${x.id}" data-status="rejected">Reject</button>`:'Reviewed'}</td></tr>`).join('')}</tbody></table></div>`:`<p class="muted">No purchase requests yet.</p>`}</section>`;
-  $('#addonCheckoutSetup').onclick=async()=>{try{const d=await api('platform/addon-checkout');const e=document.createElement('div');e.className='modal';e.innerHTML=`<div class="modalbox"><div class="modalhead"><h2>Payment & coupon setup</h2><button type="button" id="cpClose">×</button></div><form class="fields" id="cpPayForm"><h3>Checkout payment instructions</h3><label>Instructions shown to administrators at checkout<textarea name="payment_info" rows="3">${esc(d.settings?.payment_info||'')}</textarea></label><button>Save payment instructions</button></form><hr><div class="cpCoupons"><h3>Coupon codes</h3><div id="cpCouponList" class="cpCouponList"></div><form class="cpAddRow" id="cpAddForm"><input name="code" placeholder="COUPON CODE" maxlength="20"><input name="percent_off" type="number" min="1" max="100" placeholder="%"><button type="submit">Add coupon</button></form></div></div>`;document.body.append(e);e.querySelector('#cpClose').onclick=()=>e.remove();const renderCoupons=()=>{const box=e.querySelector('#cpCouponList');box.innerHTML=d.coupons.length?d.coupons.map(c=>`<div class="cpRow ${c.active?'':'off'}"><div class="cpCode"><b>${esc(c.code)}</b><small>${c.percent_off}% off</small></div><div class="cpActions"><button type="button" class="cpToggle ${c.active?'on':'off'}" data-cp-toggle="${esc(c.code)}">${c.active?'Active':'Inactive'}</button><button type="button" class="danger cpDel" data-cp-del="${esc(c.code)}">Delete</button></div></div>`).join(''):'<p class="muted">No coupons yet.</p>';box.querySelectorAll('[data-cp-toggle]').forEach(b=>b.onclick=async()=>{const code=b.dataset.cpToggle,cur=d.coupons.find(c=>c.code===code);try{await api('platform/addon-coupons',{method:'PATCH',body:JSON.stringify({code,active:!cur.active})});cur.active=!cur.active;renderCoupons();toast('Coupon '+(cur.active?'activated':'deactivated')+'.')}catch(err){toast(err.message)}});box.querySelectorAll('[data-cp-del]').forEach(b=>b.onclick=async()=>{const code=b.dataset.cpDel;if(!confirm('Delete coupon '+code+'?'))return;try{await api('platform/addon-coupons?code='+encodeURIComponent(code),{method:'DELETE'});d.coupons=d.coupons.filter(c=>c.code!==code);renderCoupons();toast('Coupon deleted.')}catch(err){toast(err.message)}})};renderCoupons();e.querySelector('#cpPayForm').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));try{await api('platform/addon-checkout',{method:'PATCH',body:JSON.stringify({payment_info:b.payment_info})});toast('Payment instructions saved.')}catch(err){toast(err.message)}};e.querySelector('#cpAddForm').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));try{const x=await api('platform/addon-coupons',{method:'POST',body:JSON.stringify({code:b.code,percent_off:+b.percent_off,active:true})});d.coupons.unshift(x);renderCoupons();ev.target.reset();toast('Coupon added.')}catch(err){toast(err.message)}}}catch(err){toast(err.message)}};
-  document.querySelectorAll('[data-addon-setup]').forEach(b=>b.onclick=()=>addonSetup(settings.find(x=>x.addon_key===b.dataset.addonSetup)));
-  document.querySelectorAll('[data-addon-review]').forEach(b=>b.onclick=async()=>{try{await api('platform/addon-purchases',{method:'PATCH',body:JSON.stringify({id:b.dataset.addonReview,status:b.dataset.status})});toast('Purchase reviewed.');ownerAddons()}catch(e){toast(e.message)}});
-}
-async function ownerHelpdesk(){
-  const moneyT=v=>new Date(v).toLocaleString([],{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
-  let list=[],currentAdmin=null;
-  const convMessages=m=>m.length?m.map(x=>`<div class="hdmsg ${x.sender_type==='admin'?'them':'me'}"><div class="hdmsgbody">${esc(x.content).replace(/\n/g,'<br>')}</div><span class="hdtime">${moneyT(x.created_at)}</span></div>`).join(''):'<div class="hdempty"><p>No messages yet. Say hello.</p></div>';
-  const renderList=()=>{
-    $('#hdList').innerHTML=list.length?list.map(a=>`<button class="hditem ${currentAdmin===a.id?'on':''}" data-hd-admin="${a.id}"><span class="hdavatar">${esc((a.name||'?').slice(0,1).toUpperCase())}</span><span class="hdmeta"><b>${esc(a.name)}</b><small>#${esc(a.admin_code||'—')} · ${esc(a.email||'')}</small><em>${a.last_message?esc(a.last_message.slice(0,46)):'No messages yet'}</em></span>${a.unread?`<span class="hdbadge hdunread">${a.unread}</span>`:''}</button>`).join(''):'<p class="muted">No administrators yet.</p>';
-    document.querySelectorAll('#hdList [data-hd-admin]').forEach(x=>x.onclick=()=>openChat(x.dataset.hdAdmin));
-  };
-  const openChat=async adminId=>{
-    currentAdmin=adminId;
-    const a=list.find(x=>x.id===adminId);
-    const right=$('#hdConv');
-    right.innerHTML=`<div class="hdconvhead"><div><h2>${esc(a?.name||'Administrator')}</h2><small class="muted">#${esc(a?.admin_code||'—')} · ${esc(a?.email||'')}</small></div></div><div class="hdmsgs" id="hdConvMsgs"><p class="muted">Loading…</p></div><form class="hdcomposer" id="hdConvForm"><textarea id="hdConvInput" rows="2" placeholder="Reply to this administrator…"></textarea><button type="submit">Send</button></form>`;
-    renderList();
-    await api('platform/helpdesk/read',{method:'POST',body:JSON.stringify({adminId})}).catch(()=>{});
-    let d;
-    try{d=await api('platform/helpdesk/conversation/'+adminId)}catch(err){toast(err.message);return}
-    const msgs=$('#hdConvMsgs');msgs.innerHTML=convMessages(d.messages);msgs.scrollTop=msgs.scrollHeight;
-    $('#hdConvForm').onsubmit=async ev=>{ev.preventDefault();const input=$('#hdConvInput'),content=input.value.trim();if(!content)return;try{await api('platform/helpdesk/send',{method:'POST',body:JSON.stringify({adminId,content})});input.value='';const u=await api('platform/helpdesk/conversation/'+adminId);$('#hdConvMsgs').innerHTML=convMessages(u.messages);const box=$('#hdConvMsgs');box.scrollTop=box.scrollHeight}catch(err){toast(err.message)}};
-  };
-  list=await api('platform/helpdesk');
-  $('#page').innerHTML=title('HelpDesk')+`<section class="panel hdowner hdsplit"><aside class="hdpanel"><div class="hdhead2"><div><h2>Administrators</h2></div><input id="hdSearch" placeholder="Search…"></div><div class="hdlist" id="hdList"></div></aside><section class="hdconv" id="hdConv"><div class="hdempty"><b>Select an administrator</b><p>Choose a conversation on the left to view and reply to their messages.</p></div></section></section>`;
-  const totalUnread=list.reduce((n,a)=>n+a.unread,0),b=$('#ohbBadge');if(b){b.textContent=totalUnread;b.hidden=totalUnread===0}
-  $('#hdSearch').oninput=e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('#hdList .hditem').forEach(x=>x.hidden=!x.textContent.toLowerCase().includes(q))};
-  renderList();
-}
-async function ownerFactoryReset(){
-  $('#page').innerHTML=title('Factory reset')+`<section class="panel"><h2>Factory reset EMS</h2><p class="muted">This permanently deletes ALL data — administrators, shops, invoices, inventory, customers, suppliers, expenses, staff, licenses, add-ons, TrueBill scans, HelpDesk messages, Vaultium files, and all platform settings — then re-seeds the defaults. This cannot be undone.</p><label>Confirmation text<input id="frConfirm" placeholder="FACTORY RESET EMS"></label><button id="frGo" class="danger">Factory reset EMS</button></section>`;
-  $('#frGo').onclick=async()=>{const c=$('#frConfirm').value.trim();if(!confirm('This permanently deletes ALL data. Continue?'))return;try{await api('platform/factory-reset',{method:'POST',body:JSON.stringify({confirmation:c})});toast('Factory reset complete.');logout()}catch(e){toast(e.message)}};
-}
-function addonSetup(x){
-  const noLimit=addonNoLimit(x), isVault=addonIsVault(x);
-  const e=document.createElement('div');e.className='modal';
-  e.innerHTML=`<form class="modalbox fields"><div class="modalhead"><h2>${esc(addonName(x))} setup</h2><button type="button">×</button></div><label>Title<input name="title" value="${esc(x.title||'')}" placeholder="${esc(ADDON_NAMES[x.addon_key]||'')}"></label>${noLimit?`<label>Verification URL <span class="muted">(base URL for QR codes)</span><input name="url" type="url" value="${esc(x.url||'')}" placeholder="https://ems.example.com"></label>`:''}<label>Image URL (PNG)<input name="image_url" type="url" value="${esc(x.image_url||'')}" placeholder="https://example.com/addon.png"></label><label>Status<select name="enabled"><option value="true" ${x.enabled?'selected':''}>Active</option><option value="false" ${!x.enabled?'selected':''}>Inactive</option></select></label><label>Details<textarea name="details">${esc(x.details)}</textarea></label><div class="grid2"><label>Unit price${isVault?' (per month)':''}<input name="unit_price" type="number" step=".01" value="${x.unit_price}"></label><label>Minimum ${isVault?'months':'days'}<input name="min_days" type="number" value="${x.min_days}"></label><label>Maximum ${isVault?'months':'days'}<input name="max_days" type="number" value="${x.max_days}"></label>${noLimit?'':`<label>Minimum ${isVault?'GB':'daily limit'}<input name="min_daily_limit" type="number" value="${x.min_daily_limit}"></label><label>Maximum ${isVault?'GB':'daily limit'}<input name="max_daily_limit" type="number" value="${x.max_daily_limit}"></label>`}</div><button>Save setup</button></form>`;
-  document.body.append(e);e.querySelector('[type=button]').onclick=()=>e.remove();
-  e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));Object.assign(b,{addon_key:x.addon_key,title:b.title,url:noLimit?(b.url?String(b.url).trim():null):null,image_url:b.image_url?String(b.image_url).trim():null,enabled:b.enabled==='true',unit_price:+b.unit_price,min_days:+b.min_days,max_days:+b.max_days,min_daily_limit:noLimit?1:(+b.min_daily_limit||1),max_daily_limit:noLimit?1:(+b.max_daily_limit||1)});try{await api('platform/addons',{method:'PATCH',body:JSON.stringify(b)});e.remove();toast('Add-on setup saved.');ownerAddons()}catch(err){toast(err.message)}};
-}
+
+
+
+
+
