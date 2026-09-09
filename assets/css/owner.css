@@ -6,27 +6,29 @@
 
 /* ---------- Design tokens ---------- */
 body.oc{
+  /* basecn.dev / shadcn-style neutral (zinc) theme — fresh flat palette, no gradients */
   --oc-font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --oc-bg:#f4f5f8;
+  --oc-bg:#fafafa;
   --oc-surface:#ffffff;
-  --oc-surface2:#fafbfc;
-  --oc-line:#e5e8ef;
-  --oc-line2:#eef0f5;
-  --oc-text:#101828;
-  --oc-mut:#667085;
-  --oc-faint:#98a2b3;
-  --oc-accent:#4f46e5;
-  --oc-accent-h:#4338ca;
-  --oc-accent-hover:#5b52e8;
-  --oc-accent-soft:#eef2ff;
-  --oc-accent-ring:rgba(79,70,229,.18);
-  --oc-ok:#067647; --oc-ok-soft:#e7f6ee; --oc-ok-line:#b7e4cb;
-  --oc-warn:#b54708; --oc-warn-soft:#fdf0e1; --oc-warn-line:#f5d3a8;
-  --oc-err:#b42318; --oc-err-soft:#fdecea; --oc-err-line:#f4b9b3;
-  --oc-info:#175cd3; --oc-info-soft:#e8f1fd; --oc-info-line:#bfd6f8;
-  --oc-neu:#475467; --oc-neu-soft:#f2f4f7; --oc-neu-line:#e0e4ea;
-  --oc-shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.06);
-  --oc-shadow-lg:0 12px 28px -8px rgba(16,24,40,.18),0 4px 12px rgba(16,24,40,.08);
+  --oc-surface2:#f8f8f8;
+  --oc-line:#e4e4e7;
+  --oc-line2:#f0f0f1;
+  --oc-text:#18181b;
+  --oc-mut:#71717a;
+  --oc-faint:#a1a1aa;
+  --oc-accent:#18181b;
+  --oc-accent-h:#3f3f46;
+  --oc-accent-hover:#09090b;
+  --oc-accent-soft:#f4f4f5;
+  --oc-accent-ring:rgba(24,24,27,.14);
+  --oc-on-accent:#fafafa;
+  --oc-ok:#15803d; --oc-ok-soft:#f0fdf4; --oc-ok-line:#bbf7d0; --oc-ok-btn:#16a34a; --oc-ok-btn-h:#15803d;
+  --oc-warn:#b45309; --oc-warn-soft:#fffbeb; --oc-warn-line:#fde68a; --oc-warn-btn:#d97706; --oc-warn-btn-h:#b45309;
+  --oc-err:#dc2626; --oc-err-soft:#fef2f2; --oc-err-line:#fecaca; --oc-err-btn:#dc2626; --oc-err-btn-h:#b91c1c;
+  --oc-info:#2563eb; --oc-info-soft:#eff6ff; --oc-info-line:#bfdbfe;
+  --oc-neu:#52525b; --oc-neu-soft:#f4f4f5; --oc-neu-line:#e4e4e7;
+  --oc-shadow:0 1px 2px rgba(24,24,27,.05),0 1px 3px rgba(24,24,27,.05);
+  --oc-shadow-lg:0 14px 30px -10px rgba(24,24,27,.16),0 4px 10px rgba(24,24,27,.06);
   --oc-r:9px;
   --oc-r-sm:7px;
   --oc-fs:13.5px;
@@ -41,27 +43,43 @@ body.oc{
   -webkit-font-smoothing:antialiased;
 }
 body.oc[data-theme="dark"]{
-  --oc-bg:#0d1017;
-  --oc-surface:#151a23;
-  --oc-surface2:#12161e;
-  --oc-line:#262c38;
-  --oc-line2:#1f2530;
-  --oc-text:#e7eaf0;
-  --oc-mut:#9aa4b5;
-  --oc-faint:#6c7688;
-  --oc-accent:#818cf8;
-  --oc-accent-h:#a5b4fc;
-  --oc-accent-hover:#98a3fd;
-  --oc-accent-soft:#232946;
-  --oc-accent-ring:rgba(129,140,248,.25);
-  --oc-ok:#4ade80; --oc-ok-soft:#13301f; --oc-ok-line:#1f5c38;
-  --oc-warn:#fbbf24; --oc-warn-soft:#3a2a10; --oc-warn-line:#6b4a14;
-  --oc-err:#f87171; --oc-err-soft:#3c1616; --oc-err-line:#6f2626;
-  --oc-info:#60a5fa; --oc-info-soft:#14273f; --oc-info-line:#24466e;
-  --oc-neu:#c7cdd8; --oc-neu-soft:#232936; --oc-neu-line:#333b4b;
-  --oc-shadow:0 1px 2px rgba(0,0,0,.35);
-  --oc-shadow-lg:0 16px 34px -10px rgba(0,0,0,.55);
+  --oc-bg:#09090b;
+  --oc-surface:#131316;
+  --oc-surface2:#101013;
+  --oc-line:#27272a;
+  --oc-line2:#1e1e21;
+  --oc-text:#f4f4f5;
+  --oc-mut:#a1a1aa;
+  --oc-faint:#6e6e76;
+  --oc-accent:#fafafa;
+  --oc-accent-h:#e4e4e7;
+  --oc-accent-hover:#fafafa;
+  --oc-accent-soft:#26262a;
+  --oc-accent-ring:rgba(255,255,255,.22);
+  --oc-on-accent:#18181b;
+  --oc-ok:#4ade80; --oc-ok-soft:#10251a; --oc-ok-line:#1f5c38; --oc-ok-btn:#22c55e; --oc-ok-btn-h:#16a34a;
+  --oc-warn:#fbbf24; --oc-warn-soft:#33270f; --oc-warn-line:#6b4a14; --oc-warn-btn:#f59e0b; --oc-warn-btn-h:#d97706;
+  --oc-err:#f87171; --oc-err-soft:#331616; --oc-err-line:#6f2626; --oc-err-btn:#ef4444; --oc-err-btn-h:#dc2626;
+  --oc-info:#60a5fa; --oc-info-soft:#13243b; --oc-info-line:#24466e;
+  --oc-neu:#c9c9d1; --oc-neu-soft:#1f1f23; --oc-neu-line:#313136;
+  --oc-shadow:0 1px 2px rgba(0,0,0,.4);
+  --oc-shadow-lg:0 16px 34px -10px rgba(0,0,0,.6);
 }
+
+/* ---------- Owner isolation layer ----------
+   Keeps legacy app.css (landing/shop) element styles from ever touching
+   the owner console: buttons, inputs, tables get flat neutral defaults here
+   before the .oc-* components below re-apply their design tokens. */
+body.oc button,body.oc input:not([type=checkbox]):not([type=radio]),body.oc select,body.oc textarea{
+  background:none;border:0;border-radius:0;box-shadow:none;padding:0;margin:0;
+  color:inherit;font:inherit;letter-spacing:normal;text-transform:none;width:auto
+}
+body.oc input[type=checkbox],body.oc input[type=radio]{width:15px;height:15px;margin:0;accent-color:var(--oc-accent);cursor:pointer}
+body.oc button{background-image:none}
+body.oc table{border-radius:0;overflow:visible;border-collapse:collapse}
+body.oc th,body.oc td{padding:0;border:0;text-align:left;background:transparent;vertical-align:middle}
+body.oc :focus{outline:none}
+body.oc ::selection{background:var(--oc-accent-soft);color:var(--oc-text)}
 
 /* ---------- Console shell ---------- */
 body.oc{overflow:hidden}
@@ -69,7 +87,7 @@ body.oc #app{height:100vh}
 .oc-shell{display:flex;width:100%;height:100vh;background:var(--oc-bg)}
 .oc-side{width:var(--oc-side-w);flex:0 0 var(--oc-side-w);background:var(--oc-surface);border-right:1px solid var(--oc-line);display:flex;flex-direction:column;transition:width .18s ease,flex-basis .18s ease;z-index:60}
 .oc-brand{height:var(--oc-top-h);flex:0 0 var(--oc-top-h);display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--oc-line)}
-.oc-brand .oc-logo{width:30px;height:30px;flex:0 0 30px;border-radius:8px;background:var(--oc-accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:.2px}
+.oc-brand .oc-logo{width:30px;height:30px;flex:0 0 30px;border-radius:8px;background:var(--oc-accent);color:var(--oc-on-accent);display:grid;place-items:center;font-weight:800;font-size:13px;letter-spacing:.2px}
 .oc-brand .oc-bname{font-weight:750;font-size:14.5px;letter-spacing:-.1px;line-height:1.15;min-width:0}
 .oc-brand .oc-bname small{display:block;font-size:10px;color:var(--oc-mut);font-weight:600;letter-spacing:.2px}
 .oc-nav{flex:1;overflow-y:auto;overflow-x:hidden;padding:12px 10px 10px;scrollbar-width:thin;scrollbar-color:var(--oc-line) transparent}
@@ -80,17 +98,17 @@ body.oc #app{height:100vh}
 .oc-navg:first-child{margin-top:2px}
 .oc-navitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:7px 10px;border-radius:var(--oc-r-sm);border:0;background:transparent;color:var(--oc-mut);font-weight:600;font-size:13.4px;cursor:pointer;transition:background .12s,color .12s;margin:1px 0;white-space:nowrap}
 .oc-navitem:hover{background:var(--oc-neu-soft);color:var(--oc-text)}
-.oc-navitem.active{background:var(--oc-accent-soft);color:var(--oc-accent)}
-body.oc[data-theme="dark"] .oc-navitem.active{color:#c7d2fe}
+.oc-navitem.active{background:var(--oc-accent-soft);color:var(--oc-text)}
+.oc-navitem.active .oc-ico{color:var(--oc-text)}
 .oc-navitem .oc-ico{width:19px;flex:0 0 19px;display:grid;place-items:center}
 .oc-navitem .oc-ico svg{width:17px;height:17px}
 .oc-navitem .oc-lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
-.oc-navitem .oc-badge{min-width:19px;height:19px;padding:0 6px;border-radius:99px;background:var(--oc-accent);color:#fff;font-size:10.5px;font-weight:750;display:inline-grid;place-items:center;flex:0 0 auto}
+.oc-navitem .oc-badge{min-width:19px;height:19px;padding:0 6px;border-radius:99px;background:var(--oc-accent);color:var(--oc-on-accent);font-size:10.5px;font-weight:750;display:inline-grid;place-items:center;flex:0 0 auto}
 .oc-navitem[hidden]{display:none}
 .oc-sidefoot{border-top:1px solid var(--oc-line);padding:10px}
-.oc-user{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border-radius:var(--oc-r-sm);border:0;background:transparent;cursor:pointer;text-align:left}
-.oc-user:hover{background:var(--oc-neu-soft)}
-.oc-user .oc-ava{width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:var(--oc-accent);color:#fff;display:grid;place-items:center;font-weight:750;font-size:12.5px}
+.oc-user{display:flex;align-items:center;gap:9px;width:100%;padding:8px;border-radius:var(--oc-r-sm);border:0;background:transparent;cursor:default;text-align:left;user-select:none}
+.oc-user+.oc-sideout{margin-top:6px}
+.oc-user .oc-ava{width:30px;height:30px;flex:0 0 30px;border-radius:50%;background:var(--oc-accent);color:var(--oc-on-accent);display:grid;place-items:center;font-weight:750;font-size:12.5px}
 .oc-user .oc-uinf{flex:1;min-width:0;line-height:1.25}
 .oc-user .oc-uinf b{display:block;font-size:12.8px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .oc-user .oc-uinf small{color:var(--oc-mut);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
@@ -128,7 +146,7 @@ body.oc .oc-shell.oc-c .oc-sideout{justify-content:center;padding:8px 0}
 .oc-iconb:hover{background:var(--oc-neu-soft);color:var(--oc-text)}
 .oc-avatar{display:flex;align-items:center;gap:9px;border:0;background:transparent;cursor:pointer;padding:4px 6px;border-radius:var(--oc-r-sm)}
 .oc-avatar:hover{background:var(--oc-neu-soft)}
-.oc-avatar .oc-ava{width:31px;height:31px;border-radius:50%;background:var(--oc-accent);color:#fff;display:grid;place-items:center;font-weight:750;font-size:13px}
+.oc-avatar .oc-ava{width:31px;height:31px;border-radius:50%;background:var(--oc-accent);color:var(--oc-on-accent);display:grid;place-items:center;font-weight:750;font-size:13px}
 .oc-avatar .oc-uname{font-weight:700;font-size:13px;line-height:1.1}
 .oc-avatar .oc-urole{font-size:11px;color:var(--oc-mut);line-height:1.1;margin-top:2px}
 .oc-avatar .oc-caret{color:var(--oc-faint);font-size:10px;margin-left:3px}
@@ -148,7 +166,7 @@ body.oc .oc-shell.oc-c .oc-sideout{justify-content:center;padding:8px 0}
 .oc-ph-actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
 
 /* ---------- Buttons ---------- */
-.oc-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:var(--oc-r-sm);border:1px solid transparent;background:var(--oc-accent);color:#fff;font-weight:650;font-size:13.2px;line-height:1.35;cursor:pointer;transition:background .12s,border-color .12s,color .12s,box-shadow .12s;text-decoration:none;white-space:nowrap;box-shadow:var(--oc-shadow)}
+.oc-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 14px;border-radius:var(--oc-r-sm);border:1px solid transparent;background:var(--oc-accent);color:var(--oc-on-accent);font-weight:600;font-size:13.2px;line-height:1.35;cursor:pointer;transition:background .12s,border-color .12s,color .12s;text-decoration:none;white-space:nowrap;box-shadow:none}
 .oc-btn:hover{background:var(--oc-accent-h)}
 .oc-btn:disabled{opacity:.55;cursor:not-allowed}
 .oc-btn svg{width:15px;height:15px;flex:0 0 auto}
@@ -156,14 +174,12 @@ body.oc .oc-shell.oc-c .oc-sideout{justify-content:center;padding:8px 0}
 .oc-btn-secondary:hover{background:var(--oc-neu-soft);border-color:var(--oc-line)}
 .oc-btn-ghost{background:transparent;color:var(--oc-mut);box-shadow:none;border-color:transparent}
 .oc-btn-ghost:hover{background:var(--oc-neu-soft);color:var(--oc-text)}
-.oc-btn-danger{background:var(--oc-err)}
-.oc-btn-danger:hover{background:#d92d20}
-body.oc[data-theme="dark"] .oc-btn-danger:hover{background:#ef4444}
+.oc-btn-danger{background:var(--oc-err-btn);color:#fff}
+.oc-btn-danger:hover{background:var(--oc-err-btn-h)}
 .oc-btn-dangerghost{background:transparent;color:var(--oc-err);border-color:var(--oc-err-line);box-shadow:none}
 .oc-btn-dangerghost:hover{background:var(--oc-err-soft)}
-.oc-btn-ok{background:var(--oc-ok)}
-.oc-btn-ok:hover{background:#079455}
-body.oc[data-theme="dark"] .oc-btn-ok:hover{background:#22c55e}
+.oc-btn-ok{background:var(--oc-ok-btn);color:#fff}
+.oc-btn-ok:hover{background:var(--oc-ok-btn-h)}
 .oc-btn-sm{padding:5px 10px;font-size:12.2px;border-radius:6px}
 .oc-btn-sm svg{width:13px;height:13px}
 .oc-btn-icon{width:32px;height:32px;padding:0;justify-content:center}
@@ -185,7 +201,7 @@ body.oc[data-theme="dark"] .oc-btn-ok:hover{background:#22c55e}
 .oc-input::placeholder,.oc-textarea::placeholder{color:var(--oc-faint)}
 .oc-input:disabled,.oc-select:disabled{background:var(--oc-surface2);color:var(--oc-mut);cursor:not-allowed}
 .oc-input[readonly]{background:var(--oc-surface2)}
-.oc-select{appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23667085' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:30px}
+.oc-select{appearance:none;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2371717a' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 11px center;padding-right:30px}
 .oc-textarea{resize:vertical;min-height:74px}
 .oc-hint{font-size:11.8px;color:var(--oc-mut);margin:5px 0 0;line-height:1.45}
 .oc-errtext{font-size:12px;color:var(--oc-err);margin-top:5px;display:none}
@@ -280,7 +296,7 @@ table.oc-tbl{width:100%;border-collapse:collapse;font-size:13px}
 .oc-call b{font-weight:700}
 
 /* ---------- Avatars, misc ---------- */
-.oc-ava2{width:30px;height:30px;flex:0 0 30px;border-radius:50%;display:inline-grid;place-items:center;font-weight:750;font-size:12px;color:#fff;background:var(--oc-accent);vertical-align:middle}
+.oc-ava2{width:30px;height:30px;flex:0 0 30px;border-radius:50%;display:inline-grid;place-items:center;font-weight:750;font-size:12px;color:var(--oc-on-accent);background:var(--oc-accent);vertical-align:middle}
 .oc-ava2.sm{width:24px;height:24px;font-size:10.5px;flex-basis:24px}
 .oc-ava2.purple{background:#7c3aed}.oc-ava2.blue{background:#2563eb}.oc-ava2.green{background:#059669}.oc-ava2.orange{background:#d97706}.oc-ava2.rose{background:#e11d48}.oc-ava2.teal{background:#0d9488}.oc-ava2.slate{background:#475467}
 .oc-ava2{background:var(--oc-accent)}
@@ -400,7 +416,7 @@ body.oc[data-theme="dark"] .oc-mask{background:rgba(0,0,0,.6)}
 .oc-hditem .oc-hdmeta b{display:block;font-size:13.2px;font-weight:700}
 .oc-hditem .oc-hdmeta small{color:var(--oc-mut);font-size:11.3px;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .oc-hditem .oc-hdmeta em{display:block;font-style:normal;font-size:12px;color:var(--oc-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
-.oc-hditem .oc-hdb{min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--oc-accent);color:#fff;font-size:10.8px;font-weight:750;display:grid;place-items:center;font-style:normal}
+.oc-hditem .oc-hdb{min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--oc-accent);color:var(--oc-on-accent);font-size:10.8px;font-weight:750;display:grid;place-items:center;font-style:normal}
 .oc-hdconv{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--oc-surface)}
 .oc-hdconvhead{padding:12px 16px;border-bottom:1px solid var(--oc-line);background:var(--oc-surface2);display:flex;align-items:center;gap:10px}
 .oc-hdconvhead b{font-size:14.4px}
@@ -409,7 +425,7 @@ body.oc[data-theme="dark"] .oc-mask{background:rgba(0,0,0,.6)}
 .oc-hdmsg{max-width:78%;display:flex;flex-direction:column;gap:3px}
 .oc-hdmsg .oc-hdbub{padding:9px 13px;border-radius:12px;font-size:13.2px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
 .oc-hdmsg.me{align-self:flex-end;align-items:flex-end}
-.oc-hdmsg.me .oc-hdbub{background:var(--oc-accent);color:#fff;border-bottom-right-radius:3px}
+.oc-hdmsg.me .oc-hdbub{background:var(--oc-accent);color:var(--oc-on-accent);border-bottom-right-radius:3px}
 .oc-hdmsg.them{align-self:flex-start}
 .oc-hdmsg.them .oc-hdbub{background:var(--oc-neu-soft);border-bottom-left-radius:3px}
 .oc-hdmsg .oc-hdt{font-size:10.5px;color:var(--oc-faint);padding:0 3px}
@@ -425,7 +441,7 @@ body.oc[data-theme="dark"] .oc-mask{background:rgba(0,0,0,.6)}
 .oc-filters{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:0 0 14px}
 .oc-fchip{border:1px solid var(--oc-line);background:var(--oc-surface);color:var(--oc-mut);padding:5.5px 12px;border-radius:99px;font-size:12.4px;font-weight:650;cursor:pointer}
 .oc-fchip:hover{color:var(--oc-text);border-color:var(--oc-faint)}
-.oc-fchip.on{background:var(--oc-accent);border-color:var(--oc-accent);color:#fff}
+.oc-fchip.on{background:var(--oc-accent);border-color:var(--oc-accent);color:var(--oc-on-accent)}
 .oc-toolrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 .oc-toolrow .oc-search{flex:1;min-width:200px}
 .oc-seg{display:inline-flex;background:var(--oc-surface);border:1px solid var(--oc-line);border-radius:8px;padding:2px;gap:2px}
@@ -448,8 +464,6 @@ body.oc[data-theme="dark"] .oc-mask{background:rgba(0,0,0,.6)}
   .oc-hd{grid-template-columns:1fr}
 }
 @media(max-width:1150px){.oc-dashgrid{grid-template-columns:1fr!important}}
-body.oc input[type=checkbox]{width:15px;height:15px;accent-color:var(--oc-accent);cursor:pointer}
-body.oc input[type=radio]{accent-color:var(--oc-accent)}
 @media(max-width:560px){
   .oc-cards{grid-template-columns:1fr 1fr}
   .oc-stat strong{font-size:20px}
@@ -468,6 +482,6 @@ body.oc #toast{background:var(--oc-text);color:var(--oc-surface);border-radius:1
 
 /* ---- small fillers ---- */
 body.oc .oc-ic{width:15px;height:15px;flex:0 0 auto;display:block}
-body.oc .oc-btn-primary{background:var(--oc-accent);color:#fff;border-color:transparent;box-shadow:0 1px 2px rgba(16,24,40,.06)}
+body.oc .oc-btn-primary{background:var(--oc-accent);color:var(--oc-on-accent);border-color:transparent;box-shadow:none}
 body.oc .oc-btn-primary:hover{background:var(--oc-accent-hover)}
 body.oc .oc-cplist{display:grid;gap:7px}
