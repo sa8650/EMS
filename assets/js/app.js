@@ -236,23 +236,10 @@ function ocBindGo(){document.querySelectorAll('[data-oc-go]').forEach(x=>{if(!x.
 function ocThemeInit(){const t=localStorage.getItem('ems.oc.theme')||(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.body.dataset.theme=t;return t}
 function ocUserMenu(anchor){const m=document.createElement('div');
 m.innerHTML=`
- <div class="oc-mhead"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'')} · ${state?.role==='owner'?'Platform owner':'Session'}</small></div>
- <button type="button" class="oc-mi" data-oc-u="profile">${ocIcon('user')}My profile</button>
- <button type="button" class="oc-mi" data-oc-u="password">${ocIcon('key')}Password recovery</button>
- <div class="oc-msep"></div>
+ <div class="oc-mhead"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'')} · Platform owner</small></div>
  <button type="button" class="oc-mi err" data-oc-u="out">${ocIcon('out')}Sign out</button>`;
 const pop=ocPop(anchor,m.innerHTML,'right');pop.dataset.ocMenu='user';
-pop.querySelectorAll('[data-oc-u]').forEach(b=>b.onclick=()=>{pop.remove();const a=b.dataset.ocU;
- if(a==='out')logout();
- if(a==='profile')ocProfileDialog();
- if(a==='password'){showEmsLogin()}
-});
-}
-function ocProfileDialog(){const u=state?.user||{};const d=ocDialog({title:'My profile',icon:ocIcon('user'),tone:'info',size:'sm',
- body:`<div style="display:flex;align-items:center;gap:13px;margin-bottom:16px"><span class="oc-ava2" style="width:46px;height:46px;font-size:18px">${esc(String(u.name||'O').slice(0,1).toUpperCase())}</span><div><b style="font-size:15.5px">${esc(u.name||'EMS Owner')}</b><div style="color:var(--oc-mut);font-size:12.6px">${esc(u.email||'')}</div></div></div>
- <div class="oc-dl"><div class="oc-di"><small>Role</small><div><span class="oc-pill accent">Platform owner</span></div></div><div class="oc-di"><small>Access level</small><div>Full platform control</div></div><div class="oc-di"><small>Session</small><div>Active · auto-expires</div></div><div class="oc-di"><small>Account ID</small><div><code class="oc-code">${esc(String(u.id||'—').replaceAll('-','').slice(0,8).toUpperCase())}</code></div></div></div>`,
- footer:`<button type="button" class="oc-btn oc-btn-danger oc-btn-sm" data-oc-logout="1">${ocIcon('out')}Sign out</button>`});
-d.body.querySelector('[data-oc-logout]').onclick=()=>{d.close();logout()};
+pop.querySelectorAll('[data-oc-u]').forEach(b=>b.onclick=()=>{pop.remove();if(b.dataset.ocU==='out')logout()});
 }
 function ocThemeToggle(){const cur=document.body.dataset.theme==='dark';const next=cur?'light':'dark';document.body.dataset.theme=next;localStorage.setItem('ems.oc.theme',next);const b=$('#ocTheme');if(b)b.innerHTML=next==='dark'?ocIcon('sun'):ocIcon('moon')}
 function ocSideToggle(){const shell=document.querySelector('.oc-shell');if(!shell)return;
@@ -262,11 +249,16 @@ function ownerHome(){
  ocThemeInit();
  const collapsed=localStorage.getItem('ems.oc.collapsed')==='1';
  document.body.classList.add('oc');
+ /* safety: owner.css must be present for the console theme */
+ try{
+  const has=[...document.styleSheets].some(s=>s.href&&s.href.endsWith('owner.css'));
+  if(!has){const l=document.createElement('link');l.rel='stylesheet';l.href='assets/css/owner.css';document.head.appendChild(l)}
+ }catch(e){}
  const navHtml=OC_NAV.map(g=>`<div class="oc-navg">${esc(g.h)}</div>`+g.items.map(([p,l,ic])=>`<button class="oc-navitem" data-owner-page="${p}" title="${esc(l)}" aria-label="${esc(l)}"><span class="oc-ico">${lucide(ic)}</span><span class="oc-lbl">${esc(l)}</span>${p==='helpdesk'?`<span class="oc-badge" id="ohbBadge" hidden></span>`:''}${p==='claims'?`<span class="oc-badge" id="ocClaimsBadge" hidden></span>`:''}</button>`).join('')).join('');
  app.innerHTML=`<div class="oc-shell${collapsed?' oc-c':''}">
   <aside class="oc-side"><div class="oc-brand"><span class="oc-logo" data-brand-mark="1">E</span><div class="oc-bname"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div></div>
   <nav class="oc-nav">${navHtml}</nav>
-  <div class="oc-sidefoot"><button type="button" class="oc-user" id="ocSideUser" title="Account &amp; profile"><span class="oc-ava">${esc((state?.user?.name||'O').slice(0,1).toUpperCase())}</span><span class="oc-uinf"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'Platform owner')}</small></span><span class="oc-caret">${ocIcon('chev')}</span></button>
+  <div class="oc-sidefoot"><div class="oc-user" id="ocSideUser" title="${esc(state?.user?.email||'')}"><span class="oc-ava">${esc((state?.user?.name||'O').slice(0,1).toUpperCase())}</span><span class="oc-uinf"><b>${esc(state?.user?.name||'EMS Owner')}</b><small>${esc(state?.user?.email||'Platform owner')}</small></span></div>
   <button type="button" class="oc-sideout" id="ocSideOut" title="Sign out"><span class="oc-ico">${ocIcon('out')}</span><span class="oc-lbl">Sign out</span></button></div></aside>
   <div class="oc-main"><header class="oc-top"><button class="oc-burger" id="ocBurger" type="button" aria-label="Toggle navigation"><span></span><span></span><span></span></button>
    <div class="oc-crumb"><span class="oc-sub">Owner console</span><span class="oc-sep">/</span><b id="ocCrumb">Dashboard</b></div><div class="oc-topsp"></div>
@@ -277,7 +269,6 @@ function ownerHome(){
  $('#ocTheme').onclick=ocThemeToggle;
  const openUserMenu=anchor=>{const open=document.querySelector('.oc-menu[data-oc-menu="user"]');if(open){open.remove();return}ocUserMenu(anchor)};
  $('#ocUserBtn').onclick=e=>{e.stopPropagation();openUserMenu($('#ocUserBtn'))};
- const su=$('#ocSideUser');if(su)su.onclick=e=>{e.stopPropagation();openUserMenu(su)};
  $('#ocSideOut').onclick=logout;
  document.querySelectorAll('.oc-navitem').forEach(x=>x.onclick=()=>{const p=x.dataset.ownerPage;if(window.innerWidth<=980)ocSideToggle();ownerPage(p)});
  api('public/branding').then(b=>{if(document.title.indexOf('|')<0)document.title=(b.website_name||'EMS V1')+' | Owner';document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});
