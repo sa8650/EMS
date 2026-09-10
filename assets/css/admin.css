@@ -150,8 +150,8 @@ body.adm-on .adm h1,body.adm-on .adm h2,body.adm-on .adm h3,body.adm-on .adm h4,
 
 .adm-grid{display:grid;gap:12px}
 .adm-kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
-.adm-storegrid{grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.adm-plans{grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.adm-storegrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.adm-plans{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .adm-shop{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:12px;align-items:start}
 
 .adm-card{position:relative;background:var(--adm-card);border-radius:20px;padding:15px;box-shadow:var(--adm-ring);display:flex;flex-direction:column;gap:8px;min-width:0}
@@ -357,6 +357,8 @@ body.adm-on .adm ::selection,body.adm-on .adm-modalbox ::selection{background:rg
 --------------------------------------------------------------------- */
 @media(max-width:1120px){
   .adm-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .adm-storegrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .adm-plans{grid-template-columns:repeat(2,minmax(0,1fr))}
   .adm-shop{grid-template-columns:1fr}
   .adm-checkout{position:static}
 }
