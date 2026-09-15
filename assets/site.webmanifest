@@ -1,8 +1,8 @@
 {
   "id": "/?source=pwa",
-  "name": "EMS V1 — Shop Management by DoxTox",
-  "short_name": "EMS V1",
-  "description": "EMS V1 multi-shop management system: inventory, sales, purchases, expenses, dues, licensing and premium add-ons, powered by DoxTox.",
+  "name": "EMS — Shop Management by Dexter Studio",
+  "short_name": "EMS",
+  "description": "EMS multi-shop management system: inventory, sales, purchases, expenses, dues, licensing and premium add-ons, powered by Dexter.",
   "start_url": "/?source=pwa",
   "scope": "/",
   "lang": "en",
