@@ -192,9 +192,11 @@ body.adm-on .adm th,body.adm-on .adm-modalbox th{font-family:var(--adm-mono)!imp
 body.adm-on .adm td,body.adm-on .adm-modalbox td{font-size:12px!important;color:var(--adm-text2)!important;padding:10px 12px!important;border:0!important;border-bottom:1px solid var(--adm-line)!important;white-space:nowrap!important;vertical-align:top;background:transparent!important}
 body.adm-on .adm tbody tr:last-child td,body.adm-on .adm-modalbox tbody tr:last-child td{border-bottom:0!important}
 body.adm-on .adm tbody tr{transition:background .12s}
-body.adm-on .adm tbody tr:hover{background:color-mix(in srgb,var(--adm-text) 7%,transparent)}
-body.adm-on .adm tbody tr:hover td{color:var(--adm-text)}
-body.adm-on .adm tbody tr:active{background:color-mix(in srgb,var(--adm-text) 11%,transparent)}
+/* !important overrides the legacy global `tbody tr:hover td{background:#f3f6fa!important}`
+   in app.css, which paints a light row in dark mode and hides the text */
+body.adm-on .adm tbody tr:hover,body.adm-on .adm-modalbox tbody tr:hover{background:color-mix(in srgb,var(--adm-text) 7%,transparent)!important}
+body.adm-on .adm tbody tr:hover td,body.adm-on .adm-modalbox tbody tr:hover td{color:var(--adm-text)!important;background:transparent!important}
+body.adm-on .adm tbody tr:active,body.adm-on .adm-modalbox tbody tr:active{background:color-mix(in srgb,var(--adm-text) 11%,transparent)!important}
 body.adm-on .adm td.adm-wrap,body.adm-on .adm-modalbox td.adm-wrap{white-space:normal!important;min-width:180px;max-width:340px;line-height:1.5}
 .adm-num{font-family:var(--adm-mono);font-variant-numeric:tabular-nums;font-weight:550;color:var(--adm-text)}
 body.adm-on .adm code,body.adm-on .adm-modalbox code{font-family:var(--adm-mono)!important;font-size:10.5px!important;font-weight:600!important;background:var(--adm-inset2)!important;border:1px solid var(--adm-line)!important;border-radius:6px!important;padding:2px 6px!important;color:var(--adm-text)!important;white-space:nowrap!important}
@@ -361,16 +363,20 @@ body.adm-on .adm ::selection,body.adm-on .adm-modalbox ::selection{background:rg
 }
 @media(max-width:960px){
   .adm{grid-template-columns:1fr}
-  .adm-side{position:sticky;top:0;height:auto;z-index:50;border-right:0;border-bottom:1px solid var(--adm-line);padding:10px 12px;gap:8px}
-  .adm-brand{padding:0 2px 4px;border-bottom:0}
-  .adm-nav{flex-direction:row;align-items:center;gap:4px;overflow-x:auto;overflow-y:hidden;padding:2px 0;scrollbar-width:none}
-  .adm-nav::-webkit-scrollbar{display:none}
-  .adm-navgroup{flex-direction:row;align-items:center;gap:3px;flex:0 0 auto}
-  .adm-navgroup>p{display:none}
-  .adm-nav button{width:auto;flex:0 0 auto;padding:6px 9px}
-  .adm-navicon{width:22px;height:22px}
-  .adm-sidefoot{border-top:0;padding-top:0}
-  .adm-sidefoot .adm-btn{width:auto;padding:6px 10px}
+  /* Left-to-right half-screen navigation drawer */
+  .adm .appBurger{display:inline-flex!important}
+  .adm-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:50vw;min-width:280px;max-width:360px;z-index:100;
+    transform:translateX(-104%);transition:transform .32s cubic-bezier(.32,.72,0,1);
+    border-right:1px solid var(--adm-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));will-change:transform}
+  body.drawer-open .adm-side{transform:translateX(0);box-shadow:0 24px 60px rgba(0,0,0,.38)}
+  .adm-brand{padding:0 2px 8px}
+  .adm-nav{flex-direction:column;overflow-y:auto;overflow-x:hidden}
+  .adm-navgroup{flex-direction:column;align-items:stretch;gap:2px}
+  .adm-navgroup>p{display:block}
+  .adm-nav button{width:100%;padding:9px 10px}
+  .adm-navicon{width:25px;height:25px}
+  .adm-sidefoot{padding-top:10px;border-top:1px solid var(--adm-line)}
+  .adm-sidefoot .adm-btn{width:100%}
   .adm-top{padding:0 14px;height:52px}
   .adm-user b{display:none}
   .adm-user{padding:3px}

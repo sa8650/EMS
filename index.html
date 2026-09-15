@@ -1,2 +1,106 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="EMS V1 multi-shop management system powered by DoxTox"><title>EMS V1 | DoxTox</title><link rel="stylesheet" href="assets/css/app.css"><link rel="stylesheet" href="assets/css/owner.css"><link rel="stylesheet" href="assets/css/admin.css">
-    <link rel="stylesheet" href="assets/css/shop.css"></head><body><div id="app"></div><div id="toast" role="status"></div><script type="module" src="assets/js/app.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="EMS V1 multi-shop management system powered by DoxTox">
+<meta name="theme-color" content="#059669">
+<title>EMS V1 | DoxTox</title>
+
+<!-- Installable PWA (Android & iOS) -->
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EMS V1">
+
+<link rel="icon" href="/assets/favicon.ico" sizes="32x32">
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<!-- iOS static launch screens (the animated splash plays immediately after) -->
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1668x2388.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1620x2160.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/owner.css">
+<link rel="stylesheet" href="assets/css/admin.css">
+<link rel="stylesheet" href="assets/css/shop.css">
+
+<!-- ═══════════════ Animated cold-open splash (PWA / mobile) ═══════════════ -->
+<style>
+  #splash{position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:26px;
+    background:radial-gradient(1200px 700px at 50% -10%,#0f766e 0%,#065f46 42%,#04161d 100%);
+    color:#fff;overflow:hidden;transition:opacity .55s ease,transform .55s ease;
+    padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+  #splash::before{content:"";position:absolute;inset:-40%;
+    background:conic-gradient(from 90deg at 50% 50%,transparent 0deg,rgba(255,255,255,.10) 60deg,transparent 130deg,transparent 220deg,rgba(255,255,255,.08) 290deg,transparent 360deg);
+    animation:sp-rotate 14s linear infinite}
+  #splash::after{content:"";position:absolute;inset:0;
+    background:radial-gradient(420px 260px at 50% 46%,rgba(16,185,129,.22),transparent 70%);
+    animation:sp-breathe 2.6s ease-in-out infinite}
+  #splash.splash-out{opacity:0;transform:scale(1.05);pointer-events:none}
+  .sp-mark{position:relative;width:108px;height:108px;display:grid;place-items:center}
+  .sp-pulse{position:absolute;inset:0;border-radius:28px;border:1.5px solid rgba(110,231,183,.75);animation:sp-pulse 2.4s cubic-bezier(.2,.6,.2,1) infinite}
+  .sp-pulse.p2{animation-delay:1.2s}
+  .sp-ring{position:absolute;inset:-9px;border-radius:34px;border:2px solid transparent;border-top-color:#6ee7b7;border-right-color:rgba(110,231,183,.35);
+    animation:sp-spin 1.5s linear infinite;filter:drop-shadow(0 0 8px rgba(110,231,183,.45))}
+  .sp-logo{position:relative;width:74px;height:74px;border-radius:22px;display:grid;place-items:center;color:#04231c;
+    background:linear-gradient(160deg,#a7f3d0 0%,#34d399 55%,#10b981 100%);
+    box-shadow:0 14px 34px rgba(6,95,70,.55),inset 0 1px 0 rgba(255,255,255,.6);
+    animation:sp-pop .9s cubic-bezier(.2,1.4,.4,1) both}
+  .sp-logo svg{width:38px;height:38px}
+  .sp-word{position:relative;display:flex;flex-direction:column;align-items:center;gap:5px;text-align:center;animation:sp-rise .8s .18s cubic-bezier(.2,.8,.3,1) both}
+  .sp-word b{font-size:26px;font-weight:850;letter-spacing:.04em;text-shadow:0 4px 24px rgba(0,0,0,.4)}
+  .sp-word small{font-size:10px;font-weight:700;letter-spacing:.34em;color:#a7f3d0}
+  .sp-bar{position:relative;width:min(210px,62vw);height:4px;border-radius:99px;background:rgba(255,255,255,.16);overflow:hidden;animation:sp-rise .8s .34s cubic-bezier(.2,.8,.3,1) both}
+  .sp-bar i{position:absolute;inset:0;width:42%;border-radius:99px;
+    background:linear-gradient(90deg,transparent,#6ee7b7,#ecfdf5,#6ee7b7,transparent);
+    animation:sp-slide 1.15s ease-in-out infinite}
+  .sp-tag{position:relative;font-size:11px;color:rgba(209,250,229,.82);letter-spacing:.06em;animation:sp-rise .8s .5s cubic-bezier(.2,.8,.3,1) both}
+  @keyframes sp-spin{to{transform:rotate(360deg)}}
+  @keyframes sp-rotate{to{transform:rotate(360deg)}}
+  @keyframes sp-pop{0%{opacity:0;transform:scale(.4) rotate(-14deg)}60%{opacity:1;transform:scale(1.08) rotate(3deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+  @keyframes sp-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes sp-pulse{0%{transform:scale(.82);opacity:.9}100%{transform:scale(1.55);opacity:0}}
+  @keyframes sp-breathe{0%,100%{opacity:.65}50%{opacity:1}}
+  @keyframes sp-slide{0%{left:-46%}100%{left:112%}}
+  @media(prefers-reduced-motion:reduce){
+    #splash::before,.sp-ring,.sp-pulse,.sp-bar i,#splash::after{animation:none}
+    .sp-logo,.sp-word,.sp-bar,.sp-tag{animation:none}
+  }
+</style>
+</head>
+<body>
+<div id="splash" aria-label="Loading EMS V1" role="status">
+  <div class="sp-mark">
+    <span class="sp-pulse"></span><span class="sp-pulse p2"></span>
+    <span class="sp-ring"></span>
+    <span class="sp-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/></svg></span>
+  </div>
+  <div class="sp-word"><b>EMS V1</b><small>POWERED BY DOXTOX</small></div>
+  <div class="sp-bar"><i></i></div>
+  <div class="sp-tag">Opening your shop console…</div>
+</div>
+<script>
+  (function(){
+    var el=document.getElementById('splash'),done=false;
+    function hide(){if(done||!el)return;done=true;el.classList.add('splash-out');setTimeout(function(){el.remove();document.dispatchEvent(new Event('splash-hidden'));},620);}
+    window.emsSplashHide=hide;
+    setTimeout(hide,3200); /* safety net if the app script stalls */
+    document.addEventListener('DOMContentLoaded',function(){
+      requestAnimationFrame(function(){ /* keep the pop animation visible for one beat */ });
+    });
+  })();
+</script>
+
+<div id="app"></div>
+<div id="toast" role="status"></div>
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
