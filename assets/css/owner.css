@@ -227,9 +227,11 @@ body.ob-on .ob th,body.ob-on .ob-modalbox th{font-family:var(--ob-mono);font-siz
 body.ob-on .ob td,body.ob-on .ob-modalbox td{font-size:12px!important;color:var(--ob-text2)!important;padding:10px 12px!important;border:0!important;border-bottom:1px solid var(--ob-line)!important;white-space:nowrap!important;vertical-align:top;background:transparent!important}
 body.ob-on .ob tbody tr:last-child td,body.ob-on .ob-modalbox tbody tr:last-child td{border-bottom:0!important}
 body.ob-on .ob tbody tr{transition:background .12s}
-body.ob-on .ob tbody tr:hover{background:color-mix(in srgb,var(--ob-text) 7%,transparent)}
-body.ob-on .ob tbody tr:hover td{color:var(--ob-text)}
-body.ob-on .ob tbody tr:active{background:color-mix(in srgb,var(--ob-text) 11%,transparent)}
+/* !important overrides the legacy global `tbody tr:hover td{background:#f3f6fa!important}`
+   in app.css, which paints a light row in dark mode and hides the text */
+body.ob-on .ob tbody tr:hover,body.ob-on .ob-modalbox tbody tr:hover{background:color-mix(in srgb,var(--ob-text) 7%,transparent)!important}
+body.ob-on .ob tbody tr:hover td,body.ob-on .ob-modalbox tbody tr:hover td{color:var(--ob-text)!important;background:transparent!important}
+body.ob-on .ob tbody tr:active,body.ob-on .ob-modalbox tbody tr:active{background:color-mix(in srgb,var(--ob-text) 11%,transparent)!important}
 body.ob-on .ob td.ob-wrap,body.ob-on .ob-modalbox td.ob-wrap{white-space:normal!important;min-width:180px;max-width:340px;line-height:1.5}
 .ob-actions{display:flex;gap:6px;align-items:center}
 .ob-num{font-family:var(--ob-mono);font-variant-numeric:tabular-nums;font-weight:550;color:var(--ob-text)}
@@ -374,7 +376,7 @@ body.ob-on .ob-chat-item.on{background:var(--ob-card)!important;box-shadow:inset
 /* ---------------------------------------------------------------------
    10 · Modals
 --------------------------------------------------------------------- */
-.ob-modal{position:fixed;inset:0;z-index:130;display:grid;place-items:center;padding:18px;background:var(--ob-overlay);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+.ob-modal{position:fixed;inset:0;z-index:130;display:grid;place-items:center;padding:max(18px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(18px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));background:var(--ob-overlay);backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
 .ob-modalbox{width:min(600px,100%);max-height:88vh;overflow:auto;background:var(--ob-card);border-radius:20px;box-shadow:var(--ob-ring),0 24px 64px rgba(0,0,0,.28);font-family:var(--ob-font)}
 .ob-modalbox.ob-modal-wide{width:min(680px,100%)}
 .ob-modalhead{position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:15px 18px;border-bottom:1px solid var(--ob-line);background:var(--ob-card)}
@@ -406,16 +408,18 @@ body.ob-on .ob ::selection,body.ob-on .ob-modalbox ::selection{background:rgba(1
 }
 @media(max-width:960px){
   .ob{grid-template-columns:1fr}
-  .ob-side{position:sticky;top:0;height:auto;z-index:50;border-right:0;border-bottom:1px solid var(--ob-line);padding:10px 12px;gap:8px}
-  .ob-brand{padding:0 2px 4px}
-  .ob-nav{flex-direction:row;align-items:center;gap:4px;overflow-x:auto;overflow-y:hidden;padding:2px 0;scrollbar-width:none}
-  .ob-nav::-webkit-scrollbar{display:none}
-  .ob-navgroup{flex-direction:row;align-items:center;gap:3px;flex:0 0 auto}
-  .ob-navgroup>p{display:none}
-  .ob-nav button{width:auto;flex:0 0 auto;padding:6px 9px}
-  .ob-navicon{width:22px;height:22px}
-  .ob-sidefoot{border-top:0;padding-top:0}
-  .ob-sidefoot .ob-btn{width:auto;padding:6px 10px}
+  /* Left-to-right half-screen navigation drawer */
+  .ob .appBurger{display:inline-flex!important}
+  .ob-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:50vw;min-width:280px;max-width:360px;z-index:100;
+    transform:translateX(-104%);transition:transform .32s cubic-bezier(.32,.72,0,1);
+    border-right:1px solid var(--ob-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));will-change:transform}
+  body.drawer-open .ob-side{transform:translateX(0);box-shadow:0 24px 60px rgba(0,0,0,.38)}
+  .ob-nav{flex-direction:column}
+  .ob-navgroup>p{display:block}
+  .ob-nav button{width:100%;padding:9px 10px}
+  .ob-navicon{width:25px;height:25px}
+  .ob-sidefoot{padding-top:10px;border-top:1px solid var(--ob-line)}
+  .ob-sidefoot .ob-btn{width:100%}
   .ob-top{padding:0 14px;height:52px}
   .ob-user b{display:none}
   .ob-user{padding:3px}
@@ -439,3 +443,13 @@ body.ob-on .ob ::selection,body.ob-on .ob-modalbox ::selection{background:rgba(1
 /* ── Skeleton tokens (shared skeleton system lives in app.css) ── */
 body.ob-on{--sk-base:color-mix(in srgb,var(--ob-text) 9%,transparent);--sk-card:var(--ob-card);--sk-inset:var(--ob-inset);--sk-line:var(--ob-line);--sk-ring:var(--ob-ring);--sk-track:color-mix(in srgb,var(--ob-text) 6%,transparent);--sk-sheen:rgba(255,255,255,.6)}
 body.ob-on[data-ob-theme="dark"]{--sk-base:color-mix(in srgb,var(--ob-text) 11%,transparent);--sk-sheen:rgba(255,255,255,.07)}
+
+/* Hidden attribute must always win over inline-flex badges/chips */
+body.ob-on [hidden]{display:none!important}
+
+/* API key provider guide (Zudo settings) */
+.ob-keylist{list-style:none;display:grid;gap:10px;margin:0;padding:0}
+.ob-keylist li{background:var(--ob-fill,#f6f7f9);border:1px solid var(--ob-line,#e7e9ee);border-radius:12px;padding:10px 12px;font-size:12.5px;line-height:1.65;color:var(--ob-mut,#5c6473)}
+.ob-keylist b{color:var(--ob-ink,#151820);font-weight:800;display:block;font-size:13px}
+.ob-keylist code{background:#fff;border:1px solid var(--ob-line,#e7e9ee);border-radius:6px;padding:0 5px;font-size:11px;color:#7c3aed}
+@media(min-width:880px){.ob-keylist{grid-template-columns:1fr 1fr}}

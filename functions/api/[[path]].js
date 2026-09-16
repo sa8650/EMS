@@ -1,4 +1,5 @@
 /* Cloudflare Pages Function: custom auth + tenant-enforced EMS API */
+import {db,dbConfigured} from '../_lib/db.js';
 const enc = new TextEncoder(), dec = new TextDecoder();
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 const fail=(message,status=400)=>json({error:message},status);
@@ -12,7 +13,6 @@ async function sendBrevo(env,to,subject,html){try{if(!env.BREVO_API_KEY||!to)ret
 const PBKDF2_ITERATIONS=100000; /* Cloudflare Workers WebCrypto maximum */
 async function hash(password,salt=b64u(crypto.getRandomValues(new Uint8Array(16)))){let bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(salt),iterations:PBKDF2_ITERATIONS,hash:'SHA-256'},await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']),256);return `pbkdf2$${PBKDF2_ITERATIONS}$${salt}$${b64u(bits)}`;}
 async function check(password,stored){let [,i,s,v]=stored.split('$'),iterations=+i;if(!iterations||iterations>PBKDF2_ITERATIONS)return false;let bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:enc.encode(s),iterations,hash:'SHA-256'},await crypto.subtle.importKey('raw',enc.encode(password),'PBKDF2',false,['deriveBits']),256);return b64u(bits)===v;}
-function db(env,path,opt={}){return fetch(env.SUPABASE_URL+'/rest/v1/'+path,{...opt,headers:{apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+env.SUPABASE_SERVICE_ROLE_KEY,Prefer:'return=representation',...(opt.headers||{})}}).then(async r=>{let x=await r.json().catch(()=>null);if(!r.ok)throw Error(x?.message||'Database request failed');return x;});}
 const clean=o=>Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined));
 const shortId=id=>String(id||'').replaceAll('-','').slice(0,6).toUpperCase();
 const emailList=v=>String(v||'').split(/[;,]/).map(x=>x.trim().toLowerCase()).filter(Boolean);const validEmail=x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);const safeText=x=>String(x||'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
@@ -26,28 +26,103 @@ const laterDate=(a,b)=>{a=a?new Date(a):null;b=b?new Date(b):null;if(!a)return b
 async function businessHealthPlan(env,storeId){let [store]=await db(env,`stores?id=eq.${storeId}&select=admin_id,status`);if(!store||!['active','read_only'].includes(store.status))return null;let [ent,addon]=await Promise.all([currentEntitlement(env,store.admin_id),addonPlan(env,store.admin_id,'business_health')]);let lic=ent?.business_health_enabled?{daily:Number(ent.business_health_daily_limit||0),expires:ent.expires_at}:null;if(!lic&&!addon)return null;return {business_health_daily_limit:Math.max(lic?lic.daily:0,addon?addon.daily_limit:0),expires_at:laterDate(lic?lic.expires:null,addon?addon.expires_at:null)}}
 async function truebillPlan(env,storeId){let [store]=await db(env,`stores?id=eq.${storeId}&select=admin_id,status`);if(!store||!['active','read_only'].includes(store.status))return null;let [ent,addon]=await Promise.all([currentEntitlement(env,store.admin_id),addonPlan(env,store.admin_id,'truebill')]);let lic=ent?.truebill_enabled?{expires:ent.expires_at}:null;if(!lic&&!addon)return null;return {enabled:true,expires_at:laterDate(lic?lic.expires:null,addon?addon.expires_at:null)}}
 const GB=1024*1024*1024;
+let _vaultExpCols=null;
+/* Detects whether vaultium_files has the expense_id/expense_code columns.
+ * Old deployments that have not run migration_vaultium_expense_links yet
+ * return false, and every Vaultium query/insert then falls back to the
+ * legacy shape so the feature keeps working instead of erroring. */
+async function vaultExpenseColumns(env){
+ if(_vaultExpCols!==null)return _vaultExpCols;
+ // A WHERE on the column fails on old schemas for BOTH drivers: PostgREST
+ // rejects unknown columns (400), and the D1 driver compiles the same WHERE.
+ // (The select-projection alone is not enough — D1 always does SELECT *.)
+ try{await db(env,'vaultium_files?expense_id=is.null&select=id&limit=1');_vaultExpCols=true}catch{_vaultExpCols=false}
+ return _vaultExpCols;
+}
+async function vaultFileRows(env,storeId,limit){
+ const has=await vaultExpenseColumns(env);
+ const cols=has
+  ?'id,invoice_id,invoice_number,expense_id,expense_code,filename,content_type,size_bytes,created_at'
+  :'id,invoice_id,invoice_number,filename,content_type,size_bytes,created_at';
+ let rows=await db(env,`vaultium_files?store_id=eq.${storeId}&select=${cols}&order=created_at.desc&limit=${limit}`);
+ if(!has)rows=rows.map(r=>({...r,expense_id:null,
+  // Legacy expense uploads were stored with invoice_id NULL and invoice_number = EXP-code.
+  expense_code:r.invoice_id?null:(r.invoice_number||null)}));
+ return rows;
+}
 async function vaultiumPlan(env,storeId){let [store]=await db(env,`stores?id=eq.${storeId}&select=admin_id,status`);if(!store||!['active','read_only'].includes(store.status))return null;let [ent,addon]=await Promise.all([currentEntitlement(env,store.admin_id),addonPlan(env,store.admin_id,'vaultium')]);let lic=ent&&Number(ent.vaultium_gb||0)>0?{gb:Number(ent.vaultium_gb),expires:ent.expires_at}:null;if(!lic&&!addon)return null;return {gb:Math.max(lic?lic.gb:0,addon?Number(addon.daily_limit||0):0),expires_at:laterDate(lic?lic.expires:null,addon?addon.expires_at:null)}}
 async function connectxPlan(env,storeId){let [store]=await db(env,`stores?id=eq.${storeId}&select=admin_id,status`);if(!store||!['active','read_only'].includes(store.status))return null;let [ent,addon]=await Promise.all([currentEntitlement(env,store.admin_id),addonPlan(env,store.admin_id,'connectx')]);let lic=ent?.connectx_enabled?{daily:Number(ent.connectx_daily_limit||0),expires:ent.expires_at}:null;if(!lic&&!addon)return null;return {connectx_daily_limit:Math.max(lic?lic.daily:0,addon?addon.daily_limit:0),expires_at:laterDate(lic?lic.expires:null,addon?addon.expires_at:null)}}
 async function zudoPlan(env,storeId){let [store]=await db(env,`stores?id=eq.${storeId}&select=admin_id,status`);if(!store||!['active','read_only'].includes(store.status))return null;let [ent,addon]=await Promise.all([currentEntitlement(env,store.admin_id),addonPlan(env,store.admin_id,'zudo')]);let lic=ent?.zudo_enabled?{daily:Number(ent.zudo_daily_limit||0),expires:ent.expires_at}:null;if(!lic&&!addon)return null;return {zudo_daily_limit:Math.max(lic?lic.daily:0,addon?addon.daily_limit:0),expires_at:laterDate(lic?lic.expires:null,addon?addon.expires_at:null)}}
 const AI_PROVIDERS={
- '@cf/meta/llama-3.2-3b-instruct':{name:'Llama 3.2 3B Instruct (Cloudflare)',provider:'cf'},
- 'gemini:gemini-2.0-flash':{name:'Gemini 2.0 Flash (Google)',provider:'gemini'},
- 'gemini:gemini-2.0-flash-lite':{name:'Gemini 2.0 Flash-Lite (Google)',provider:'gemini'},
- 'groq:llama-3.3-70b-versatile':{name:'Llama 3.3 70B (Groq)',provider:'groq'},
- 'groq:qwen-qwq-32b':{name:'Qwen QwQ 32B (Groq)',provider:'groq'},
- 'groq:llama-3.1-8b-instant':{name:'Llama 3.1 8B Instant (Groq)',provider:'groq'},
- 'cerebras:llama3.1-8b':{name:'Llama 3.1 8B (Cerebras)',provider:'cerebras'},
- 'cerebras:qwen-2.5-7b':{name:'Qwen 2.5 7B (Cerebras)',provider:'cerebras'},
- 'cerebras:gpt-oss-20b':{name:'GPT-OSS 20B (Cerebras)',provider:'cerebras'}
+ '@cf/meta/llama-3.2-3b-instruct':{name:'Llama 3.2 3B Instruct (Cloudflare · free)',provider:'cf'},
+ 'gemini:gemini-3.6-flash':{name:'Gemini 3.6 Flash (Google)',provider:'gemini'},
+ 'gemini:gemini-3.5-flash-lite':{name:'Gemini 3.5 Flash-Lite (Google)',provider:'gemini'},
+ 'groq:openai/gpt-oss-120b':{name:'GPT-OSS 120B (Groq · free tier)',provider:'groq'},
+ 'groq:openai/gpt-oss-20b':{name:'GPT-OSS 20B (Groq · free tier)',provider:'groq'},
+ 'groq:qwen/qwen3.6-27b':{name:'Qwen3.6 27B vision (Groq · preview)',provider:'groq'},
+ 'cerebras:llama-3.3-70b':{name:'Llama 3.3 70B (Cerebras · free)',provider:'cerebras'},
+ 'cerebras:gpt-oss-120b':{name:'GPT-OSS 120B (Cerebras · free)',provider:'cerebras'},
+ 'cerebras:qwen-3-32b':{name:'Qwen3 32B (Cerebras · free)',provider:'cerebras'},
+ 'cerebras:llama-4-scout-17b-16e-instruct':{name:'Llama 4 Scout 17B (Cerebras · free)',provider:'cerebras'},
+ 'deepseek:deepseek-chat':{name:'DeepSeek Chat V3 (DeepSeek direct)',provider:'deepseek'},
+ 'deepseek:deepseek-reasoner':{name:'DeepSeek Reasoner R1 (DeepSeek direct)',provider:'deepseek'},
+ 'openrouter:openai/gpt-oss-120b:free':{name:'GPT-OSS 120B (OpenRouter · free)',provider:'openrouter'},
+ 'openrouter:openai/gpt-oss-20b:free':{name:'GPT-OSS 20B (OpenRouter · free)',provider:'openrouter'},
+ 'openrouter:google/gemma-4-31b-it:free':{name:'Gemma 4 31B (OpenRouter · free)',provider:'openrouter'},
+ 'openrouter:nvidia/nemotron-3-super-120b-a12b:free':{name:'Nemotron 3 Super 120B (OpenRouter · free)',provider:'openrouter'},
+ 'github:gpt-4o-mini':{name:'GPT-4o mini (GitHub Models · Copilot, free)',provider:'github'},
+ 'github:DeepSeek-V3':{name:'DeepSeek V3 (GitHub Models · Copilot, free)',provider:'github'},
+ 'github:Meta-Llama-3.3-70B-Instruct':{name:'Llama 3.3 70B (GitHub Models · Copilot, free)',provider:'github'},
+ 'anthropic:claude-haiku-4-5':{name:'Claude Haiku 4.5 (Anthropic)',provider:'anthropic'},
+ 'anthropic:claude-sonnet-5':{name:'Claude Sonnet 5 (Anthropic)',provider:'anthropic'}
 };
-const aiProvider=m=>{const k=String(m||'');if(k.startsWith('@cf/'))return 'cf';if(k.startsWith('gemini:'))return 'gemini';if(k.startsWith('groq:'))return 'groq';if(k.startsWith('cerebras:'))return 'cerebras';return 'cf'};
-const aiConfigured=(env,m)=>{const p=aiProvider(m);if(p==='gemini')return !!env.GEMINI_API_KEY;if(p==='groq')return !!env.GROQ_API_KEY;if(p==='cerebras')return !!env.CEREBRAS_API_KEY;return !!env.AI};
-async function openaiCompat(url,key,model,messages,temperature){const res=await fetch(url,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json'},body:JSON.stringify({model,messages,temperature})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||out?.message||'AI request failed');return String(out?.choices?.[0]?.message?.content||'')}
-async function runAI(env,model,messages,temperature=0.3){const m=String(model||'@cf/meta/llama-3.2-3b-instruct'),p=aiProvider(m);
- if(p==='gemini'){if(!env.GEMINI_API_KEY)throw Error('Gemini API key is not configured. Add GEMINI_API_KEY to Cloudflare secrets.');const gm=m.slice(7);const sys=messages.filter(x=>x.role==='system').map(x=>x.content).join('\n\n');const contents=messages.filter(x=>x.role!=='system').map(x=>({role:x.role==='assistant'?'model':'user',parts:[{text:x.content}]}));const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${gm}:generateContent?key=${env.GEMINI_API_KEY}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents,systemInstruction:sys?{parts:[{text:sys}]}:undefined,generationConfig:{temperature}})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||'Gemini request failed');return String(out?.candidates?.[0]?.content?.parts?.[0]?.text||'')}
- if(p==='groq'){if(!env.GROQ_API_KEY)throw Error('Groq API key is not configured. Add GROQ_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.groq.com/openai/v1/chat/completions',env.GROQ_API_KEY,m.slice(5),messages,temperature)}
- if(p==='cerebras'){if(!env.CEREBRAS_API_KEY)throw Error('Cerebras API key is not configured. Add CEREBRAS_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.cerebras.ai/v1/chat/completions',env.CEREBRAS_API_KEY,m.slice(9),messages,temperature)}
- if(!env.AI)throw Error('Cloudflare AI binding is not configured.');const r=await env.AI.run(m,{messages,temperature});return String(r?.response||r?.result?.response||'')}
+/* Saved model ids that providers have retired/decommissioned -> current replacement.
+ * Applied transparently so shops keep working after provider-side removals. */
+const AI_MODEL_FALLBACKS={
+ 'gemini:gemini-2.0-flash':'gemini:gemini-3.6-flash',
+ 'gemini:gemini-2.0-flash-lite':'gemini:gemini-3.5-flash-lite',
+ 'groq:llama-3.3-70b-versatile':'groq:openai/gpt-oss-120b',
+ 'groq:qwen-qwq-32b':'groq:openai/gpt-oss-120b',
+ 'groq:llama-3.1-8b-instant':'groq:openai/gpt-oss-20b',
+ 'cerebras:llama3.1-8b':'cerebras:llama-3.3-70b',
+ 'cerebras:qwen-2.5-7b':'cerebras:qwen-3-32b',
+ 'cerebras:gpt-oss-20b':'cerebras:gpt-oss-120b'
+};
+function modernModel(id){let m=String(id||'@cf/meta/llama-3.2-3b-instruct');if(AI_MODEL_FALLBACKS[m])m=AI_MODEL_FALLBACKS[m];if(aiProvider(m)==='cf'&&(m.includes('llama-3.1')||m.includes('infire')))m='@cf/meta/llama-3.2-3b-instruct';return m}
+/* Detects the user's writing mode so the model cannot drift to the language of
+ * earlier turns. Returns a hard directive appended to the LATEST user message:
+ * 'bangla' (Bengali script), 'banglish' (Roman Bengali), 'english', or
+ * 'same' (Hindi/Arabic/other — reply in that language and script). */
+function zudoLangMode(q){
+ const s=String(q||'');
+ if(/[\u0980-\u09FF]/.test(s))return 'bangla';
+ if(/[\u0900-\u097F]/.test(s))return 'hindi';
+ if(/[\u0600-\u06FF]/.test(s))return 'arabic';
+ const words=s.toLowerCase().match(/[a-z']+/g)||[];
+ const banglish=new Set(['ami','amr','amar','amake','amakey','amader','apni','apnar','apnake','tumi','tomar','tomake','tui','tor','kothay','kotha','koto','kivabe','keno','kichu','kichute','kono','kon','ache','achhe','achen','achilo','nai','nei','thakbe','thake','thakto','hobe','hobena','hoy','hoye','hoeche','hoyche','hoyese','geche','geche','giye','gelo','gulo','gula','korbo','korbona','koro','korben','korte','korchen','kori','korite','chai','chan','chao','chay','chaichi','dao','din','deoya','debe','deben','dite','diyecho','diyechi','diyechilen','bolo','bolun','bolte','bujhi','bujhte','bujh','parba','parben','paro','parchi','ektu','ekta','ekhon','aaj','aj','kal','roja','bhalo','valo','khub','kom','komme','beshi','taka','dokan','bikri','kroy','baad','pao','pabe','paben','pawa','lagbe','lagto','darun','sob','soba','naki','tahole','tarpor','somossa','ossubidha','osubidha','vai','bhai','apu','salam','namaskar','doya','koruna','jan','janen','jano','ache','vala','mot','kichui','tuku','gn']);
+ if(words.some(w=>banglish.has(w)))return 'banglish';
+ return 'english';
+}
+function zudoLangDirective(q){
+ const mode=zudoLangMode(q);
+ if(mode==='bangla')return '- The question above is in BENGALI (Bangla) script. Write your ENTIRE reply in natural, warm Bengali/Bangla script (অ আ ক খ). Do not use English sentences; common product/number words may stay as-is.';
+ if(mode==='banglish')return '- The question above is in BANGLISH (Bengali written in Roman/Latin letters, e.g. "amar koto sale hoyeche?"). Write your ENTIRE reply in the SAME Banglish style — warm, simple Bengali using Roman letters (e.g. "Apnar ajker sale hoyeche ৳..."). Do NOT use Bengali script and do NOT answer in English.';
+ if(mode==='hindi')return '- The question above is in Hindi (Devanagari script). Write your ENTIRE reply in the same Hindi language and script.';
+ if(mode==='arabic')return '- The question above is in Arabic script. Write your ENTIRE reply in the same language and script.';
+ return '- The question above is in English. Write your ENTIRE reply ONLY in English, even if earlier messages in this conversation used Bangla or Banglish.';
+}
+const aiProvider=m=>{const k=String(m||'');const pfx=k.split(':')[0];if(k.startsWith('@cf/'))return 'cf';if(['gemini','groq','cerebras','deepseek','openrouter','github','anthropic'].includes(pfx))return pfx;return 'cf'};
+const aiConfigured=(env,m)=>{const p=aiProvider(m);return {cf:!!env.AI,gemini:!!env.GEMINI_API_KEY,groq:!!env.GROQ_API_KEY,cerebras:!!env.CEREBRAS_API_KEY,deepseek:!!env.DEEPSEEK_API_KEY,openrouter:!!env.OPENROUTER_API_KEY,github:!!env.GITHUB_TOKEN,anthropic:!!env.ANTHROPIC_API_KEY}[p]};
+async function openaiCompat(url,key,model,messages,temperature,maxTokens,extraHeaders){const res=await fetch(url,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json',...(extraHeaders||{})},body:JSON.stringify({model,messages,temperature,max_tokens:maxTokens||1024})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||out?.message||'AI request failed');return String(out?.choices?.[0]?.message?.content||'')}
+async function runAI(env,model,messages,temperature=0.3,maxTokens=1024){const m=modernModel(model),p=aiProvider(m);
+ if(p==='gemini'){if(!env.GEMINI_API_KEY)throw Error('Gemini API key is not configured. Add GEMINI_API_KEY to Cloudflare secrets.');const gm=m.slice(7);const sys=messages.filter(x=>x.role==='system').map(x=>x.content).join('\n\n');const contents=messages.filter(x=>x.role!=='system').map(x=>({role:x.role==='assistant'?'model':'user',parts:[{text:x.content}]}));const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${gm}:generateContent?key=${env.GEMINI_API_KEY}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents,systemInstruction:sys?{parts:[{text:sys}]}:undefined,generationConfig:{temperature,maxOutputTokens:maxTokens}})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||'Gemini request failed');return String(out?.candidates?.[0]?.content?.parts?.[0]?.text||'')}
+ if(p==='groq'){if(!env.GROQ_API_KEY)throw Error('Groq API key is not configured. Add GROQ_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.groq.com/openai/v1/chat/completions',env.GROQ_API_KEY,m.slice(5),messages,temperature,maxTokens)}
+ if(p==='cerebras'){if(!env.CEREBRAS_API_KEY)throw Error('Cerebras API key is not configured. Add CEREBRAS_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.cerebras.ai/v1/chat/completions',env.CEREBRAS_API_KEY,m.slice(9),messages,temperature,maxTokens)}
+ if(p==='deepseek'){if(!env.DEEPSEEK_API_KEY)throw Error('DeepSeek API key is not configured. Add DEEPSEEK_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.deepseek.com/v1/chat/completions',env.DEEPSEEK_API_KEY,m.slice(9),messages,temperature,maxTokens)}
+ if(p==='openrouter'){if(!env.OPENROUTER_API_KEY)throw Error('OpenRouter API key is not configured. Add OPENROUTER_API_KEY to Cloudflare secrets.');return openaiCompat('https://openrouter.ai/api/v1/chat/completions',env.OPENROUTER_API_KEY,m.slice(11),messages,temperature,maxTokens,{'HTTP-Referer':'https://ems-v1.app','X-Title':'EMS V1 · Zudo AI'})}
+ if(p==='github'){if(!env.GITHUB_TOKEN)throw Error('GitHub token is not configured. Add GITHUB_TOKEN to Cloudflare secrets (GitHub Models, free).');return openaiCompat('https://models.inference.ai.azure.com/chat/completions',env.GITHUB_TOKEN,m.slice(7),messages,temperature,maxTokens)}
+ if(p==='anthropic'){if(!env.ANTHROPIC_API_KEY)throw Error('Anthropic API key is not configured. Add ANTHROPIC_API_KEY to Cloudflare secrets.');const sys=messages.filter(x=>x.role==='system').map(x=>x.content).join('\n\n');const amessages=messages.filter(x=>x.role!=='system').map(x=>({role:x.role==='assistant'?'assistant':'user',content:x.content}));const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01'},body:JSON.stringify({model:m.slice(10),max_tokens:maxTokens,temperature,system:sys||undefined,messages:amessages})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||'Anthropic request failed');return String(out?.content?.filter(x=>x.type==='text').map(x=>x.text).join('\n')||'')}
+ if(!env.AI)throw Error('Cloudflare AI binding is not configured.');const r=await env.AI.run(m,{messages,temperature,max_tokens:maxTokens});return String(r?.response||r?.result?.response||'')}
 
 const tables={supplier:'suppliers',customer:'customers',inventory:'inventory_items',expense:'expenses',staff:'staff'};
 const perms={supplier:'supplier',customer:'customer',inventory:'inventory',expense:'expense',staff:'staff'};
@@ -58,7 +133,7 @@ function allowed(s,section,verb){if(s.readOnly&&verb!=='view')return false;if(s.
 function allowedAddon(s,section,verb){if(s.role==='admin'||s.adminAccess)return true;let actions=(s.permissions||{})[section]||[];return actions.includes(verb)||(section==='connectx'&&verb==='send'&&actions.includes('add'))||(section==='zudo'&&verb==='add'&&(actions.includes('send')||actions.includes('add')))}
 function publicStaff(r){delete r.password_hash;return r}
 export async function onRequest(context){const {request,env,params}=context, path=(params.path||[]).join('/'), method=request.method;try{
- {let missing=['SUPABASE_URL','SUPABASE_SERVICE_ROLE_KEY','SESSION_SECRET'].filter(k=>!env[k]);if(missing.length)return fail('Server configuration is incomplete: missing '+missing.join(', ')+'.',500);}
+ {let missing=['SESSION_SECRET'].filter(k=>!env[k]);if(!dbConfigured(env))missing.push(String(env.DB_DRIVER||'').toLowerCase()==='d1'?'DB (D1 binding)':'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or set DB_DRIVER=d1 with a D1 binding named DB)');if(missing.length)return fail('Server configuration is incomplete: missing '+missing.join(', ')+'.',500);}
  if(path==='auth/admin/register'&&method==='POST'){let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!b.phone||!email||!b.password||b.password.length<10)return fail('Name, phone, valid email and a 10-character password are required.');let exists=await db(env,`administrators?email=eq.${encodeURIComponent(email)}&select=id`);if(exists.length)return fail('That email is already registered.',409);let adminCode;for(let i=0;i<12;i++){adminCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`administrators?admin_code=eq.${adminCode}&select=id`);if(!used.length)break;adminCode=null}if(!adminCode)throw Error('Could not reserve an Administrator ID. Please retry.');let [a]=await db(env,'administrators',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name.trim(),address:b.address||null,phone:b.phone.trim(),email,password_hash:await hash(b.password),admin_code:adminCode})});return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
  if(path==='auth/admin/login'&&method==='POST'){let b=await body(request),[a]=await db(env,`administrators?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!a)return fail('Wrong email or password.',401);if(!a.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',a.password_hash))return fail('Wrong email or password.',401);return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
  if(path==='auth/shop/login'&&method==='POST'){let b=await body(request),[store]=await db(env,`stores?shop_code=eq.${encodeURIComponent(b.storeId||'')}&select=id,status,name,admin_id`);if(!store)return fail('Wrong Shop ID.',401);if(!await enforceEntitlement(env,store.admin_id))store.status='read_only';if(store.status==='inactive')return fail('This shop is deactivated. Contact the administrator.',403);let [st]=await db(env,`staff?store_id=eq.${store.id}&user_id=eq.${encodeURIComponent(b.userId||'')}&select=*`), fp=request.headers.get('cf-connecting-ip')+'|'+request.headers.get('user-agent');if(st){if(!st.active)return fail('This user account is deactivated. Contact your shop administrator.',403);if(!await check(b.password||'',st.password_hash))return fail('Wrong user ID or password.',401);await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:st.id,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'staff',actor_id:st.id,action:'staff login',entity_type:'session',entity_id:st.id})});return json({token:await token({id:st.id,role:'staff',storeId:store.id,permissions:normalizePermissions(st.permissions||{}),readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:st.id,name:st.full_name},store:{id:store.id,name:store.name},role:'staff',readOnly:store.status==='read_only'})}let [admin]=await db(env,`administrators?id=eq.${store.admin_id}&email=eq.${encodeURIComponent((b.userId||'').toLowerCase())}&select=*`);if(!admin)return fail('Wrong user ID or password.',401);if(!admin.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',admin.password_hash))return fail('Wrong user ID or password.',401);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:null,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'admin',actor_id:admin.id,action:'administrator shop login',entity_type:'store',entity_id:store.id})});let adminReturn={token:await token({id:admin.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name,email:admin.email},role:'admin'};return json({token:await token({id:admin.id,role:'staff',storeId:store.id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name},store:{id:store.id,name:store.name},role:'staff',adminAccess:true,readOnly:store.status==='read_only',adminReturn})}
@@ -116,7 +191,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='platform/connectx'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'connectx_settings?select=*');let today=new Date().toISOString().slice(0,10),used=await db(env,`connectx_messages?created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`);return json({...x,usedToday:used.length,apiConfigured:!!env.BREVO_API_KEY})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'connectx_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,provider:'brevo_api',from_name:b.from_name,from_email:b.from_email,reply_to:b.reply_to||null,global_daily_limit:Number(b.global_daily_limit),enabled:!!b.enabled,updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
  if(path==='platform/connectx/logs'&&method==='GET'){if(s.role!=='owner')return fail('Forbidden',403);return json(await db(env,'connectx_messages?select=store_id,to_emails,subject,status,error_message,provider_message_id,shop_deleted_at,created_at&order=created_at.desc&limit=100'))}
  if(path==='platform/connectx/test'&&method==='POST'){if(s.role!=='owner')return fail('Forbidden',403);let b=await body(request),to=emailList(b.to);if(to.length!==1||!validEmail(to[0]))return fail('Enter one valid test recipient email.');let [cfg]=await db(env,'connectx_settings?select=*');if(!cfg?.from_email)return fail('Save a valid ConnectX From Email first.');if(!env.BREVO_API_KEY)return fail('BREVO_API_KEY is missing from Cloudflare Production secrets.',503);let res=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':env.BREVO_API_KEY,'content-type':'application/json'},body:JSON.stringify({sender:{name:cfg.from_name,email:cfg.from_email},replyTo:cfg.reply_to?{email:cfg.reply_to}:undefined,to:[{email:to[0]}],subject:'ConnectX Provider Test',htmlContent:'<p>ConnectX provider test successful.</p>'})}),out=await res.json().catch(()=>({}));if(!res.ok)return fail('Brevo rejected test: '+(out.message||('HTTP '+res.status)),502);return json({ok:true,messageId:out.messageId||null})}
- if(path==='platform/zudo'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'zudo_settings?select=*');let today=new Date().toISOString().slice(0,10),used=await db(env,`zudo_messages?role=eq.user&created_at=gte.${today}T00:00:00Z&select=id`);return json({...x,usedToday:used.length,aiBinding:!!env.AI,geminiBinding:!!env.GEMINI_API_KEY,groqBinding:!!env.GROQ_API_KEY,cerebrasBinding:!!env.CEREBRAS_API_KEY,models:AI_PROVIDERS})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'zudo_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,enabled:!!b.enabled,model:b.model||'@cf/meta/llama-3.2-3b-instruct',global_daily_limit:Number(b.global_daily_limit),updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
+ if(path==='platform/zudo'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'zudo_settings?select=*');let today=new Date().toISOString().slice(0,10),used=await db(env,`zudo_messages?role=eq.user&created_at=gte.${today}T00:00:00Z&select=id`);return json({...x,usedToday:used.length,aiBinding:!!env.AI,geminiBinding:!!env.GEMINI_API_KEY,groqBinding:!!env.GROQ_API_KEY,cerebrasBinding:!!env.CEREBRAS_API_KEY,deepseekBinding:!!env.DEEPSEEK_API_KEY,openrouterBinding:!!env.OPENROUTER_API_KEY,githubBinding:!!env.GITHUB_TOKEN,anthropicBinding:!!env.ANTHROPIC_API_KEY,models:AI_PROVIDERS})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'zudo_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,enabled:!!b.enabled,model:b.model||'@cf/meta/llama-3.2-3b-instruct',global_daily_limit:Number(b.global_daily_limit),updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
  if(path==='platform/zudo/logs'&&method==='GET'){if(s.role!=='owner')return fail('Forbidden',403);let convs=await db(env,'zudo_conversations?select=id,store_id,user_id,title,shop_deleted_at,created_at,updated_at&order=updated_at.desc&limit=100'),storeIds=[...new Set(convs.map(c=>c.store_id).filter(Boolean))],stores=storeIds.length?await db(env,`stores?id=in.(${storeIds.join(',')})&select=id,shop_code`):[],staffs=storeIds.length?await db(env,`staff?store_id=in.(${storeIds.join(',')})&select=id,user_id`):[],admins=await db(env,'administrators?select=id,email'),storeMap=Object.fromEntries(stores.map(x=>[x.id,x.shop_code])),staffMap=Object.fromEntries(staffs.map(x=>[x.id,x.user_id])),adminMap=Object.fromEntries(admins.map(x=>[x.id,x.email]));return json(convs.map(c=>({...c,shop_code:storeMap[c.store_id]||null,user_login_id:staffMap[c.user_id]||adminMap[c.user_id]||null})))}
  if(path.match(/^platform\/zudo\/conversation\/[^/]+$/)&&method==='GET'){if(s.role!=='owner')return fail('Forbidden',403);let id=path.split('/')[3],[c]=await db(env,`zudo_conversations?id=eq.${id}&select=id,title`);if(!c)return fail('Conversation not found.',404);let msgs=await db(env,`zudo_messages?conversation_id=eq.${id}&select=role,content,created_at&order=created_at.asc`);return json({title:c.title,messages:msgs})}
  if(path==='platform/factory-reset'&&method==='POST'){ if(s.role!=='owner')return fail('Forbidden',403);let b=await body(request);if(b.confirmation!=='FACTORY RESET EMS')return fail('Enter the exact confirmation text: FACTORY RESET EMS',400);await db(env,'rpc/factory_reset_ems',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});return json({ok:true})}
@@ -141,7 +216,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='invoice-items'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let kind=new URL(request.url).searchParams.get('kind'),section=kind==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(kind)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,unit,sale_price,total_stock,active&order=description.asc`))}
  if(path==='invoice-parties'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let kind=new URL(request.url).searchParams.get('kind'),section=kind==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(kind)||!allowed(s,section,'view'))return fail('Permission denied.',403);let table=kind==='purchase'?'suppliers':'customers',code=kind==='purchase'?'supplier_code':'customer_code';return json(await db(env,`${table}?store_id=eq.${s.storeId}&select=id,name,address,phone,${code}&order=name.asc`))}
  if(path.match(/^invoices\/[^/]+$/)&&method==='DELETE'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[1],[inv]=await db(env,`invoices?id=eq.${id}&store_id=eq.${s.storeId}&select=kind`);if(!inv)return fail('Invoice not found.',404);if(!allowed(s,inv.kind==='purchase'?'purchase':'sales','delete'))return fail('Permission denied.',403);await db(env,'rpc/delete_posted_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_store_id:s.storeId,p_invoice_id:id})});await audit(env,s,'delete',inv.kind+' invoice',id);return json({ok:true})}
- if(path==='invoices'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let q=new URL(request.url).searchParams.get('kind'),section=q==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(q)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${q}&select=*,invoice_lines(*,inventory_items(item_code,description,unit))&order=created_at.desc`))}if(method==='POST'){let b=await body(request), section=b.kind==='purchase'?'purchase':'sales';if(!allowed(s,section,'add'))return fail('Permission denied.',403);let payload={p_store_id:s.storeId,p_kind:b.kind,p_party_id:b.partyId||null,p_invoice_date:b.invoiceDate,p_payment_method:b.paymentMethod||'cash',p_transaction_id:b.transactionId||null,p_notes:b.notes||null,p_tax_percent:Number(b.taxPercent||0),p_discount:Number(b.discount||0),p_paid_amount:Number(b.paidAmount||0),p_created_by:s.id,p_lines:b.lines};let x=null,lastErr=null;for(let attempt=0;attempt<4;attempt++){let actualInvoiceNumber=await db(env,'rpc/next_ems_invoice_number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_kind:b.kind})});let r=await fetch(env.SUPABASE_URL+'/rest/v1/rpc/post_invoice',{method:'POST',headers:{apikey:env.SUPABASE_SERVICE_ROLE_KEY,Authorization:'Bearer '+env.SUPABASE_SERVICE_ROLE_KEY,'content-type':'application/json'},body:JSON.stringify({...payload,p_invoice_number:actualInvoiceNumber})});let rj=await r.json().catch(()=>({}));if(!r.ok){lastErr=rj.message||rj.error||'Invoice could not be posted';if(/duplicate key|already exists/i.test(lastErr))continue;throw Error(lastErr)}x=rj;break}if(!x)throw Error(lastErr||'Invoice could not be posted');if(b.kind==='sale'&&!b.partyId){let [updated]=await db(env,`invoices?id=eq.${x.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({custom_party_name:b.customPartyName||null,custom_party_address:b.customPartyAddress||null,custom_party_phone:b.customPartyPhone||null})});x=updated}await audit(env,s,'post',b.kind+' invoice',x.id);return json(x,201)}}
+ if(path==='invoices'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let q=new URL(request.url).searchParams.get('kind'),section=q==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(q)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${q}&select=*,invoice_lines(*,inventory_items(item_code,description,unit))&order=created_at.desc`))}if(method==='POST'){let b=await body(request), section=b.kind==='purchase'?'purchase':'sales';if(!allowed(s,section,'add'))return fail('Permission denied.',403);let payload={p_store_id:s.storeId,p_kind:b.kind,p_party_id:b.partyId||null,p_invoice_date:b.invoiceDate,p_payment_method:b.paymentMethod||'cash',p_transaction_id:b.transactionId||null,p_notes:b.notes||null,p_tax_percent:Number(b.taxPercent||0),p_discount:Number(b.discount||0),p_paid_amount:Number(b.paidAmount||0),p_created_by:s.id,p_lines:b.lines};let x=null,rj=null,lastErr=null;for(let attempt=0;attempt<4;attempt++){let actualInvoiceNumber=await db(env,'rpc/next_ems_invoice_number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_kind:b.kind})});try{rj=await db(env,'rpc/post_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,p_invoice_number:actualInvoiceNumber})})}catch(pe){lastErr=pe.message||'Invoice could not be posted';if(/duplicate|already exists|UNIQUE/i.test(lastErr))continue;throw Error(lastErr)}x=rj;break}if(!x)throw Error(lastErr||'Invoice could not be posted');if(b.kind==='sale'&&!b.partyId){let [updated]=await db(env,`invoices?id=eq.${x.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({custom_party_name:b.customPartyName||null,custom_party_address:b.customPartyAddress||null,custom_party_phone:b.customPartyPhone||null})});x=updated}await audit(env,s,'post',b.kind+' invoice',x.id);return json(x,201)}}
  if(path==='shop/settings'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [store]=await db(env,`stores?id=eq.${s.storeId}&select=name,shop_code,address,phone,phone2,email,website,low_stock_threshold,status`);return json(store)}
  if(path==='shop/activity-logs'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [logs,staffs,suppliers,customers,items,expenses,invoices]=await Promise.all([db(env,`activity_logs?store_id=eq.${s.storeId}&select=*&order=created_at.desc&limit=300`),db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`),db(env,`suppliers?store_id=eq.${s.storeId}&select=id,supplier_code`),db(env,`customers?store_id=eq.${s.storeId}&select=id,customer_code`),db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code`),db(env,`expenses?store_id=eq.${s.storeId}&select=id,expense_code`),db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number`)]);let staffMap=Object.fromEntries(staffs.map(x=>[x.id,{userId:x.user_id,name:x.full_name}])),details={};for(let a of [suppliers,customers,items,expenses,invoices])for(let r of a)details[r.id]=r.supplier_code||r.customer_code||r.item_code||r.expense_code||r.invoice_number;return json(logs.map(x=>({...x,detail:details[x.entity_id]||x.entity_id||'—',actor:staffMap[x.actor_id]||{userId:x.actor_type==='admin'?'ADMIN':'System',name:x.actor_type==='admin'?'Administrator':'System'}})))}
  if(path==='addons/coupon'&&s.role==='admin'&&method==='GET'){let code=(new URL(request.url).searchParams.get('code')||'').trim().toUpperCase();if(!code)return fail('Enter a coupon code.',400);let [c]=await db(env,`addon_coupons?code=eq.${encodeURIComponent(code)}&active=is.true&select=*`);if(!c)return fail('Invalid or inactive coupon code.',404);return json({code:c.code,percent_off:Number(c.percent_off||0)})}
@@ -190,49 +265,80 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let today=new Date().toISOString().slice(0,10),[globalUsed,shopUsed]=await Promise.all([db(env,`business_health_reports?created_at=gte.${today}T00:00:00Z&select=id`),db(env,`business_health_reports?store_id=eq.${s.storeId}&created_at=gte.${today}T00:00:00Z&select=id`)]);
   if(globalUsed.length>=Number(cfg.global_daily_limit||100))return fail('Business AI Health global daily limit has been reached.',429);
   if(shopUsed.length>=plan.business_health_daily_limit)return fail('Your shop has reached its daily Business AI Health limit.',429);
-  let [store,sales,purchases,expenses,recoveries,errors,activity,customers,suppliers,staff]=await Promise.all([
-   db(env,`stores?id=eq.${s.storeId}&select=id,name,address,phone,phone2,email,website`),
-   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,created_by,subtotal,discount,total_due`),
-   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,subtotal`),
-   db(env,`expenses?store_id=eq.${s.storeId}&expense_date=gte.${start}&expense_date=lte.${end}&select=total`),
+  const ymd=d=>d.toISOString().slice(0,10);
+  const sd=new Date(start+'T00:00:00'),ed=new Date(end+'T00:00:00');
+  const days=Math.max(1,Math.round((ed-sd)/86400000)+1);
+  const prevEnd=new Date(sd.getTime()-86400000),prevStart=new Date(prevEnd.getTime()-(days-1)*86400000);
+  const ps=ymd(prevStart),pe=ymd(prevEnd);
+  let [store,sales,purchases,expenses,recoveries,errors,activity,customers,suppliers,staff,prevSales,prevPurchases,prevExpenses,inventory]=await Promise.all([
+   db(env,`stores?id=eq.${s.storeId}&select=id,name,address,phone,phone2,email,website,low_stock_threshold`),
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,custom_party_name,created_by,invoice_date,subtotal,discount,tax_amount,paid_amount,total_due`),
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,invoice_date,subtotal,paid_amount`),
+   db(env,`expenses?store_id=eq.${s.storeId}&expense_date=gte.${start}&expense_date=lte.${end}&select=expense_date,details,total,paid,due`),
    db(env,`due_recoveries?store_id=eq.${s.storeId}&created_at=gte.${start}T00:00:00Z&created_at=lte.${end}T23:59:59Z&select=amount`),
    db(env,`error_logs?store_id=eq.${s.storeId}&created_at=gte.${start}T00:00:00Z&created_at=lte.${end}T23:59:59Z&select=id`),
    db(env,`activity_logs?store_id=eq.${s.storeId}&created_at=gte.${start}T00:00:00Z&created_at=lte.${end}T23:59:59Z&select=id`),
    db(env,`customers?store_id=eq.${s.storeId}&select=id,name`),
    db(env,`suppliers?store_id=eq.${s.storeId}&select=id,name`),
-   db(env,`staff?store_id=eq.${s.storeId}&select=id,full_name,user_id`)
+   db(env,`staff?store_id=eq.${s.storeId}&select=id,full_name,user_id`),
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&invoice_date=gte.${ps}&invoice_date=lte.${pe}&select=subtotal`),
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&invoice_date=gte.${ps}&invoice_date=lte.${pe}&select=subtotal`),
+   db(env,`expenses?store_id=eq.${s.storeId}&expense_date=gte.${ps}&expense_date=lte.${pe}&select=total`),
+   db(env,`inventory_items?store_id=eq.${s.storeId}&active=is.true&select=id,item_code,description,total_stock,sale_price&order=total_stock.asc&limit=500`)
   ]);
-  let money=v=>Number(v||0),sum=(rows,f)=>rows.reduce((n,r)=>n+money(f(r)),0);
-  let salesTotal=sum(sales,r=>r.subtotal),salesDiscount=sum(sales,r=>r.discount),purchaseTotal=sum(purchases,r=>r.subtotal),expenseTotal=sum(expenses,r=>r.total),recovered=sum(recoveries,r=>r.amount),dueTotal=sum(sales,r=>r.total_due);
+  let money=v=>Number(v||0),sum=(rows,f)=>rows.reduce((n,r)=>n+money(f(r)),0),pct=(a,b)=>b>0?Math.round((a-b)/b*100):null;
+  let salesTotal=sum(sales,r=>r.subtotal),salesDiscount=sum(sales,r=>r.discount),salesCollected=sum(sales,r=>r.paid_amount),purchaseTotal=sum(purchases,r=>r.subtotal),purchasePaid=sum(purchases,r=>r.paid_amount),expenseTotal=sum(expenses,r=>r.total),expensePaid=sum(expenses,r=>r.paid),recovered=sum(recoveries,r=>r.amount),dueTotal=sum(sales,r=>r.total_due);
+  let prevSalesTotal=sum(prevSales,r=>r.subtotal),prevPurchaseTotal=sum(prevPurchases,r=>r.subtotal),prevExpenseTotal=sum(prevExpenses,r=>r.total);
+  let profit=salesTotal-purchaseTotal-expenseTotal,prevProfit=prevSalesTotal-prevPurchaseTotal-prevExpenseTotal;
+  let avgSale=sales.length?Math.round(salesTotal/sales.length):0;
+  let uniqueCustomers=new Set(sales.map(r=>r.party_id||r.custom_party_name).filter(Boolean)).size;
+  let threshold=Number(store[0]?.low_stock_threshold||5);
+  let lowStock=inventory.filter(r=>Number(r.total_stock||0)<=threshold);
+  let outStock=lowStock.filter(r=>Number(r.total_stock||0)===0);
+  let dayMap={};for(let r of sales){dayMap[r.invoice_date]=(dayMap[r.invoice_date]||0)+money(r.subtotal)}
+  let busiestDay=Object.entries(dayMap).sort((a,b)=>b[1]-a[1])[0]||null;
   let cName=Object.fromEntries(customers.map(x=>[x.id,x.name])),sName=Object.fromEntries(suppliers.map(x=>[x.id,x.name])),stName=Object.fromEntries(staff.map(x=>[x.id,x.full_name]));
   let top=(rows,key,nameMap)=>{let m={};for(let r of rows){let id=r[key];if(!id)continue;m[id]=(m[id]||0)+money(r.subtotal)}return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,5).map(([id,t])=>({name:nameMap[id]||'—',total:t}))};
   let topCustomers=top(sales,'party_id',cName),topSuppliers=top(purchases,'party_id',sName),topSalesStaff=top(sales,'created_by',stName);
   let storeRow=store[0]||{};
   let missing=[];if(!storeRow.address)missing.push('address');if(!storeRow.phone)missing.push('phone');if(!storeRow.email)missing.push('email');
+  let collectionRate=salesTotal>0?Math.round(salesCollected/salesTotal*100):null,dueRate=salesTotal>0?Math.round(dueTotal/salesTotal*100):null,discountRate=salesTotal>0?Math.round(salesDiscount/salesTotal*100):null,expenseRatio=salesTotal>0?Math.round(expenseTotal/salesTotal*100):null,recoveryRate=(dueTotal+recovered)>0?Math.round(recovered/(dueTotal+recovered)*100):null,marginPct=salesTotal>0?Math.round(profit/salesTotal*100):null;
+  let fmtB=v=>money(v).toLocaleString('en-BD')+' BDT';
   let findings=[];
-  if(sales.length===0)findings.push('No sales recorded in the selected period.');
-  if(dueTotal>0)findings.push('Outstanding dues of '+money(dueTotal).toLocaleString('en-BD')+' BDT remain in this period.');
-  if(salesTotal>0&&dueTotal/salesTotal>0.5)findings.push('Due level is high relative to sales.');
-  if(salesTotal>0&&salesDiscount/salesTotal>0.2)findings.push('Discount level is unusually high.');
-  if(errors.length)findings.push(errors.length+' system error(s) recorded.');
-  if(missing.length)findings.push('Store profile missing: '+missing.join(', ')+'.');
+  if(sales.length===0)findings.push('No sales were recorded in the selected period — records may be missing or the shop was inactive.');
+  if(dueTotal>0)findings.push('Outstanding customer dues of '+fmtB(dueTotal)+' remain uncollected from this period\'s sales.');
+  if(collectionRate!==null&&collectionRate<60)findings.push('Collection rate is only '+collectionRate+'% — more than 40% of sales value is leaving the shop as due.');
+  if(dueRate!==null&&dueRate>50)findings.push('Due level is high: '+dueRate+'% of sales value is still owed by customers.');
+  if(discountRate!==null&&discountRate>20)findings.push('Discounts are unusually high at '+discountRate+'% of sales ('+fmtB(salesDiscount)+').');
+  if(profit<0&&salesTotal>0)findings.push('Purchases and expenses ('+fmtB(purchaseTotal+expenseTotal)+') exceeded sales ('+fmtB(salesTotal)+') — the period ran at a loss of '+fmtB(Math.abs(profit))+'.');
+  else if(marginPct!==null&&marginPct<10)findings.push('Operating margin is thin at '+marginPct+'% — costs are eating most of the sales value.');
+  if(outStock.length)findings.push(outStock.length+' item(s) are completely out of stock and may be losing walk-in sales.');
+  else if(lowStock.length)findings.push(lowStock.length+' item(s) are at or below the low-stock threshold ('+threshold+' units).');
+  if(recoveryRate!==null&&recoveryRate<20&&dueTotal>0)findings.push('Only '+recoveryRate+'% of dues were recovered during the period.');
+  if(errors.length)findings.push(errors.length+' system error(s) were recorded during this period.');
+  if(missing.length)findings.push('Store profile is incomplete — missing: '+missing.join(', ')+'. Completed profiles look professional on invoices and emails.');
+  if(!findings.length)findings.push('No automatic risks were found for this period.');
   let score=100;
-  if(salesTotal<=0)score-=15;else score-=Math.min(30,Math.round(dueTotal/salesTotal*30));
-  if(salesTotal>0)score-=Math.min(15,Math.round(salesDiscount/salesTotal*30));
-  score-=Math.min(15,missing.length*5);
-  score-=Math.min(15,errors.length*3);
+  if(salesTotal<=0)score-=15;else score-=Math.min(25,Math.round((dueRate||0)/100*25));
+  if(collectionRate!==null&&collectionRate<60)score-=10;
+  if(discountRate!==null)score-=Math.min(10,Math.max(0,Math.round((discountRate-10)/2)));
+  if(salesTotal>0){if(profit<0)score-=15;else if((marginPct||0)<10)score-=8}
+  score-=Math.min(10,lowStock.length*2);
+  score-=Math.min(10,missing.length*3);
+  score-=Math.min(10,errors.length*3);
   score=Math.max(0,Math.min(100,Math.round(score)));
-  let snapshot={sales:{total:salesTotal,count:sales.length,discount:salesDiscount},purchase:{total:purchaseTotal,count:purchases.length},expense:{total:expenseTotal,count:expenses.length},due:{total:dueTotal,recovered},errors:errors.length,activityCount:activity.length,findings,missing,topCustomers,topSuppliers,topSalesStaff};
-  let activeModel=String(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
-  if(aiProvider(activeModel)==='cf'&&(activeModel.includes('llama-3.1')||activeModel.includes('infire')))activeModel='@cf/meta/llama-3.2-3b-instruct';
-  let prompt='You are an AI business health advisor for EMS V1. Review this shop data summary for '+start+' to '+end+' and give 3 to 5 short, practical, read-only recommendations. Use short bullet points in plain business language. Do not invent facts beyond the summary. DATA: '+JSON.stringify({store:storeRow,snapshot})+'\\n\\nRecommendations only:';
-  let result=await runAI(env,activeModel,[{role:'system',content:'You are a concise business analyst. Reply with short bullet-point recommendations only.'},{role:'user',content:prompt}],0.3);
-  let insights=String(result||'No recommendations could be generated for this period.');
+  let trend={sales:{now:salesTotal,prev:prevSalesTotal,pct:pct(salesTotal,prevSalesTotal)},purchase:{now:purchaseTotal,prev:prevPurchaseTotal,pct:pct(purchaseTotal,prevPurchaseTotal)},expense:{now:expenseTotal,prev:prevExpenseTotal,pct:pct(expenseTotal,prevExpenseTotal)},profit:{now:profit,prev:prevProfit,pct:pct(profit,prevProfit)}};
+  let snapshot={period:{start,end,days,previousStart:ps,previousEnd:pe},sales:{total:salesTotal,count:sales.length,collected:salesCollected,discount:salesDiscount,avg:avgSale,uniqueCustomers},purchase:{total:purchaseTotal,count:purchases.length,paid:purchasePaid},expense:{total:expenseTotal,count:expenses.length,paid:expensePaid},profit:{value:profit,marginPct},due:{total:dueTotal,recovered,recoveryRate},ratios:{collectionRate,dueRate,discountRate,expenseRatio},trend,inventory:{lowStockCount:lowStock.length,outStockCount:outStock.length,lowStockItems:lowStock.slice(0,8).map(r=>({name:r.description||r.item_code,stock:Number(r.total_stock||0)}))},busiestDay:busiestDay?{date:busiestDay[0],total:busiestDay[1]}:null,people:{customersCount:customers.length,suppliersCount:suppliers.length,staffCount:staff.length},errors:errors.length,activityCount:activity.length,findings,missing,topCustomers,topSuppliers,topSalesStaff};
+  let activeModel=modernModel(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
+  let systemPrompt='You are the EMS Business Health Advisor — a warm, practical retail business coach for Bangladeshi shopkeepers. You write an organized, easy-to-relate-to health report from the shop\'s own numbers. Use simple business language (no jargon), short paragraphs and bullet lists. Money is BDT (you may use ৳). Base every statement on the supplied DATA only — never invent figures, names or dates. Be specific and quote the real numbers. Format your reply with exactly these markdown headings, in this order:\n# Business health overview\n2-3 friendly sentences: the headline result for the period, how it compares with the previous period, and one strength plus one concern.\n# What is working well\n3 to 5 bullets that reference real figures (e.g. collection, recovery, top customers, margin, low errors).\n# What needs attention\n3 to 5 bullets, each naming the actual number and what it means in plain words.\n# Your 7-day action plan\nExactly 5 numbered, specific, doable steps (dues to chase, items to reorder, discounts to review, records to complete) that this exact shop can act on this week.\n# Cash and due collection guidance\n2 to 3 practical bullets about collecting dues and managing cash.\n# Growth ideas\n2 to 3 simple, realistic suggestions that fit a shop with this data (e.g. reorder best-sellers, follow up top customers, bundle slow items).\nDo not add any other sections and do not reveal field names or JSON.';
+  let prompt='Period: '+start+' to '+end+' ('+days+' day(s)), compared with the previous '+days+' day(s): '+ps+' to '+pe+'.\n\nDATA SNAPSHOT (all money in BDT):\n'+JSON.stringify({store:{name:storeRow.name,address:storeRow.address,phone:storeRow.phone,email:storeRow.email},snapshot})+'\n\nWrite the full health report now. Make it about 30% more detailed than a short summary, but stay skimmable; every section above must be present and reference real numbers.';
+  let result=await runAI(env,activeModel,[{role:'system',content:systemPrompt},{role:'user',content:prompt}],0.35,2048);
+  let insights=String(result||'No health report could be generated for this period. Please try again.');
   let [rep]=await db(env,'business_health_reports',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,start_date:start,end_date:end,score,snapshot,insights})});
   await audit(env,s,'Business AI Health report','report',rep.id);
   return json({score,snapshot,insights,usage:{dailyLimit:plan.business_health_daily_limit,usedToday:shopUsed.length+1,remaining:Math.max(0,plan.business_health_daily_limit-shopUsed.length-1)}});
  }
- if(path==='platform/business-health'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'business_health_settings?select=*');let today=new Date().toISOString().slice(0,10),used=await db(env,`business_health_reports?created_at=gte.${today}T00:00:00Z&select=id`);return json({...(x||{enabled:false,global_daily_limit:100,model:'@cf/meta/llama-3.2-3b-instruct'}),usedToday:used.length,aiBinding:!!env.AI,geminiBinding:!!env.GEMINI_API_KEY,groqBinding:!!env.GROQ_API_KEY,cerebrasBinding:!!env.CEREBRAS_API_KEY,models:AI_PROVIDERS})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'business_health_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,enabled:!!b.enabled,model:b.model||'@cf/meta/llama-3.2-3b-instruct',global_daily_limit:Number(b.global_daily_limit),updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
+ if(path==='platform/business-health'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'business_health_settings?select=*');let today=new Date().toISOString().slice(0,10),used=await db(env,`business_health_reports?created_at=gte.${today}T00:00:00Z&select=id`);return json({...(x||{enabled:false,global_daily_limit:100,model:'@cf/meta/llama-3.2-3b-instruct'}),usedToday:used.length,aiBinding:!!env.AI,geminiBinding:!!env.GEMINI_API_KEY,groqBinding:!!env.GROQ_API_KEY,cerebrasBinding:!!env.CEREBRAS_API_KEY,deepseekBinding:!!env.DEEPSEEK_API_KEY,openrouterBinding:!!env.OPENROUTER_API_KEY,githubBinding:!!env.GITHUB_TOKEN,anthropicBinding:!!env.ANTHROPIC_API_KEY,models:AI_PROVIDERS})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'business_health_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,enabled:!!b.enabled,model:b.model||'@cf/meta/llama-3.2-3b-instruct',global_daily_limit:Number(b.global_daily_limit),updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
  if(path==='platform/business-health/logs'&&method==='GET'){if(s.role!=='owner')return fail('Forbidden',403);return json(await db(env,'business_health_reports?select=store_id,start_date,end_date,score,created_at&order=created_at.desc&limit=100'))}
 
  if(path==='zudo/availability'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let entitlement=await zudoPlan(env,s.storeId),ever=await featureEver(env,s.storeId,'zudo'),today=new Date().toISOString().slice(0,10),used=await db(env,`zudo_messages?store_id=eq.${s.storeId}&role=eq.user&created_at=gte.${today}T00:00:00Z&select=id`);if(!entitlement)return json({enabled:false,history:ever,dailyLimit:0,usedToday:used.length,remaining:0});return json({enabled:true,history:true,dailyLimit:entitlement.zudo_daily_limit,usedToday:used.length,remaining:Math.max(0,entitlement.zudo_daily_limit-used.length)})}
@@ -259,7 +365,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let conversationId=b.conversationId,[conversation]=conversationId?await db(env,`zudo_conversations?id=eq.${conversationId}&store_id=eq.${s.storeId}&user_id=eq.${s.id}&select=*`):[];
   if(!conversation){let [x]=await db(env,'zudo_conversations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,title:question.slice(0,80)})});conversation=x;conversationId=x.id}
   await db(env,'zudo_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({conversation_id:conversationId,store_id:s.storeId,user_id:s.id,role:'user',content:question})});
-  let [sales,purchases,expenses,items,customers,connectxMessages,administrators,licenses,entitlements,history]=await Promise.all([
+  let [sales,purchases,expenses,items,customers,connectxMessages,administrators,licenses,entitlements,history,pages,blogs,plans,addonCatalog,checkoutCfg,activeAddons]=await Promise.all([
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&select=subtotal,total_due,invoice_date,party_id,invoice_number&order=invoice_date.desc&limit=100`),
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&select=subtotal,total_due,invoice_date&order=invoice_date.desc&limit=100`),
    db(env,`expenses?store_id=eq.${s.storeId}&select=total,paid,due,expense_date&order=expense_date.desc&limit=100`),
@@ -269,15 +375,24 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
    db(env,`administrators?id=eq.${store.admin_id}&select=admin_code,name,address,phone,email,active,created_at`),
    db(env,`licenses?admin_id=eq.${store.admin_id}&select=id,plan_id,duration_months,amount,max_stores,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,status,transaction_type,starts_at,expires_at,created_at,license_plans(title)&order=created_at.desc&limit=25`),
    db(env,`current_entitlements?admin_id=eq.${store.admin_id}&select=current_license_id,shop_limit,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,status,starts_at,expires_at,updated_at`),
-   db(env,`zudo_messages?conversation_id=eq.${conversationId}&user_id=eq.${s.id}&select=role,content,created_at&order=created_at.asc&limit=20`)
+   db(env,`zudo_messages?conversation_id=eq.${conversationId}&user_id=eq.${s.id}&select=role,content,created_at&order=created_at.asc&limit=20`),
+   db(env,'public_pages?select=slug,title,body,updated_at').catch(()=>[]),
+   db(env,'blog_posts?published=is.true&select=title,slug,excerpt,published_at&order=published_at.desc&limit=20').catch(()=>[]),
+   db(env,'license_plans?active=is.true&select=id,title,duration_months,max_stores,benefits,payment_details,price,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,business_health_enabled,business_health_daily_limit,truebill_enabled,vaultium_gb&order=price.asc').catch(()=>[]),
+   db(env,'addon_settings?enabled=is.true&select=addon_key,title,details,unit_price,min_days,max_days,min_daily_limit,max_daily_limit,url&order=unit_price.asc').catch(()=>[]),
+   db(env,'addon_checkout_settings?select=payment_info&limit=1').catch(()=>[]),
+   db(env,`addon_purchases?admin_id=eq.${store.admin_id}&select=addon_key,status,validity_days,daily_limit,amount,starts_at,expires_at,created_at&order=created_at.desc&limit=25`).catch(()=>[])
   ]);
   let shopData={...store};delete shopData.admin_id;
-  let context=JSON.stringify({shop:shopData,administrator:administrators[0]||null,license:{currentEntitlement:entitlements[0]||null,history:licenses},zudo:{dailyLimit:plan.zudo_daily_limit,usedToday:shopUsed.length,remaining:Math.max(0,Number(plan.zudo_daily_limit)-shopUsed.length)},connectx:{messages:connectxMessages},sales,purchases,expenses,inventory:items,customers});
+  let website={pages:(pages||[]).map(p=>({page:p.slug,title:p.title,content:p.body,updatedAt:p.updated_at})),blogPosts:blogs||[]};
+  let purchasable={licensePlans:(plans||[]).map(p=>({name:p.title,durationMonths:p.duration_months,maxShops:p.max_stores,priceBDT:Number(p.price||0),features:p.benefits||p.payment_details||'',connectxDaily:p.connectx_enabled?p.connectx_daily_limit:0,zudoDaily:p.zudo_enabled?p.zudo_daily_limit:0,businessHealthDaily:p.business_health_enabled?p.business_health_daily_limit:0,truebillIncluded:!!p.truebill_enabled,vaultiumGB:Number(p.vaultium_gb||0)})),addOns:(addonCatalog||[]).map(a=>({key:a.addon_key,name:a.title,description:a.details,pricePerDayBDT:Number(a.unit_price||0),minDays:a.min_days,maxDays:a.max_days,minDailyLimit:a.min_daily_limit,maxDailyLimit:a.max_daily_limit,setupUrl:a.url||null})),paymentInstructions:(checkoutCfg&&checkoutCfg[0]&&checkoutCfg[0].payment_info)||null,currentAddOnPurchases:(activeAddons||[]).map(a=>({addon:a.addon_key,status:a.status,validityDays:a.validity_days,dailyLimit:a.daily_limit,starts:a.starts_at,expires:a.expires_at}))};
+  let context=JSON.stringify({shop:shopData,administrator:administrators[0]||null,license:{currentEntitlement:entitlements[0]||null,history:licenses},zudo:{dailyLimit:plan.zudo_daily_limit,usedToday:shopUsed.length,remaining:Math.max(0,Number(plan.zudo_daily_limit)-shopUsed.length)},connectx:{messages:connectxMessages},sales,purchases,expenses,inventory:items,customers,website,purchasable});
   let priorHistory=history.slice(0,-1).map(x=>({role:x.role,content:x.content}));
-  let activeModel=String(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
-  if(aiProvider(activeModel)==='cf'&&(activeModel.includes('llama-3.1')||activeModel.includes('infire')))activeModel='@cf/meta/llama-3.2-3b-instruct';
-  let result=await runAI(env,activeModel,[{role:'system',content:'You are Zudo, a friendly, expert business assistant for EMS V1 (powered by DoxTox). You help shop owners and staff understand their business by reading their live shop data.\n\nHOW TO ANSWER:\n- Talk naturally and warmly, like a helpful human business advisor, not a robot.\n- Use plain, clear language. Explain any term the user might not know.\n- Be concise but complete. Use short headings and bullet points when they make the answer clearer.\n- Always answer from the supplied CURRENT SHOP DATA and conversation history. That data is the single source of truth.\n- When asked about sales, purchases, inventory, customers, expenses, dues, or ConnectX emails, look it up and give specific, real numbers.\n- If data is missing or the answer is not in the data, say so honestly and suggest what to check.\n\nRULES:\n- You are read-only. You cannot create, edit, or delete records. Never claim otherwise.\n- Never invent numbers or facts.\n- Never reveal passwords, password hashes, API keys, or any credentials.\n- Never output JSON, arrays, raw objects, code, or database field names.\n- Money is in BDT (Bangladeshi Taka). Show amounts with BDT or ৳.\n- Present dates in a friendly readable form.\n- For summaries, give totals and one or two useful insights.'},...priorHistory,{role:'user',content:'CURRENT SHOP DATA: '+context+'\n\nQUESTION: '+question}],0.3);
-  let answer=String(result||'Zudo could not generate a response.');
+  let activeModel=modernModel(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
+  let result=null,aiError=null;
+  try{result=await runAI(env,activeModel,[{role:'system',content:"You are Zudo, the friendly in-app business assistant for EMS V1 (powered by DoxTox). Shop owners and staff ask you about their shop, the product, pricing, and the public website, and you answer from the data provided.\n\nYOUR PERSONALITY:\n- Talk like a warm, sharp, reassuring human business advisor — never like a robot reading a database.\n- Greet naturally when greeted. Be encouraging, and explain things simply for a busy shopkeeper, as if chatting on WhatsApp.\n- LANGUAGE RULE (very important) — follow the user's LATEST message exactly, ignoring the language of earlier messages:\n  * English writing (Latin letters, English words) -> reply ONLY in English.\n  * Banglish, meaning Bengali written in Roman/Latin letters (words like ami, amar, koto, ache, korbo, chai, dao, bolo, kivabe, keno) -> reply ONLY in warm, simple Banglish (Roman Bengali letters). Do NOT use Bengali script for Banglish.\n  * Bengali/Bangla script (\u0985-\u09df letters: \u0986\u09ae\u09bf, \u0995\u09a4) -> reply ONLY in natural Bengali/Bangla script.\n  * Any other language (Hindi, Arabic, etc.) -> reply in that same language and script.\n  Never mix scripts: a Banglish question must get Roman-letter Banglish; a Bengali-script question must get Bengali-script Bangla; an English question must get English only.\n- Use short, natural sentences. Light emoji are welcome when they make an answer friendlier (💰 📦 ⚠️ ✅), but do not overdo them.\n\nWHAT YOU CAN ANSWER:\n- Shop operations: sales, purchases, expenses, inventory & low stock, customers, dues, attendance/salary context, and ConnectX emails — always pull the real numbers from CURRENT SHOP DATA.\n- Pricing & upgrades: the purchasable.licensePlans and purchasable.addOns arrays list exactly what is available with prices (BDT), durations, shop limits, feature flags and daily quotas. Explain them clearly, compare options, recommend the best fit, and mention the purchasable.paymentInstructions if present. Tell them the shop Administrator activates plans/add-ons (bKash/Nagad checkout) — you cannot purchase or change anything yourself.\n- The product & website: answer \"what is EMS\", About, Terms, Contact details and published blog highlights from website.pages and website.blogPosts. If a page body is empty, say the page has no published content yet.\n- Their current plan/quota: license.currentEntitlement, license.history, zudo usage limits and purchasable.currentAddOnPurchases.\n\nHOW TO FORMAT:\n- Answer the question COMPLETELY — never stop mid-sentence, mid-list or cut the answer short; use as many words as the question genuinely needs.\n- Lead with the direct answer, then use short headings or bullet lists when they genuinely help. Short questions get short answers; detailed questions get full step-by-step answers.\n- Turn raw figures into friendly insight: totals, what stands out, and one practical suggestion (for example a stock to reorder or a due to chase).\n- Money is Bangladeshi Taka — write it as ৳ or BDT. Render dates in a readable form (e.g. 16 Sep 2026).\n- Keep it skimmable and avoid repeating the question, but completeness beats brevity.\n\nRULES:\n- The supplied data is the only source of truth. Never invent numbers, prices, dates, names, or features.\n- If the data does not contain the answer, say so honestly in plain words and suggest what to check or whom to ask.\n- You are read-only: you cannot create, edit, delete, buy, or send anything — never imply otherwise.\n- Never reveal passwords, hashes, API keys, tokens, or internal IDs/field names.\n- Never output JSON, raw arrays, code, SQL, or database column names — convert everything into normal human language."},...priorHistory,{role:'user',content:'CURRENT SHOP DATA: '+context+'\n\nQUESTION: '+question+'\n\nLANGUAGE FOR THIS REPLY (highest priority, overrides every earlier message):\n'+zudoLangDirective(question)+'\n\nWrite a COMPLETE answer and never stop mid-sentence or mid-list.'}],0.3)}catch(e){aiError=e.message||'AI provider failed to respond'}
+  let answer=String(result||'').trim();
+  if(!answer)answer=aiError?('⚠️ I could not reach my AI brain just now ('+String(aiError).slice(0,140)+'). Your conversation is saved — please send the message again.'):'Zudo could not generate a response. Please try again.';
   await db(env,'zudo_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({conversation_id:conversationId,store_id:s.storeId,user_id:s.id,role:'assistant',content:answer})});
   await db(env,`zudo_conversations?id=eq.${conversationId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({updated_at:new Date().toISOString()})});
   await audit(env,s,'Zudo AI request','zudo',conversationId);
@@ -333,6 +448,111 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='dashboard'){let id=s.storeId;if(!id)return fail('Choose a store.',400);let [store]=await db(env,`stores?id=eq.${id}&select=low_stock_threshold`);let [sales,purchase,expense,low,recent]=await Promise.all([db(env,`invoices?store_id=eq.${id}&kind=eq.sale&select=subtotal,total_due,invoice_date`),db(env,`invoices?store_id=eq.${id}&kind=eq.purchase&select=subtotal,invoice_date`),db(env,`expenses?store_id=eq.${id}&select=total,expense_date`),db(env,`inventory_items?store_id=eq.${id}&active=is.true&select=*&total_stock=lte.${store.low_stock_threshold}`),db(env,`activity_logs?store_id=eq.${id}&select=*&order=created_at.desc&limit=10`)]);let sum=a=>a.reduce((x,y)=>x+Number(y.subtotal??y.total),0),due=a=>a.reduce((x,y)=>x+Number(y.total_due||0),0),today=new Date().toISOString().slice(0,10);return json({sales:{lifetime:sum(sales),today:sum(sales.filter(x=>x.invoice_date===today)),dueLifetime:due(sales),dueToday:due(sales.filter(x=>x.invoice_date===today))},purchase:{lifetime:sum(purchase),today:sum(purchase.filter(x=>x.invoice_date===today))},expense:{lifetime:sum(expense),today:sum(expense.filter(x=>x.expense_date===today))},lowStock:low,recent});}
 
 
+ /* Notifications — SHOP scope only: stock, overdue invoices/expenses, business health. Never administrator-panel items. */
+ if(path==='notifications/shop'&&method==='GET'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  let id=s.storeId, today=new Date();
+  let cutoff=new Date(today);cutoff.setDate(cutoff.getDate()-30);let isoCut=cutoff.toISOString().slice(0,10);
+  let [thresholdRow]=await db(env,`stores?id=eq.${id}&select=low_stock_threshold,name`);
+  let lowThreshold=Number(thresholdRow?.low_stock_threshold??5);
+  let [items,overdueInvoices,overdueExpenses,health,customers,suppliers]=await Promise.all([
+   db(env,`inventory_items?store_id=eq.${id}&active=is.true&total_stock=lte.${lowThreshold}&select=id,item_code,description,total_stock,unit&order=total_stock.asc&limit=100`).catch(()=>[]),
+   db(env,`invoices?store_id=eq.${id}&total_due=gt.0&invoice_date=lte.${isoCut}&select=id,kind,invoice_number,invoice_date,party_id,custom_party_name,total_due,paid_amount,subtotal&order=invoice_date.asc&limit=200`).catch(()=>[]),
+   db(env,`expenses?store_id=eq.${id}&due=gt.0&expense_date=lte.${isoCut}&select=id,expense_code,expense_date,details,total,paid,due&order=expense_date.asc&limit=200`).catch(()=>[]),
+   db(env,`business_health_reports?store_id=eq.${id}&select=id,score,insights,created_at&order=created_at.desc&limit=1`).catch(()=>[]),
+   db(env,`customers?store_id=eq.${id}&select=id,name`).catch(()=>[]),
+   db(env,`suppliers?store_id=eq.${id}&select=id,name`).catch(()=>[])
+  ]);
+  let notes=[], at=new Date().toISOString();
+  let out=items.filter(x=>Number(x.total_stock)<=0), low=items.filter(x=>Number(x.total_stock)>0);
+  if(out.length)notes.push({key:'stock-out',level:'critical',icon:'package',title:out.length+' item'+(out.length>1?'s are':' is')+' out of stock',detail:out.slice(0,5).map(x=>x.description||x.item_code).join(', ')+(out.length>5?' and '+(out.length-5)+' more':''),goto:'inventory',at});
+  if(low.length)notes.push({key:'low-stock',level:'warning',icon:'package',title:low.length+' low-stock item'+(low.length>1?'s':''),detail:low.slice(0,5).map(x=>(x.description||x.item_code)+' ('+x.total_stock+' '+(x.unit||'')+')').join(', ')+(low.length>5?' and '+(low.length-5)+' more':''),goto:'inventory',at});
+  let custMap=Object.fromEntries(customers.map(x=>[x.id,x.name])), supMap=Object.fromEntries(suppliers.map(x=>[x.id,x.name]));
+  let overdueSales=overdueInvoices.filter(x=>x.kind==='sale'), overduePurchases=overdueInvoices.filter(x=>x.kind==='purchase');
+  let bd=new Intl.NumberFormat('en-BD',{minimumFractionDigits:2,maximumFractionDigits:2});
+  if(overdueSales.length){
+   let total=overdueSales.reduce((n,x)=>n+Number(x.total_due||0),0);
+   notes.push({key:'overdue-sales',level:'warning',icon:'coins',title:overdueSales.length+' customer invoice'+(overdueSales.length>1?'s are':' is')+' overdue by 30+ days',detail:'৳ '+bd.format(total)+' due · '+overdueSales.slice(0,4).map(x=>(custMap[x.party_id]||x.custom_party_name||x.invoice_number)).join(', ')+(overdueSales.length>4?' …':''),goto:'due-recover',at});
+  }
+  if(overduePurchases.length){
+   let total=overduePurchases.reduce((n,x)=>n+Number(x.total_due||0),0);
+   notes.push({key:'overdue-purchases',level:'warning',icon:'cart',title:overduePurchases.length+' supplier bill'+(overduePurchases.length>1?'s are':' is')+' overdue by 30+ days',detail:'৳ '+bd.format(total)+' payable · '+overduePurchases.slice(0,4).map(x=>(supMap[x.party_id]||x.invoice_number)).join(', ')+(overduePurchases.length>4?' …':''),goto:'due-recover',at});
+  }
+  if(overdueExpenses.length){
+   let total=overdueExpenses.reduce((n,x)=>n+Number(x.due||0),0);
+   notes.push({key:'overdue-expenses',level:'info',icon:'wallet',title:overdueExpenses.length+' expense'+(overdueExpenses.length>1?'s are':' is')+' unpaid after 30+ days',detail:'৳ '+bd.format(total)+' due · '+overdueExpenses.slice(0,4).map(x=>x.details||x.expense_code).join(', ')+(overdueExpenses.length>4?' …':''),goto:'expense',at});
+  }
+  let h=health[0];
+  if(h&&Number(h.score)<60)notes.push({key:'business-health',level:h.score<40?'critical':'warning',icon:'chart',title:'Business health score is low ('+h.score+'/100)',detail:'Open the Business AI Health report for practical recommendations.',goto:'report',at:h.created_at});
+  let order={critical:0,warning:1,info:2};
+  notes.sort((a,b)=>order[a.level]-order[b.level]);
+  return json({items:notes,counts:{critical:notes.filter(x=>x.level==='critical').length,warning:notes.filter(x=>x.level==='warning').length,info:notes.filter(x=>x.level==='info').length},generatedAt:at});
+ }
+ /* Notifications — ADMIN scope only: license, add-ons, shop capacity, helpdesk. Never store-operational items. */
+ if(path==='notifications/admin'&&method==='GET'){
+  if(s.role!=='admin')return fail('Forbidden',403);
+  let notes=[], now=new Date(), isoNow=now.toISOString(), in14=new Date(now);in14.setDate(in14.getDate()+14);let in7=new Date(now);in7.setDate(in7.getDate()+7);
+  let [ent,licenses,stores,unreadHelp,addons]=await Promise.all([
+   currentEntitlement(env,s.id),
+   db(env,`licenses?admin_id=eq.${s.id}&select=id,status,amount,duration_months,transaction_type,starts_at,expires_at,review_note,created_at&order=created_at.desc&limit=50`),
+   db(env,`stores?admin_id=eq.${s.id}&select=id,shop_code,name,status,created_at`),
+   db(env,`helpdesk_messages?admin_id=eq.${s.id}&sender_type=eq.owner&read_by_admin=eq.false&select=id,content,created_at&order=created_at.desc&limit=5`),
+   db(env,`addon_purchases?admin_id=eq.${s.id}&select=id,addon_key,status,validity_days,daily_limit,amount,review_note,starts_at,expires_at,created_at&order=created_at.desc&limit=50`)
+  ]);
+  let pendingLic=licenses.filter(x=>x.status==='pending'), rejectedLic=licenses.filter(x=>x.status==='rejected').slice(0,3);
+  let everLicensed=licenses.length>0;
+  if(!ent){
+   notes.push({key:'license-inactive',level:'critical',icon:'shield',title:everLicensed?'No active license':'No active license yet',detail:everLicensed?'Your license has expired or is not active. Shops are in read-only mode until a license is activated.':'Activate a license plan to start using your shops.',goto:'licenses',at:licenses[0]?.expires_at||isoNow});
+  }else if(ent.expires_at && new Date(ent.expires_at)<=in14){
+   let days=Math.max(0,Math.ceil((new Date(ent.expires_at)-now)/86400000));
+   notes.push({key:'license-expiring',level:'warning',icon:'shield',title:'License expires in '+days+' day'+(days===1?'':'s'),detail:'Renew before expiry to keep your shops active and avoid read-only mode.',goto:'licenses',at:ent.expires_at});
+  }
+  if(pendingLic.length)notes.push({key:'license-pending',level:'info',icon:'clock',title:pendingLic.length+' license payment'+(pendingLic.length>1?'s are':' is')+' under review',detail:'EMS verifies bKash/Nagad payments before activation.',goto:'licenses',at:pendingLic[0].created_at});
+  rejectedLic.forEach((x,i)=>notes.push({key:'license-rejected-'+x.id,level:'warning',icon:'shield',title:'A license payment was rejected',detail:x.review_note?String(x.review_note).slice(0,140):'Please contact EMS support or submit the payment again.',goto:'licenses',at:x.created_at}));
+  let readOnlyStores=stores.filter(x=>x.status==='read_only'), activeStores=stores.filter(x=>x.status==='active');
+  if(readOnlyStores.length)notes.push({key:'shops-readonly',level:'warning',icon:'store',title:readOnlyStores.length+' shop'+(readOnlyStores.length>1?'s are':' is')+' in read-only mode',detail:'Your plan allows '+(ent?.shop_limit||0)+' active shop(s). Oldest shops stay active; newer ones become read-only until you upgrade.',goto:'stores',at:isoNow});
+  else if(ent&&stores.length>=Number(ent.shop_limit||0)&&Number(ent.shop_limit)>0)notes.push({key:'shops-at-capacity',level:'info',icon:'store',title:'You have reached your shop limit ('+ent.shop_limit+')',detail:'New shops will be read-only until you upgrade your license.',goto:'licenses',at:isoNow});
+  if(unreadHelp.length)notes.push({key:'helpdesk',level:unreadHelp.length>2?'warning':'info',icon:'msg',title:unreadHelp.length+' unread message'+(unreadHelp.length>1?'s':'')+' from EMS support',detail:String(unreadHelp[0].content||'').slice(0,140),goto:'helpdesk',at:unreadHelp[0].created_at});
+  let pendingAdd=addons.filter(x=>x.status==='pending'), rejectedAdd=addons.filter(x=>x.status==='rejected'), activeAdd=addons.filter(x=>x.status==='active');
+  if(pendingAdd.length)notes.push({key:'addon-pending',level:'info',icon:'sparkles',title:pendingAdd.length+' add-on request'+(pendingAdd.length>1?'s are':' is')+' under review',detail:pendingAdd.slice(0,4).map(x=>({connectx:'ConnectX',zudo:'Zudo AI',business_health:'AI Business Health',truebill:'TrueBill',vaultium:'Vaultium'}[x.addon_key]||x.addon_key)).join(', '),goto:'addons',at:pendingAdd[0].created_at});
+  rejectedAdd.slice(0,3).forEach(x=>notes.push({key:'addon-rejected-'+x.id,level:'warning',icon:'sparkles',title:({connectx:'ConnectX',zudo:'Zudo AI',business_health:'AI Business Health',truebill:'TrueBill',vaultium:'Vaultium'}[x.addon_key]||'Add-on')+' request was rejected',detail:x.review_note?String(x.review_note).slice(0,140):'Please contact EMS support.',goto:'addons',at:x.created_at}));
+  activeAdd.forEach(x=>{if(x.expires_at&&new Date(x.expires_at)<=in7){let days=Math.max(0,Math.ceil((new Date(x.expires_at)-now)/86400000));let name={connectx:'ConnectX',zudo:'Zudo AI',business_health:'AI Business Health',truebill:'TrueBill',vaultium:'Vaultium'}[x.addon_key]||'Add-on';notes.push({key:'addon-expiring-'+x.id,level:'warning',icon:'sparkles',title:name+' expires in '+days+' day'+(days===1?'':'s'),detail:'Renew from the add-ons page to keep the feature active.',goto:'addons',at:x.expires_at})}});
+  let order={critical:0,warning:1,info:2};
+  notes.sort((a,b)=>order[a.level]-order[b.level] || new Date(b.at)-new Date(a.at));
+  return json({items:notes,counts:{critical:notes.filter(x=>x.level==='critical').length,warning:notes.filter(x=>x.level==='warning').length,info:notes.filter(x=>x.level==='info').length},generatedAt:isoNow});
+ }
+ if(path==='notifications/owner'&&method==='GET'){
+  if(s.role!=='owner')return fail('Forbidden',403);
+  let notes=[], now=new Date(), isoNow=now.toISOString();
+  let [licenses,addons,unreadMsgs,admins,newContacts,stores] = await Promise.all([
+   db(env,'licenses?select=id,status,amount,created_at&order=created_at.desc&limit=200'),
+   db(env,'addon_purchases?select=id,addon_key,status,created_at&order=created_at.desc&limit=200'),
+   db(env,'helpdesk_messages?sender_type=eq.admin&read_by_owner=eq.false&select=id,admin_id,content,created_at&order=created_at.desc&limit=50'),
+   db(env,'administrators?select=id,admin_code,name'),
+   db(env,'contact_messages?status=eq.new&select=id,name,subject,message,created_at&order=created_at.desc&limit=20'),
+   db(env,'stores?select=id,status,created_at')
+  ]);
+  let pendingLic=licenses.filter(x=>x.status==='pending');
+  if(pendingLic.length)notes.push({key:'owner-license-pending',level:pendingLic.length>5?'critical':'warning',icon:'clock',title:pendingLic.length+' license payment'+(pendingLic.length>1?'s are':' is')+' waiting for verification',detail:'Review bKash/Nagad payments and activate or reject them from License control.',goto:'licenses',at:pendingLic[0].created_at});
+  let pendingAdd=addons.filter(x=>x.status==='pending');
+  if(pendingAdd.length)notes.push({key:'owner-addon-pending',level:'warning',icon:'sparkles',title:pendingAdd.length+' add-on purchase'+(pendingAdd.length>1?'s are':' is')+' pending review',detail:pendingAdd.slice(0,4).map(x=>({connectx:'ConnectX',zudo:'Zudo AI',business_health:'AI Business Health',truebill:'TrueBill',vaultium:'Vaultium'}[x.addon_key]||x.addon_key)).join(', '),goto:'addons',at:pendingAdd[0].created_at});
+  let adminName={};admins.forEach(a=>{adminName[a.id]=a.name||a.admin_code||'Administrator'});
+  let helpByAdmin={};unreadMsgs.forEach(m=>{(helpByAdmin[m.admin_id]=helpByAdmin[m.admin_id]||[]).push(m)});
+  let helpEntries=Object.entries(helpByAdmin).sort((a,b)=>new Date(b[1][0].created_at)-new Date(a[0][0].created_at));
+  if(unreadMsgs.length){
+   let total=unreadMsgs.length;
+   notes.push({key:'owner-helpdesk',level:total>5?'critical':'warning',icon:'msg',title:total+' unread HelpDesk message'+(total>1?'s':'')+' from '+helpEntries.length+' admin'+(helpEntries.length>1?'s':''),detail:(adminName[helpEntries[0][0]]||'Administrator')+': '+String(helpEntries[0][1][0].content||'').slice(0,120),goto:'helpdesk',at:unreadMsgs[0].created_at});
+  }
+  if(newContacts.length)notes.push({key:'owner-contact-new',level:'info',icon:'msg',title:newContacts.length+' new contact message'+(newContacts.length>1?'s':''),detail:String((newContacts[0].subject?newContacts[0].subject+' — ':'')+(newContacts[0].message||'')).slice(0,120)+' ('+newContacts[0].name+')',goto:'contact-messages',at:newContacts[0].created_at});
+  let readOnly=stores.filter(x=>x.status==='read_only');
+  if(readOnly.length)notes.push({key:'owner-shops-readonly',level:'info',icon:'store',title:readOnly.length+' shop'+(readOnly.length>1?'s are':' is')+' in read-only mode',detail:'These shops are over their plan limits and await a license upgrade.',goto:'shops',at:isoNow});
+  let dayAgo=new Date(now-86400000).toISOString();
+  let newStores=stores.filter(x=>x.created_at>=dayAgo);
+  if(newStores.length)notes.push({key:'owner-shops-new',level:'info',icon:'store',title:newStores.length+' new shop'+(newStores.length>1?'s':'')+' in the last 24 hours',detail:'Platform growth snapshot.',goto:'shops',at:newStores[0].created_at});
+  let order={critical:0,warning:1,info:2};
+  notes.sort((a,b)=>order[a.level]-order[b.level] || new Date(b.at)-new Date(a.at));
+  return json({items:notes.slice(0,30),counts:{critical:notes.filter(x=>x.level==='critical').length,warning:notes.filter(x=>x.level==='warning').length,info:notes.filter(x=>x.level==='info').length},generatedAt:isoNow});
+ }
  if(path==='dashboard/sales-trend'&&method==='GET'){
   if(!s.storeId)return fail('Choose a store.',400);
   // Same query shape as the working 'dashboard' route (no date-range filter) — filter in JS.
@@ -463,7 +683,8 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   }
  }
  if(path==='vaultium/availability'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [store]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id`),adminId=store?.admin_id;let [plan,usedRows,ever]=await Promise.all([vaultiumPlan(env,s.storeId),adminId?db(env,`vaultium_files?admin_id=eq.${adminId}&select=size_bytes`):[],featureEver(env,s.storeId,'vaultium')]);let used=(usedRows||[]).reduce((n,r)=>n+Number(r.size_bytes||0),0);return json({enabled:!!plan,ever,gb:plan?plan.gb:0,used,usedFormatted:(used/GB).toFixed(2),expiresAt:plan?plan.expires_at:null})}
- if(path==='vaultium/files'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','view'))return fail('Permission denied.',403);let q=new URL(request.url).searchParams.get('q');let [store]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id`),adminId=store?.admin_id;let rows=await db(env,`vaultium_files?store_id=eq.${s.storeId}&select=id,invoice_id,invoice_number,filename,content_type,size_bytes,created_at&order=created_at.desc&limit=500`);if(q){q=q.toLowerCase();rows=rows.filter(r=>(r.invoice_number||'').toLowerCase().includes(q)||(r.filename||'').toLowerCase().includes(q)||(r.invoice_id||'').startsWith(q))}return json(rows)}
+ if(path==='vaultium/files'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','view'))return fail('Permission denied.',403);let q=new URL(request.url).searchParams.get('q');let rows=await vaultFileRows(env,s.storeId,500);if(q){q=q.toLowerCase();rows=rows.filter(r=>(r.invoice_number||'').toLowerCase().includes(q)||(r.expense_code||'').toLowerCase().includes(q)||(r.filename||'').toLowerCase().includes(q)||(r.invoice_id||'').startsWith(q)||(r.expense_id||'').startsWith(q))}return json(rows)}
+ if(path==='vaultium/source-files'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);return json(await vaultFileRows(env,s.storeId,2000))}
  if(path==='vaultium/usage'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [store]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id`),adminId=store?.admin_id;let rows=await db(env,`vaultium_files?admin_id=eq.${adminId}&select=size_bytes`),used=rows.reduce((n,r)=>n+Number(r.size_bytes||0),0),plan=await vaultiumPlan(env,s.storeId);return json({used,usedGB:(used/GB).toFixed(2),gb:plan?plan.gb:0})}
  if(path==='vaultium/upload'&&method==='POST'){
   if(!s.storeId)return fail('Shop access required.',403);
@@ -474,11 +695,18 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let fd=await request.formData();
   let files=[...fd.getAll('files')].filter(x=>x&&x.name);
   let invoiceId=fd.get('invoice_id')||null, invoiceNumber=fd.get('invoice_number')||null;
+  let expenseId=fd.get('expense_id')||null, expenseCode=fd.get('expense_code')||null;
   if(!files.length)return fail('Select at least one file.',400);
-  if(files.length>5)return fail('Maximum 5 files per invoice.',400);
+  if(files.length>5)return fail('Maximum 5 files per record.',400);
   let [store]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id`),adminId=store?.admin_id;
-  let existing=await db(env,`vaultium_files?invoice_id=eq.${invoiceId||'00000000-0000-0000-0000-000000000000'}&select=id`);
-  if(existing.length+files.length>5)return fail('Maximum 5 files per invoice.',400);
+  if(expenseId){let [exp]=await db(env,`expenses?id=eq.${expenseId}&store_id=eq.${s.storeId}&select=id,expense_code`);if(!exp)return fail('Expense record not found.',404);expenseCode=expenseCode||exp.expense_code||null}
+  const hasExpCols=await vaultExpenseColumns(env);
+  // On old schemas (pre expense-link migration) expense files were keyed by invoice_number = EXP-code.
+  let sourceFilter;
+  if(expenseId)sourceFilter=hasExpCols?`expense_id=eq.${expenseId}`:`invoice_number=eq.${encodeURIComponent(expenseCode||'')}`;
+  else sourceFilter=`invoice_id=eq.${invoiceId||'00000000-0000-0000-0000-000000000000'}`;
+  let existing=await db(env,`vaultium_files?${sourceFilter}&select=id`);
+  if(existing.length+files.length>5)return fail('Maximum 5 files per record.',400);
   let usedRows=await db(env,`vaultium_files?admin_id=eq.${adminId}&select=size_bytes`),used=usedRows.reduce((n,r)=>n+Number(r.size_bytes||0),0);
   let cap=plan.gb*GB;
   for(const f of files){if(f.size>5*1024*1024)return fail('Each file must be 5 MB or less.',400);if(!f.size)return fail('Empty file not allowed.',400)}
@@ -488,14 +716,21 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   for(const f of files){
     let ext=(f.name.split('.').pop()||'').toLowerCase();
     if(['mp4','webm','mov','avi','mkv'].includes(ext))return fail('Video files are not allowed.',400);
-    let r2key=`${adminId}/${invoiceId||'misc'}/${crypto.randomUUID()}-${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
+    let folder=expenseId?('expense/'+expenseId):(invoiceId||'misc');
+    let r2key=`${adminId}/${folder}/${crypto.randomUUID()}-${f.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`;
     await env.VAULTIUM.put(r2key,f.stream(),{httpMetadata:{contentType:f.type||'application/octet-stream'}});
-    let [r]=await db(env,'vaultium_files',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({admin_id:adminId,store_id:s.storeId,invoice_id:invoiceId||null,invoice_number:invoiceNumber||null,filename:f.name,content_type:f.type||'application/octet-stream',size_bytes:f.size,r2_key:r2key,uploaded_by:s.id})});
+    let row={admin_id:adminId,store_id:s.storeId,invoice_id:invoiceId||null,invoice_number:invoiceNumber||null,expense_id:expenseId||null,expense_code:expenseCode||null,filename:f.name,content_type:f.type||'application/octet-stream',size_bytes:f.size,r2_key:r2key,uploaded_by:s.id};
+    if(!hasExpCols){
+     // Legacy schema: store expense links in invoice_number (the old convention), drop expense_* columns.
+     if(expenseId)row.invoice_number=expenseCode;
+     delete row.expense_id;delete row.expense_code;
+    }
+    let [r]=await db(env,'vaultium_files',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(row)});
     out.push(r);
   }
   return json(out,201);
  }
- if(path.match(/^vaultium\/file\/[^/]+$/)&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','view'))return fail('Permission denied.',403);let id=path.split('/')[2];let [file]=await db(env,`vaultium_files?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);if(!env.VAULTIUM)return fail('Vaultium R2 bucket is not configured.',503);let obj=await env.VAULTIUM.get(file.r2_key);if(!obj)return fail('File missing from storage.',404);return new Response(obj.body,{headers:{'content-type':file.content_type||'application/octet-stream','content-disposition':'attachment; filename="'+encodeURIComponent(file.filename)+'"','cache-control':'private'}})}
+ if(path.match(/^vaultium\/file\/[^/]+$/)&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[2],inline=new URL(request.url).searchParams.get('view')==='1';let [file]=await db(env,`vaultium_files?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);if(!env.VAULTIUM)return fail('Vaultium R2 bucket is not configured.',503);let obj=await env.VAULTIUM.get(file.r2_key);if(!obj)return fail('File missing from storage.',404);let disposition=(inline?'inline':'attachment')+'; filename="'+encodeURIComponent(file.filename)+'"';return new Response(obj.body,{headers:{'content-type':file.content_type||'application/octet-stream','content-disposition':disposition,'cache-control':'private'}})}
  if(path==='vaultium/delete'&&method==='POST'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','delete'))return fail('Permission denied.',403);let b=await body(request);if(!b.id)return fail('File id required.',400);let [file]=await db(env,`vaultium_files?id=eq.${b.id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);try{await env.VAULTIUM.delete(file.r2_key)}catch{}await db(env,`vaultium_files?id=eq.${file.id}`,{method:'DELETE'});return json({ok:true})}
  if(path==='platform/vaultium'&&s.role==='owner'&&method==='GET'){let [rows,stores,admins,ents,addons]=await Promise.all([db(env,'vaultium_files?select=store_id,admin_id,size_bytes'),db(env,'stores?select=id,shop_code,admin_id'),db(env,'administrators?select=id,admin_code,name'),db(env,'current_entitlements?select=admin_id,vaultium_gb,status,expires_at'),db(env,'addon_purchases?addon_key=eq.vaultium&select=admin_id,status,expires_at,validity_days,daily_limit&order=created_at.desc')]);let used=rows.reduce((n,r)=>n+Number(r.size_bytes||0),0);let storeMap=Object.fromEntries(stores.map(x=>[x.id,x])),adminMap=Object.fromEntries(admins.map(x=>[x.id,x]));let entMap={};for(const e of ents){if(!entMap[e.admin_id]||(Number(entMap[e.admin_id].gb||0)<=Number(e.vaultium_gb||0)))entMap[e.admin_id]={gb:Number(e.vaultium_gb||0),expires:e.expires_at,status:e.status}}let addonMap={};for(const a of addons){if(!addonMap[a.admin_id])addonMap[a.admin_id]=a}let byStore={};for(const r of rows){if(!r.store_id)continue;const s=storeMap[r.store_id];if(!s)continue;byStore[r.store_id]=(byStore[r.store_id]||0)+Number(r.size_bytes||0)}let breakdown=Object.entries(byStore).map(([sid,bytes])=>{const s=storeMap[sid]||{},a=adminMap[s.admin_id]||{},ent=entMap[s.admin_id],addon=addonMap[s.admin_id];let limit=Math.max(ent?.gb||0,Number(addon?.daily_limit||0));let expires=addon?.status==='active'?addon.expires_at:ent?.expires||null;let status=limit>0?(expires&&new Date(expires)>new Date()?'Active':'Expired'):'None';return {store_id:sid,shop_code:s.shop_code||null,admin_code:a.admin_code||null,admin_name:a.name||null,used:bytes,usedGB:(bytes/GB).toFixed(2),limit,expires,status}}).sort((a,b)=>b.used-a.used);return json({r2Binding:!!env.VAULTIUM,used,usedGB:(used/GB).toFixed(2),files:rows.length,breakdown})}
 

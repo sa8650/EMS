@@ -9,3 +9,23 @@ binding = "AI"
 [[r2_buckets]]
 binding = "VAULTIUM"
 bucket_name = "emsvaultium"
+
+# ----------------------------------------------------------------------------
+# Cloudflare D1 (SQLite) — OPTIONAL alternative to Supabase.
+#
+# The app uses Supabase by default (SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY).
+# To run on D1 instead:
+#   1. npx wrangler d1 create ems-d1
+#   2. paste the returned database_id below
+#   3. apply the schema:
+#        npx wrangler d1 execute ems-d1 --remote --file=supabase/d1/schema.sql
+#   4. set the DB_DRIVER variable to "d1" (Pages dashboard → Settings →
+#      Variables), and leave the Supabase variables unset (or keep them set —
+#      DB_DRIVER=d1 always wins).
+# See DATABASE_SETUP.md for full instructions.
+# ----------------------------------------------------------------------------
+# Uncomment after running `npx wrangler d1 create ems-d1` and paste the id:
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "ems-d1"
+# database_id = "paste-the-database_id-from-wrangler-d1-create-here"
