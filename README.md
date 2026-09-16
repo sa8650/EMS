@@ -1,4 +1,4 @@
-# EMS — powered by DoxTox
+# EMS — powered by Dexter Studio
 
 **EMS V1** is a multi-shop retail management system: one platform where a single
 platform owner hosts many businesses, each business (administrator) runs one or
@@ -7,7 +7,7 @@ salaries from a simple dashboard.
 
 It is a static single-page app served by **Cloudflare Pages**, powered by a
 **Cloudflare Pages Functions API** (`functions/api/[[path]].js`) and a
-**Supabase PostgreSQL** database.
+**Supabase PostgreSQL** database.f
 
 > This repository contains **only the EMS application**. It is fully standalone —
 > the site root (`/`) is the EMS landing page and app.
