@@ -39,6 +39,15 @@ async function vaultExpenseColumns(env){
  try{await db(env,'vaultium_files?expense_id=is.null&select=id&limit=1');_vaultExpCols=true}catch{_vaultExpCols=false}
  return _vaultExpCols;
 }
+let _duePayCols=null;
+/* Detects whether due_recoveries has the payment_method/transaction_id
+ * columns (migration 034). Older deployments return false, and recoveries
+ * keep working without payment details instead of erroring. */
+async function duePayCols(env){
+ if(_duePayCols!==null)return _duePayCols;
+ try{await db(env,'due_recoveries?payment_method=is.null&select=id&limit=1');_duePayCols=true}catch{_duePayCols=false}
+ return _duePayCols;
+}
 async function vaultFileRows(env,storeId,limit){
  const has=await vaultExpenseColumns(env);
  const cols=has
@@ -428,20 +437,44 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   }
   if(method==='POST'){
     if(!allowed(s,'due_recover','add'))return fail('Permission denied.',403);
-    let b=await body(request),amount=Number(b.amount);
+    let b=await body(request),amount=Math.round(Number(b.amount)*100)/100;
     if(!['sale','purchase','expense'].includes(b.sourceType)||!b.sourceId||!amount||amount<=0)return fail('A valid source and recovery amount are required.');
     let table=b.sourceType==='expense'?'expenses':'invoices',[source]=await db(env,`${table}?id=eq.${b.sourceId}&store_id=eq.${id}&select=*`);
     if(!source)return fail('Due source not found.',404);
-    let due=Number(b.sourceType==='expense'?source.due:source.total_due);
-    if(amount>due)return fail('Recovery amount cannot exceed the outstanding due.',400);
     if(b.sourceType==='expense'){
-      await db(env,`expenses?id=eq.${source.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({paid:Number(source.paid)+amount})})
-    }else{
-      await db(env,`invoices?id=eq.${source.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({paid_amount:Number(source.paid_amount)+amount,total_due:due-amount})})
+      let due=Math.round(Number(source.due)*100)/100;
+      if(amount>due)return fail('Recovery amount cannot exceed the outstanding due.',400);
+      await db(env,`expenses?id=eq.${source.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({paid:Math.round((Number(source.paid)+amount)*100)/100})});
+      let [upd]=await db(env,`expenses?id=eq.${source.id}&select=*`);
+      let [r]=await db(env,'due_recoveries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:id,source_type:b.sourceType,source_id:b.sourceId,amount,note:b.note||null,recovered_by:s.id})});
+      await audit(env,s,'recover due',b.sourceType,b.sourceId,{amount});
+      return json({...r,remaining_due:upd?Math.round(Number(upd.due)*100)/100:Math.round((due-amount)*100)/100},201)
     }
-    let [r]=await db(env,'due_recoveries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:id,source_type:b.sourceType,source_id:b.sourceId,amount,note:b.note||null,recovered_by:s.id})});
-    await audit(env,s,'recover due',b.sourceType,b.sourceId,{amount});
-    return json(r,201)
+    /* sale / purchase — optional tax & discount adjustment plus payment details.
+       The remaining due is always recomputed from the invoice's own numbers
+       (subtotal + tax - discount - paid) so a partial recovery keeps the
+       invoice visible in the due list with its true outstanding balance. */
+    let subtotal=Number(source.subtotal||0),
+        taxPercent=(b.taxPercent!=null&&b.taxPercent!=='')?Number(b.taxPercent):Number(source.tax_percent||0),
+        discount=(b.discount!=null&&b.discount!=='')?Number(b.discount):Number(source.discount||0);
+    if(Number.isNaN(taxPercent)||taxPercent<0||taxPercent>100)return fail('New tax percent must be between 0 and 100.',400);
+    if(Number.isNaN(discount)||discount<0)return fail('New discount cannot be negative.',400);
+    let taxAmount=Math.round(subtotal*taxPercent)/100,
+        grand=Math.round((subtotal+taxAmount-discount)*100)/100;
+    if(grand<0)return fail('New discount cannot exceed the invoice subtotal plus tax.',400);
+    let paidBefore=Math.round(Number(source.paid_amount||0)*100)/100;
+    if(paidBefore>grand)return fail('The new tax/discount would make the invoice total lower than the amount already paid.',400);
+    let dueNow=Math.round((grand-paidBefore)*100)/100;
+    if(amount>dueNow)return fail('Recovery amount cannot exceed the outstanding due ('+dueNow.toFixed(2)+').',400);
+    let newPaid=Math.round((paidBefore+amount)*100)/100,
+        newDue=Math.max(0,Math.round((grand-newPaid)*100)/100);
+    await db(env,`invoices?id=eq.${source.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({paid_amount:newPaid,total_due:newDue,tax_percent:taxPercent,discount:discount,tax_amount:taxAmount})});
+    let payCols=await duePayCols(env),
+        recBody={store_id:id,source_type:b.sourceType,source_id:b.sourceId,amount,note:b.note||null,recovered_by:s.id};
+    if(payCols){recBody.payment_method=['cash','bkash','nagad','bank','other'].includes(b.paymentMethod)?b.paymentMethod:null;recBody.transaction_id=b.transactionId?String(b.transactionId).slice(0,120):null}
+    let [r]=await db(env,'due_recoveries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(recBody)});
+    await audit(env,s,'recover due',b.sourceType,b.sourceId,{amount,taxPercent,discount,paymentMethod:recBody.payment_method||null});
+    return json({...r,remaining_due:newDue},201)
   }
  }
  if(path==='dashboard/activity-snapshot'){let id=s.storeId;if(!id)return fail('Shop access required.',403);let since=new Date(Date.now()-86400000).toISOString(),[invoices,expenses,inventory,logs,staffs]=await Promise.all([db(env,`invoices?store_id=eq.${id}&created_at=gte.${since}&select=kind,invoice_number,subtotal,paid_amount,total_due,created_at,created_by`),db(env,`expenses?store_id=eq.${id}&created_at=gte.${since}&select=id,total,paid,due,created_at,created_by`),db(env,`inventory_items?store_id=eq.${id}&select=id,item_code`),db(env,`activity_logs?store_id=eq.${id}&created_at=gte.${since}&entity_type=eq.inventory&select=action,entity_id,actor_id,created_at`),db(env,`staff?store_id=eq.${id}&select=id,user_id`)]);let users=Object.fromEntries(staffs.map(x=>[x.id,x.user_id])),items=Object.fromEntries(inventory.map(x=>[x.id,x.item_code]));let snapshots=[...invoices.map(x=>({label:x.kind==='sale'?'Sale':'Purchase',id:x.invoice_number,total:x.subtotal,paid:x.paid_amount,due:x.total_due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...expenses.map(x=>({label:'Expense',id:'EXP-'+shortId(x.id),total:x.total,paid:x.paid,due:x.due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...logs.filter(x=>items[x.entity_id]).map(x=>({label:'Inventory',id:items[x.entity_id],total:'—',paid:'—',due:'—',submittedBy:users[x.actor_id]||'Administrator',createdAt:x.created_at}))].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return json(snapshots)}

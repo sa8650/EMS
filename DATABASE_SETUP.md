@@ -106,6 +106,17 @@ seed defaults (branding, theme, public pages, add-on catalogue, AI settings).
 > [`supabase/migrations/migration_vaultium_expense_links.sql`](supabase/migrations/migration_vaultium_expense_links.sql)
 > in the SQL Editor.
 
+> **Upgrading an existing database for due-recovery payment details**
+> (payment method + Trx ID recorded with each recovery) — run once (a
+> `duplicate column name` error means it was already applied):
+> ```bash
+> npx wrangler d1 execute ems-d1 --remote --file=supabase/d1/migration_due_recovery_payment.sql
+> ```
+> Existing **Supabase** databases run the idempotent
+> [`supabase/migrations/034_due_recovery_payment.sql`](supabase/migrations/034_due_recovery_payment.sql)
+> in the SQL Editor. The API detects these columns automatically, so
+> recoveries keep working even before the migration is applied.
+
 ### 2.4 Configure the Pages variables
 
 | Variable | Value |

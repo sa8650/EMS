@@ -289,6 +289,8 @@ create table if not exists public.due_recoveries (
   source_id      uuid not null,
   amount         numeric(14,2) not null check(amount > 0),
   note           text,
+  payment_method text check (payment_method in ('cash','bkash','nagad','bank','other')),
+  transaction_id text,
   recovered_by   uuid,
   created_at     timestamptz not null default now()
 );

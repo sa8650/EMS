@@ -276,6 +276,8 @@ CREATE TABLE IF NOT EXISTS due_recoveries (
   source_id      TEXT NOT NULL,
   amount         REAL NOT NULL,
   note           TEXT,
+  payment_method TEXT CHECK(payment_method IN ('cash','bkash','nagad','bank','other')),
+  transaction_id TEXT,
   recovered_by   TEXT,
   created_at     TEXT NOT NULL
 );
