@@ -385,7 +385,7 @@ async function d1Rpc(env, name, bodyRaw) {
       }]));
       stmts.push({ sql: `UPDATE inventory_items SET total_stock=total_stock+?, updated_at=? WHERE id=?`, params: [p.p_kind === 'purchase' ? qty : -qty, now, ln.itemId] });
     }
-    await env.DB.batch(stmts);
+    await env.DB.batch(stmts.map(s=>env.DB.prepare(s.sql).bind(...(s.params||[]))));
     const [row] = await d1All(env, `SELECT * FROM invoices WHERE id=?`, [invId]);
     return decodeRow('invoices', row);
   }
@@ -403,7 +403,7 @@ async function d1Rpc(env, name, bodyRaw) {
       stmts.push({ sql: `UPDATE inventory_items SET total_stock=total_stock+?, updated_at=? WHERE id=?`, params: [inv.kind === 'purchase' ? -Number(ln.quantity) : Number(ln.quantity), nowIso(), ln.item_id] });
     }
     stmts.push({ sql: `DELETE FROM invoices WHERE id=?`, params: [inv.id] });
-    await env.DB.batch(stmts);
+    await env.DB.batch(stmts.map(s=>env.DB.prepare(s.sql).bind(...(s.params||[]))));
     return null;
   }
 

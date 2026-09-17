@@ -333,9 +333,13 @@ body.shp-on[data-shp-theme="dark"] .shp-growth.down{color:#fb7185}
 .shp-lines-empty{font-family:var(--shp-mono);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--shp-muted2);padding:8px 4px}
 .shp-sumgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
 .shp-iv-linerow{display:grid;grid-template-columns:minmax(0,1.7fr) 84px 110px auto;gap:10px;align-items:end}
-.shp-iv-linerow-buy{grid-template-columns:minmax(0,1.7fr) 84px 110px 110px auto}
-.shp-iv-linerow input[readonly]{color:var(--shp-muted)}
 .shp-iv-linerow>div{display:grid;align-items:end}
+.shp-iv-addrow{display:flex;justify-content:flex-end;margin-bottom:10px}
+/* item picker modal (add-item product table) */
+.shp-picker{display:grid;gap:12px}
+.shp-picker .shp-tw{max-height:300px;overflow:auto;border:1px solid var(--shp-line);border-radius:12px}
+.shp-picker-sel{display:grid;grid-template-columns:minmax(0,2.2fr) 92px 84px 130px auto;gap:10px;align-items:end;border-top:1px solid var(--shp-line);padding-top:12px}
+.shp-picker-add .shp-btn{min-height:38px;white-space:nowrap;width:100%}
 body.shp-on .shp-iv-add .shp-btn{min-height:38px;white-space:nowrap}
 body.shp-on .shp-sumgrid input[readonly]{font-family:var(--shp-mono)!important;font-variant-numeric:tabular-nums;font-weight:650;color:var(--shp-text)!important;background:var(--shp-inset2)!important}
 .shp-iv-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
@@ -894,10 +898,9 @@ body.shp-on[data-shp-theme="dark"] .shp-icobtn.dl:hover{color:#34d399}
   .shp-iv-linerow>label:nth-child(3){grid-column:1}
   .shp-iv-linerow>div:last-child{grid-column:2;align-self:end}
   .shp-iv-linerow>div:last-child>.shp-btn{width:100%}
-  .shp-iv-linerow-buy{grid-template-columns:1fr 1fr}
-  .shp-iv-linerow-buy>label:nth-child(3),.shp-iv-linerow-buy>label:nth-child(4){grid-column:auto}
-  .shp-iv-linerow-buy>div:last-child{grid-column:1/-1}
-  .shp-iv-linerow-buy>div:last-child>.shp-btn{width:100%}
+  .shp-picker-sel{grid-template-columns:1fr 1fr}
+  .shp-picker-sel>label:first-child{grid-column:1/-1}
+  .shp-picker-add{grid-column:1/-1}
   .shp-sal-fgrid{grid-template-columns:1fr}
   .shp-sal-adj{grid-template-columns:1fr 1fr}
   .shp-sal-sum{grid-template-columns:1fr 1fr}
