@@ -338,8 +338,14 @@ body.shp-on[data-shp-theme="dark"] .shp-growth.down{color:#fb7185}
 /* item picker modal (add-item product table) */
 .shp-picker{display:grid;gap:12px}
 .shp-picker .shp-tw{max-height:300px;overflow:auto;border:1px solid var(--shp-line);border-radius:12px}
-.shp-picker-sel{display:grid;grid-template-columns:minmax(0,2.2fr) 92px 84px 130px auto;gap:10px;align-items:end;border-top:1px solid var(--shp-line);padding-top:12px}
+.shp-picker-sel{display:grid;grid-template-columns:minmax(0,2.4fr) 84px 70px 106px 90px 100px 116px auto;gap:10px;align-items:end;border-top:1px solid var(--shp-line);padding-top:12px}
 .shp-picker-add .shp-btn{min-height:38px;white-space:nowrap;width:100%}
+.shp-picker-cats{flex-wrap:wrap;row-gap:6px}
+/* inventory modal — category dropdown + create-new button */
+.shp-cat-row{display:flex;gap:8px;align-items:stretch}
+.shp-cat-row select{flex:1;min-width:0}
+.shp-cat-plus{width:42px;min-width:42px;min-height:38px;font-size:19px;font-weight:600;line-height:1;display:grid;place-items:center;padding:0}
+.shp-cat-chips{flex-wrap:wrap;row-gap:6px;margin-bottom:2px}
 body.shp-on .shp-iv-add .shp-btn{min-height:38px;white-space:nowrap}
 body.shp-on .shp-sumgrid input[readonly]{font-family:var(--shp-mono)!important;font-variant-numeric:tabular-nums;font-weight:650;color:var(--shp-text)!important;background:var(--shp-inset2)!important}
 .shp-iv-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}

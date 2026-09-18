@@ -355,33 +355,41 @@ async function d1Rpc(env, name, bodyRaw) {
   if (name === 'post_invoice') {
     const p = b;
     if (!['purchase', 'sale'].includes(p.p_kind) || !Array.isArray(p.p_lines) || !p.p_lines.length) throw Error('Invoice type and at least one line are required');
+    const r2 = n => Math.round(n * 100) / 100;
     const lines = p.p_lines;
-    let subtotal = 0;
+    let subtotal = 0, lineTaxSum = 0, lineDiscSum = 0;
     for (const ln of lines) {
       const qty = Number(ln.quantity), price = Number(ln.unitPrice);
-      if (!(qty > 0) || price < 0) throw Error('Invalid item quantity or price');
+      const lt = Number(ln.taxPercent || 0), ld = r2(Number(ln.discount || 0));
+      if (!(qty > 0) || price < 0 || lt < 0 || ld < 0) throw Error('Invalid item quantity, price, VAT, or discount');
       const item = await d1All(env, `SELECT * FROM inventory_items WHERE id=? AND store_id=?`, [ln.itemId, p.p_store_id]);
       if (!item[0]) throw Error('Inventory item does not belong to this shop');
       if (p.p_kind === 'sale' && Number(item[0].total_stock) < qty) throw Error('Insufficient stock for item ' + item[0].item_code);
-      subtotal += qty * price;
+      const lsub = qty * price, ltax = r2(lsub * lt / 100);
+      if (ld > lsub + ltax) throw Error('Item discount cannot exceed the item total for ' + item[0].item_code);
+      subtotal += lsub; lineTaxSum += ltax; lineDiscSum += ld;
     }
-    const tax = Math.round(subtotal * Number(p.p_tax_percent || 0) / 100 * 100) / 100;
+    const tax = r2(subtotal * Number(p.p_tax_percent || 0) / 100);
     const discount = Number(p.p_discount || 0), paid = Number(p.p_paid_amount || 0);
-    const total = subtotal + tax - discount;
+    const total = subtotal + tax + lineTaxSum - discount - lineDiscSum;
     if (paid > total) throw Error('Paid amount cannot exceed invoice total');
     const invId = uuid(), now = nowIso();
     const inv = {
       id: invId, store_id: p.p_store_id, kind: p.p_kind, invoice_number: p.p_invoice_number, party_id: p.p_party_id || null,
       invoice_date: p.p_invoice_date, payment_method: p.p_payment_method || 'cash', transaction_id: p.p_transaction_id || null,
-      notes: p.p_notes || null, subtotal, tax_percent: Number(p.p_tax_percent || 0), discount, tax_amount: tax,
-      paid_amount: paid, total_due: total - paid, created_by: p.p_created_by || null,
+      notes: p.p_notes || null, subtotal: r2(subtotal), tax_percent: Number(p.p_tax_percent || 0), discount, tax_amount: tax,
+      paid_amount: paid, total_due: r2(total - paid), line_tax_amount: r2(lineTaxSum), line_discount_amount: r2(lineDiscSum),
+      created_by: p.p_created_by || null,
       verification_token: uuid(), created_at: now, updated_at: now,
     };
     const stmts = [insertStmt('invoices', [inv])];
     for (const ln of lines) {
       const qty = Number(ln.quantity), price = Number(ln.unitPrice);
+      const lt = Number(ln.taxPercent || 0), ld = r2(Number(ln.discount || 0));
+      const lsub = qty * price;
       stmts.push(insertStmt('invoice_lines', [{
-        id: uuid(), invoice_id: invId, item_id: ln.itemId, quantity: qty, unit_price: price, line_total: Math.round(qty * price * 100) / 100,
+        id: uuid(), invoice_id: invId, item_id: ln.itemId, quantity: qty, unit_price: price,
+        tax_percent: lt, discount: ld, line_total: r2(lsub + r2(lsub * lt / 100) - ld),
       }]));
       stmts.push({ sql: `UPDATE inventory_items SET total_stock=total_stock+?, updated_at=? WHERE id=?`, params: [p.p_kind === 'purchase' ? qty : -qty, now, ln.itemId] });
     }
