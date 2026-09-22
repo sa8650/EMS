@@ -17,7 +17,7 @@ const clean=o=>Object.fromEntries(Object.entries(o).filter(([,v])=>v!==undefined
 const shortId=id=>String(id||'').replaceAll('-','').slice(0,6).toUpperCase();
 const emailList=v=>String(v||'').split(/[;,]/).map(x=>x.trim().toLowerCase()).filter(Boolean);const validEmail=x=>/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x);const safeText=x=>String(x||'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 async function body(req){try{return await req.json()}catch{return {}}}
-async function audit(env,s,action,entity,id,meta={}){try{await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId||null,actor_type:s.role,actor_id:s.id,action,entity_type:entity,entity_id:id||null,metadata:meta})})}catch{}}
+async function audit(env,s,action,entity,id,meta={}){try{let storeId=s?.storeId||(entity==='store'?id:(meta?.storeId||null));await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:storeId,actor_type:s?.role||'staff',actor_id:s?.id||null,action,entity_type:entity,entity_id:id||null,metadata:meta||{}})});}catch(e){console.error('Audit failed:',e)}}
 async function currentEntitlement(env,adminId){let now=new Date().toISOString(),[x]=await db(env,`current_entitlements?admin_id=eq.${adminId}&status=eq.active&starts_at=lte.${now}&expires_at=gt.${now}&select=*`);if(!x)return null;let [license]=await db(env,`licenses?id=eq.${x.current_license_id}&select=status,expires_at`);if(!license||license.status!=='active'||!license.expires_at||new Date(license.expires_at)<=new Date())return null;return x}
 async function enforceEntitlement(env,adminId){let entitlement=await currentEntitlement(env,adminId);if(entitlement)return entitlement;await db(env,`stores?admin_id=eq.${adminId}&status=neq.inactive`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'read_only',updated_at:new Date().toISOString()})});await db(env,`current_entitlements?admin_id=eq.${adminId}&status=eq.active`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'expired',updated_at:new Date().toISOString()})});return null}
 async function addonPlan(env,adminId,addonKey){let now=new Date().toISOString();let [p]=await db(env,`addon_purchases?admin_id=eq.${adminId}&addon_key=eq.${addonKey}&status=eq.active&expires_at=gt.${now}&select=*`);return p?{daily_limit:Number(p.daily_limit||0),expires_at:p.expires_at}:null}
@@ -121,9 +121,20 @@ function zudoLangDirective(q){
  return '- The question above is in English. Write your ENTIRE reply ONLY in English, even if earlier messages in this conversation used Bangla or Banglish.';
 }
 const aiProvider=m=>{const k=String(m||'');const pfx=k.split(':')[0];if(k.startsWith('@cf/'))return 'cf';if(['gemini','groq','cerebras','deepseek','openrouter','github','anthropic'].includes(pfx))return pfx;return 'cf'};
-const aiConfigured=(env,m)=>{const p=aiProvider(m);return {cf:!!env.AI,gemini:!!env.GEMINI_API_KEY,groq:!!env.GROQ_API_KEY,cerebras:!!env.CEREBRAS_API_KEY,deepseek:!!env.DEEPSEEK_API_KEY,openrouter:!!env.OPENROUTER_API_KEY,github:!!env.GITHUB_TOKEN,anthropic:!!env.ANTHROPIC_API_KEY}[p]};
+const aiConfigured=(env,m)=>{if(env.MOCK_AI==='1')return true;const p=aiProvider(m);return {cf:!!env.AI,gemini:!!env.GEMINI_API_KEY,groq:!!env.GROQ_API_KEY,cerebras:!!env.CEREBRAS_API_KEY,deepseek:!!env.DEEPSEEK_API_KEY,openrouter:!!env.OPENROUTER_API_KEY,github:!!env.GITHUB_TOKEN,anthropic:!!env.ANTHROPIC_API_KEY}[p]};
 async function openaiCompat(url,key,model,messages,temperature,maxTokens,extraHeaders){const res=await fetch(url,{method:'POST',headers:{authorization:'Bearer '+key,'content-type':'application/json',...(extraHeaders||{})},body:JSON.stringify({model,messages,temperature,max_tokens:maxTokens||1024})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||out?.message||'AI request failed');return String(out?.choices?.[0]?.message?.content||'')}
-async function runAI(env,model,messages,temperature=0.3,maxTokens=1024){const m=modernModel(model),p=aiProvider(m);
+async function runAI(env,model,messages,temperature=0.3,maxTokens=1024){
+ if(env.MOCK_AI==='1'){
+  if(messages.some(m=>typeof m.content==='string'&&(m.content.includes('DATA SNAPSHOT')||m.content.includes('Business Health Advisor')))){
+   return '# Business health overview\nThe shop recorded solid performance with steady gross sales and manageable return volume.\n\n# What is working well\n- Sales performance and inventory restock movement\n- Due recoveries and cash receipts\n\n# What needs attention\n- Monitor customer returns and refunds\n- Manage low-stock items\n\n# Your 7-day action plan\n1. Review returned item conditions and reasons\n2. Reorder fast-selling stock\n3. Follow up on sales dues\n4. Inspect quarantined damaged merchandise\n5. Update customer contact information\n\n# Cash and due collection guidance\n- Promptly collect invoice balances\n\n# Growth ideas\n- Bundle accessories with core inventory';
+  }
+  let userMsg = (messages.find(m => m.role === 'user')?.content || '').toLowerCase();
+  if (userMsg.includes('quarantine') || userMsg.includes('damaged') || userMsg.includes('defective')) {
+   return 'Based on the store quarantine records, we currently track quarantined Damaged and Defective products isolated from active sellable inventory, including returned item codes, descriptions, quantities, and customer reasons.';
+  }
+  return 'Based on current shop data, customer returns, product exchanges, refunds, sellable inventory, and quarantined damaged/defective merchandise are fully tracked.';
+ }
+ const m=modernModel(model),p=aiProvider(m);
  if(p==='gemini'){if(!env.GEMINI_API_KEY)throw Error('Gemini API key is not configured. Add GEMINI_API_KEY to Cloudflare secrets.');const gm=m.slice(7);const sys=messages.filter(x=>x.role==='system').map(x=>x.content).join('\n\n');const contents=messages.filter(x=>x.role!=='system').map(x=>({role:x.role==='assistant'?'model':'user',parts:[{text:x.content}]}));const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${gm}:generateContent?key=${env.GEMINI_API_KEY}`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({contents,systemInstruction:sys?{parts:[{text:sys}]}:undefined,generationConfig:{temperature,maxOutputTokens:maxTokens}})});const out=await res.json().catch(()=>({}));if(!res.ok)throw Error(out?.error?.message||'Gemini request failed');return String(out?.candidates?.[0]?.content?.parts?.[0]?.text||'')}
  if(p==='groq'){if(!env.GROQ_API_KEY)throw Error('Groq API key is not configured. Add GROQ_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.groq.com/openai/v1/chat/completions',env.GROQ_API_KEY,m.slice(5),messages,temperature,maxTokens)}
  if(p==='cerebras'){if(!env.CEREBRAS_API_KEY)throw Error('Cerebras API key is not configured. Add CEREBRAS_API_KEY to Cloudflare secrets.');return openaiCompat('https://api.cerebras.ai/v1/chat/completions',env.CEREBRAS_API_KEY,m.slice(9),messages,temperature,maxTokens)}
@@ -135,17 +146,17 @@ async function runAI(env,model,messages,temperature=0.3,maxTokens=1024){const m=
 
 const tables={supplier:'suppliers',customer:'customers',inventory:'inventory_items',expense:'expenses',staff:'staff'};
 const perms={supplier:'supplier',customer:'customer',inventory:'inventory',expense:'expense',staff:'staff'};
-const PERMISSION_SECTIONS=['dashboard','supplier','customer','inventory','purchase','sales','expense','due_recover','staff','report','settings','connectx','zudo','attendance','salary','vaultium'];
+const PERMISSION_SECTIONS=['dashboard','supplier','customer','inventory','purchase','sales','returns_refunds','expense','due_recover','staff','report','settings','connectx','zudo','attendance','salary','vaultium'];
 const PERMISSION_ACTIONS=['view','add','edit','delete'];
 function normalizePermissions(input){let output={};for(const section of PERMISSION_SECTIONS){let values=Array.isArray(input?.[section])?input[section]:[],actions=section==='zudo'?['view','send','delete']:PERMISSION_ACTIONS;output[section]=actions.filter(action=>values.includes(action));}return output}
-function allowed(s,section,verb){if(s.readOnly&&verb!=='view')return false;if(s.role==='admin'||s.adminAccess)return true;if(section==='dashboard'&&verb==='view')return true;let actions=(s.permissions||{})[section]||[];return actions.includes(verb)||(section==='connectx'&&verb==='send'&&actions.includes('add'))||(section==='zudo'&&verb==='add'&&(actions.includes('send')||actions.includes('add')))}
+function allowed(s,section,verb){if(s.readOnly&&verb!=='view')return false;if(s.role==='admin'||s.adminAccess)return true;if(section==='dashboard'&&verb==='view')return true;let actions=(s.permissions||{})[section]||[];if(!actions.length&&section==='returns_refunds')actions=(s.permissions||{})['sales']||[];return actions.includes(verb)||(section==='connectx'&&verb==='send'&&actions.includes('add'))||(section==='zudo'&&verb==='add'&&(actions.includes('send')||actions.includes('add')))}
 function allowedAddon(s,section,verb){if(s.role==='admin'||s.adminAccess)return true;let actions=(s.permissions||{})[section]||[];return actions.includes(verb)||(section==='connectx'&&verb==='send'&&actions.includes('add'))||(section==='zudo'&&verb==='add'&&(actions.includes('send')||actions.includes('add')))}
 function publicStaff(r){delete r.password_hash;return r}
 export async function onRequest(context){const {request,env,params}=context, path=(params.path||[]).join('/'), method=request.method;try{
  {let missing=['SESSION_SECRET'].filter(k=>!env[k]);if(!dbConfigured(env))missing.push(String(env.DB_DRIVER||'').toLowerCase()==='d1'?'DB (D1 binding)':'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or set DB_DRIVER=d1 with a D1 binding named DB)');if(missing.length)return fail('Server configuration is incomplete: missing '+missing.join(', ')+'.',500);}
  if(path==='auth/admin/register'&&method==='POST'){let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!b.phone||!email||!b.password||b.password.length<10)return fail('Name, phone, valid email and a 10-character password are required.');let exists=await db(env,`administrators?email=eq.${encodeURIComponent(email)}&select=id`);if(exists.length)return fail('That email is already registered.',409);let adminCode;for(let i=0;i<12;i++){adminCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`administrators?admin_code=eq.${adminCode}&select=id`);if(!used.length)break;adminCode=null}if(!adminCode)throw Error('Could not reserve an Administrator ID. Please retry.');let [a]=await db(env,'administrators',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name.trim(),address:b.address||null,phone:b.phone.trim(),email,password_hash:await hash(b.password),admin_code:adminCode})});return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
  if(path==='auth/admin/login'&&method==='POST'){let b=await body(request),[a]=await db(env,`administrators?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!a)return fail('Wrong email or password.',401);if(!a.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',a.password_hash))return fail('Wrong email or password.',401);return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
- if(path==='auth/shop/login'&&method==='POST'){let b=await body(request),[store]=await db(env,`stores?shop_code=eq.${encodeURIComponent(b.storeId||'')}&select=id,status,name,admin_id`);if(!store)return fail('Wrong Shop ID.',401);if(!await enforceEntitlement(env,store.admin_id))store.status='read_only';if(store.status==='inactive')return fail('This shop is deactivated. Contact the administrator.',403);let [st]=await db(env,`staff?store_id=eq.${store.id}&user_id=eq.${encodeURIComponent(b.userId||'')}&select=*`), fp=request.headers.get('cf-connecting-ip')+'|'+request.headers.get('user-agent');if(st){if(!st.active)return fail('This user account is deactivated. Contact your shop administrator.',403);if(!await check(b.password||'',st.password_hash))return fail('Wrong user ID or password.',401);await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:st.id,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'staff',actor_id:st.id,action:'staff login',entity_type:'session',entity_id:st.id})});return json({token:await token({id:st.id,role:'staff',storeId:store.id,permissions:normalizePermissions(st.permissions||{}),readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:st.id,name:st.full_name},store:{id:store.id,name:store.name},role:'staff',readOnly:store.status==='read_only'})}let [admin]=await db(env,`administrators?id=eq.${store.admin_id}&email=eq.${encodeURIComponent((b.userId||'').toLowerCase())}&select=*`);if(!admin)return fail('Wrong user ID or password.',401);if(!admin.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',admin.password_hash))return fail('Wrong user ID or password.',401);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:null,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'admin',actor_id:admin.id,action:'administrator shop login',entity_type:'store',entity_id:store.id})});let adminReturn={token:await token({id:admin.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name,email:admin.email},role:'admin'};return json({token:await token({id:admin.id,role:'staff',storeId:store.id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name},store:{id:store.id,name:store.name},role:'staff',adminAccess:true,readOnly:store.status==='read_only',adminReturn})}
+ if(path==='auth/shop/login'&&method==='POST'){let b=await body(request),[store]=await db(env,`stores?shop_code=eq.${encodeURIComponent(b.storeId||'')}&select=id,status,name,admin_id,category`);if(!store)return fail('Wrong Shop ID.',401);if(!await enforceEntitlement(env,store.admin_id))store.status='read_only';if(store.status==='inactive')return fail('This shop is deactivated. Contact the administrator.',403);let [st]=await db(env,`staff?store_id=eq.${store.id}&user_id=eq.${encodeURIComponent(b.userId||'')}&select=*`), fp=request.headers.get('cf-connecting-ip')+'|'+request.headers.get('user-agent');if(st){if(!st.active)return fail('This user account is deactivated. Contact your shop administrator.',403);if(!await check(b.password||'',st.password_hash))return fail('Wrong user ID or password.',401);await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:st.id,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'staff',actor_id:st.id,action:'staff login',entity_type:'session',entity_id:st.id,metadata:{user_id:st.user_id,staff_name:st.full_name,user_agent:request.headers.get('user-agent'),ip:request.headers.get('cf-connecting-ip')}})});return json({token:await token({id:st.id,role:'staff',storeId:store.id,permissions:normalizePermissions(st.permissions||{}),readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:st.id,name:st.full_name},store:{id:store.id,name:store.name,category:store.category||'General Store'},role:'staff',readOnly:store.status==='read_only'})}let [admin]=await db(env,`administrators?id=eq.${store.admin_id}&email=eq.${encodeURIComponent((b.userId||'').toLowerCase())}&select=*`);if(!admin)return fail('Wrong user ID or password.',401);if(!admin.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',admin.password_hash))return fail('Wrong user ID or password.',401);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:null,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'admin',actor_id:admin.id,action:'administrator shop login',entity_type:'store',entity_id:store.id,metadata:{admin_email:admin.email,admin_name:admin.name,user_agent:request.headers.get('user-agent'),ip:request.headers.get('cf-connecting-ip')}})});let adminReturn={token:await token({id:admin.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name,email:admin.email},role:'admin'};return json({token:await token({id:admin.id,role:'staff',storeId:store.id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name},store:{id:store.id,name:store.name,category:store.category||'General Store'},role:'staff',adminAccess:true,readOnly:store.status==='read_only',adminReturn})}
  if(path==='auth/ems/register'&&method==='POST'){let owners=await db(env,'ems_owners?select=id&limit=1');if(owners.length)return fail('The EMS owner has already been initialized. Use EMS login.',403);let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!email||!b.password||b.password.length<12)return fail('Name, email, and a password of at least 12 characters are required.');let [o]=await db(env,'ems_owners',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name,email,password_hash:await hash(b.password)})});return json({token:await token({id:o.id,role:'owner',exp:Math.floor(Date.now()/1000)+14400},env.SESSION_SECRET),user:{id:o.id,name:o.name,email:o.email},role:'owner'});}
  if(path==='auth/ems/login'&&method==='POST'){let b=await body(request),[o]=await db(env,`ems_owners?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!o)return fail('Wrong EMS email or password.',401);if(!o.active)return fail('This EMS owner account is deactivated.',403);if(!await check(b.password||'',o.password_hash))return fail('Wrong EMS email or password.',401);return json({token:await token({id:o.id,role:'owner',exp:Math.floor(Date.now()/1000)+14400},env.SESSION_SECRET),user:{id:o.id,name:o.name,email:o.email},role:'owner'});}
  if(path==='public/page'&&method==='GET'){let slug=new URL(request.url).searchParams.get('slug'),[x]=await db(env,`public_pages?slug=eq.${encodeURIComponent(slug||'')}&select=slug,title,body,hero_image_prompt,updated_at`);if(!x)return fail('Page not found.',404);return json(x)}
@@ -153,7 +164,65 @@ export async function onRequest(context){const {request,env,params}=context, pat
  if(path==='public/contact'&&method==='POST'){let b=await body(request);if(!b.name||!validEmail(b.email)||!b.message)return fail('Name, valid email, and message are required.');let [x]=await db(env,'contact_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:String(b.name).slice(0,120),email:String(b.email).toLowerCase(),phone:b.phone||null,subject:b.subject||null,message:String(b.message).slice(0,5000)})});return json({ok:true,id:x.id},201)}
  if(path==='public/branding'&&method==='GET'){ let [x]=await db(env,'platform_settings?setting_key=eq.branding&select=setting_value');return json(x?.setting_value||{product_name:'EMS V1',powered_by:'DoxTox',website_name:'EMS V1',public_base_url:''});}
  if(path==='public/license-plans'&&method==='GET'){return json(await db(env,'license_plans?active=is.true&select=id,title,duration_months,max_stores,benefits,price,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,business_health_enabled,business_health_daily_limit,truebill_enabled,vaultium_gb&order=price.asc'));}
- if(path.startsWith('public/invoice/')&&method==='GET'){let token=path.split('/')[2],[invoice]=await db(env,`invoices?verification_token=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoice_lines(*,inventory_items(item_code,description,unit))`);if(!invoice)return fail('Invoice verification record was not found.',404);await db(env,'truebill_scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:invoice.store_id||null,invoice_id:invoice.id,invoice_number:invoice.invoice_number,invoice_kind:invoice.kind,ip_address:request.headers.get('cf-connecting-ip')||null,user_agent:request.headers.get('user-agent')||null})}).catch(()=>{});let table=invoice.kind==='sale'?'customers':'suppliers',[party]=invoice.party_id?await db(env,`${table}?id=eq.${invoice.party_id}&select=*`):[];return json({verified:true,invoice,party:party||null})}
+ if(path.startsWith('public/invoice/')&&method==='GET'){
+  let token=decodeURIComponent(path.split('/')[2]||'').trim();
+  if(!token)return fail('Verification token is required.',400);
+
+  const isUuid = /^[0-9a-f-]{36}$/i.test(token);
+
+  // 1. Try invoices (by verification_token or id)
+  let invoice = null;
+  if(isUuid){
+    let [byUuid]=await db(env,`invoices?verification_token=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoice_lines(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    invoice = byUuid;
+    if(!invoice){
+      let [byId]=await db(env,`invoices?id=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoice_lines(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+      invoice = byId;
+    }
+  } else {
+    let [byTok]=await db(env,`invoices?verification_token=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoice_lines(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    invoice = byTok;
+  }
+  if(invoice){
+    await db(env,'truebill_scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:invoice.store_id||null,invoice_id:invoice.id,invoice_number:invoice.invoice_number,invoice_kind:invoice.kind,ip_address:request.headers.get('cf-connecting-ip')||null,user_agent:request.headers.get('user-agent')||null})}).catch(()=>{});
+    let table=invoice.kind==='sale'?'customers':'suppliers',[party]=invoice.party_id?await db(env,`${table}?id=eq.${invoice.party_id}&select=*`).catch(()=>[]):[];
+    return json({verified:true,record_type:'invoice',type:'invoice',invoice,party:party||null});
+  }
+
+  // 2. Try returns (lookup by id first if UUID, then verification_token; catches missing column errors gracefully)
+  let ret = null;
+  if(isUuid){
+    let [byId]=await db(env,`returns?id=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoices(invoice_number,invoice_date),return_items(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    ret = byId;
+  }
+  if(!ret){
+    let [byTok]=await db(env,`returns?verification_token=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoices(invoice_number,invoice_date),return_items(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    ret = byTok;
+  }
+  if(ret){
+    await db(env,'truebill_scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:ret.store_id||null,invoice_id:ret.id,invoice_number:ret.return_number,invoice_kind:'return',ip_address:request.headers.get('cf-connecting-ip')||null,user_agent:request.headers.get('user-agent')||null})}).catch(()=>{});
+    let [party]=ret.customer_id?await db(env,`customers?id=eq.${ret.customer_id}&select=*`).catch(()=>[]):[];
+    return json({verified:true,record_type:'return',type:'return',return:ret,party:party||null,invoice:ret.invoices||ret});
+  }
+
+  // 3. Try exchanges (lookup by id first if UUID, then verification_token; catches missing column errors gracefully)
+  let exc = null;
+  if(isUuid){
+    let [byId]=await db(env,`exchanges?id=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoices(invoice_number,invoice_date),exchange_items(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    exc = byId;
+  }
+  if(!exc){
+    let [byTok]=await db(env,`exchanges?verification_token=eq.${encodeURIComponent(token)}&select=*,stores(name,address,phone,phone2,email,website),invoices(invoice_number,invoice_date),exchange_items(*,inventory_items(item_code,description,unit))`).catch(()=>[]);
+    exc = byTok;
+  }
+  if(exc){
+    await db(env,'truebill_scans',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:exc.store_id||null,invoice_id:exc.id,invoice_number:exc.exchange_number,invoice_kind:'exchange',ip_address:request.headers.get('cf-connecting-ip')||null,user_agent:request.headers.get('user-agent')||null})}).catch(()=>{});
+    let [party]=exc.customer_id?await db(env,`customers?id=eq.${exc.customer_id}&select=*`).catch(()=>[]):[];
+    return json({verified:true,record_type:'exchange',type:'exchange',exchange:exc,party:party||null,invoice:exc.invoices||exc});
+  }
+
+  return fail('Invoice verification record was not found.',404);
+ }
  
  if(path==='auth/forgot-password'&&method==='POST'){
   let b=await body(request),type=b.type,email=(b.email||'').trim().toLowerCase(),otp=String(crypto.getRandomValues(new Uint32Array(1))[0]%900000+100000);
@@ -215,26 +284,597 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='admin/connectx-usage'){if(s.role!=='admin')return fail('Forbidden',403);let stores=await db(env,`stores?admin_id=eq.${s.id}&select=id,name,shop_code`),today=new Date().toISOString().slice(0,10),out=[];for(let store of stores){let plan=await connectxPlan(env,store.id),used=await db(env,`connectx_messages?store_id=eq.${store.id}&created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`);out.push({...store,enabled:!!plan,dailyLimit:plan?.connectx_daily_limit||0,usedToday:used.length,expiresAt:plan?.expires_at||null})}return json(out)}
  if(path==='admin/zudo-usage'&&method==='GET'){if(s.role!=='admin')return fail('Forbidden',403);let stores=await db(env,`stores?admin_id=eq.${s.id}&select=id,name,shop_code,status`),today=new Date().toISOString().slice(0,10),out=await Promise.all(stores.map(async store=>{let used=await db(env,`zudo_messages?store_id=eq.${store.id}&role=eq.user&created_at=gte.${today}T00:00:00Z&select=id`),plan=await zudoPlan(env,store.id),enabled=!!plan&&store.status==='active',dailyLimit=enabled?Number(plan.zudo_daily_limit||0):0;return {...store,enabled,dailyLimit,usedToday:used.length,remaining:Math.max(0,dailyLimit-used.length),expiresAt:enabled?plan.expires_at:null}}));return json(out)}
  if(path==='admin/devices'){if(s.role!=='admin')return fail('Forbidden',403);return json(await db(env,`device_logins?select=*,stores!inner(name),staff(full_name,user_id)&stores.admin_id=eq.${s.id}&order=last_seen_at.desc`));}
- if(path==='admin/stores') {if(s.role!=='admin')return fail('Forbidden',403);if(method==='GET'){await enforceEntitlement(env,s.id);return json(await db(env,`stores?admin_id=eq.${s.id}&select=*&order=created_at.desc`));}let b=await body(request);if(method==='POST'){let [entitlement,existing]=await Promise.all([currentEntitlement(env,s.id),db(env,`stores?admin_id=eq.${s.id}&select=id`)]);let permitted=Number(entitlement?.shop_limit||0);if(!permitted)return fail('Purchase and activate a license plan before creating your first shop.',403);if(existing.length>=permitted)return fail('Your current license capacity has been reached. Upgrade or renew your license to create another shop.',403);let shopCode;for(let i=0;i<12;i++){shopCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`stores?shop_code=eq.${shopCode}&select=id`);if(!used.length)break;shopCode=null}if(!shopCode)throw Error('Could not reserve a Shop ID. Please retry.');let [r]=await db(env,'stores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...clean(b),admin_id:s.id,status:'active',shop_code:shopCode})});await audit(env,s,'create','store',r.id);return json(r,201)}}
+ if(path==='admin/stores') {if(s.role!=='admin')return fail('Forbidden',403);if(method==='GET'){await enforceEntitlement(env,s.id);return json(await db(env,`stores?admin_id=eq.${s.id}&select=*&order=created_at.desc`));}let b=await body(request);if(method==='POST'){let [entitlement,existing]=await Promise.all([currentEntitlement(env,s.id),db(env,`stores?admin_id=eq.${s.id}&select=id`)]);let permitted=Number(entitlement?.shop_limit||0);if(!permitted)return fail('Purchase and activate a license plan before creating your first shop.',403);if(existing.length>=permitted)return fail('Your current license capacity has been reached. Upgrade or renew your license to create another shop.',403);let shopCode;for(let i=0;i<12;i++){shopCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`stores?shop_code=eq.${shopCode}&select=id`);if(!used.length)break;shopCode=null}if(!shopCode)throw Error('Could not reserve a Shop ID. Please retry.');let cat=String(b.category||'General Store').trim()||'General Store';let [r]=await db(env,'stores',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...clean(b),category:cat,admin_id:s.id,status:'active',shop_code:shopCode})});await audit(env,s,'create','store',r.id,{storeId:r.id,name:r.name,category:cat});return json(r,201)}}
  if(path==='admin/store-capacity'&&method==='POST'){if(s.role!=='admin')return fail('Forbidden',403);let b=await body(request),entitlement=await enforceEntitlement(env,s.id),stores=await db(env,`stores?admin_id=eq.${s.id}&select=id,status&order=created_at.asc`),choices=b.choices||[];if(!Array.isArray(choices)||choices.length!==stores.length)return fail('Invalid shop capacity selection.',400);let ids=new Set(stores.map(x=>x.id)),active=choices.filter(x=>x.status==='active');if(!entitlement||active.length>entitlement.shop_limit)return fail(`Your current license allows ${entitlement?.shop_limit||0} active shop(s).`,403);if(choices.some(x=>!ids.has(x.id)||!['active','read_only','inactive','delete'].includes(x.status)))return fail('Invalid shop selection.',400);for(let choice of choices){if(choice.status==='delete')await db(env,`stores?id=eq.${choice.id}&admin_id=eq.${s.id}`,{method:'DELETE'});else await db(env,`stores?id=eq.${choice.id}&admin_id=eq.${s.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:choice.status})})}await audit(env,s,'manage shop capacity','stores',null,{choices});return json({ok:true})}
- if(path.match(/^admin\/store\/[^/]+\/goto$/)&&method==='POST'){ if(s.role!=='admin')return fail('Forbidden',403);let id=path.split('/')[2],[store]=await db(env,`stores?id=eq.${id}&admin_id=eq.${s.id}&select=id,name,status`);if(!store)return fail('Store not found',404);if(!await enforceEntitlement(env,s.id))store.status='read_only';if(store.status==='inactive')return fail('This shop is inactive.',403);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await audit(env,s,'administrator shop access','store',id);return json({token:await token({id:s.id,role:'staff',storeId:id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+3600},env.SESSION_SECRET),user:{id:s.id,name:'Administrator'},store:{id,name:store.name},role:'staff',adminAccess:true,readOnly:store.status==='read_only'});}
- if(path.startsWith('admin/store/')){if(s.role!=='admin')return fail('Forbidden',403);let id=path.split('/')[2], [store]=await db(env,`stores?id=eq.${id}&admin_id=eq.${s.id}&select=*`);if(!store)return fail('Store not found',404);if(method==='PATCH'){let b=await body(request);if(b.status==='active'){let entitlement=await enforceEntitlement(env,s.id),shops=await db(env,`stores?admin_id=eq.${s.id}&select=id&order=created_at.asc`),position=shops.findIndex(x=>x.id===id)+1;if(!entitlement||position>entitlement.shop_limit)return fail('This shop exceeds your current license capacity and must remain Read-Only. Upgrade your license to activate it.',403)}let [r]=await db(env,`stores?id=eq.${id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});await audit(env,s,'update','store',id);return json(r)}if(method==='DELETE'){await db(env,`stores?id=eq.${id}`,{method:'DELETE'});await audit(env,s,'delete','store',id);return json({ok:true})}}
+ if(path.match(/^admin\/store\/[^/]+\/goto$/)&&method==='POST'){ if(s.role!=='admin')return fail('Forbidden',403);let id=path.split('/')[2],[store]=await db(env,`stores?id=eq.${id}&admin_id=eq.${s.id}&select=id,name,status,category`);if(!store)return fail('Store not found',404);if(!await enforceEntitlement(env,s.id))store.status='read_only';if(store.status==='inactive')return fail('This shop is inactive.',403);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await audit(env,s,'administrator shop access','store',id,{storeId:id,name:store.name});return json({token:await token({id:s.id,role:'staff',storeId:id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+3600},env.SESSION_SECRET),user:{id:s.id,name:'Administrator'},store:{id,name:store.name,category:store.category||'General Store'},role:'staff',adminAccess:true,readOnly:store.status==='read_only'});}
+ if(path.startsWith('admin/store/')){if(s.role!=='admin')return fail('Forbidden',403);let id=path.split('/')[2], [store]=await db(env,`stores?id=eq.${id}&admin_id=eq.${s.id}&select=*`);if(!store)return fail('Store not found',404);if(method==='PATCH'){let b=await body(request);if(b.status==='active'){let entitlement=await enforceEntitlement(env,s.id),shops=await db(env,`stores?admin_id=eq.${s.id}&select=id&order=created_at.asc`),position=shops.findIndex(x=>x.id===id)+1;if(!entitlement||position>entitlement.shop_limit)return fail('This shop exceeds your current license capacity and must remain Read-Only. Upgrade your license to activate it.',403)}let [r]=await db(env,`stores?id=eq.${id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});await audit(env,s,'update','store',id,{storeId:id,changed:Object.keys(clean(b))});return json(r)}if(method==='DELETE'){await db(env,`stores?id=eq.${id}`,{method:'DELETE'});await audit(env,s,'delete','store',id,{storeId:id,name:store.name});return json({ok:true})}}
  if(path==='license-plans'&&method==='GET'){return json(await db(env,'license_plans?active=is.true&select=*&order=price.asc'));}
  if(path==='admin/licenses'&&s.role==='admin'){if(method==='GET')return json(await db(env,`licenses?admin_id=eq.${s.id}&select=*,license_plans(title,max_stores)&order=created_at.desc`));if(method==='POST'){let b=await body(request),[plan]=await db(env,`license_plans?id=eq.${b.planId}&active=is.true&select=*`);if(!plan)return fail('Selected license plan is unavailable.',404);if(Number(plan.price)===0){let prior=await db(env,`licenses?admin_id=eq.${s.id}&plan_id=eq.${plan.id}&status=eq.active&select=id`);if(prior.length)return fail('This free license plan has already been activated for your administrator account.',409)}let data={admin_id:s.id,plan_id:plan.id,duration_months:plan.duration_months,amount:plan.price,max_stores:plan.max_stores,connectx_enabled:plan.connectx_enabled,connectx_daily_limit:plan.connectx_daily_limit,zudo_enabled:plan.zudo_enabled,zudo_daily_limit:plan.zudo_daily_limit,business_health_enabled:plan.business_health_enabled,business_health_daily_limit:plan.business_health_daily_limit,truebill_enabled:plan.truebill_enabled,vaultium_gb:Number(plan.vaultium_gb||0),status:plan.price===0?'active':'pending'};if(plan.price>0){if(!['bkash','nagad'].includes(b.paymentMethod)||!b.paymentNumber||!b.transactionId)return fail('Payment method, payment number, and transaction ID are required.');let prior=await db(env,`licenses?payment_method=eq.${b.paymentMethod}&transaction_id=eq.${encodeURIComponent(b.transactionId)}&select=id`);if(prior.length)return fail('This payment transaction ID has already been submitted. Use the correct unique bKash/Nagad transaction ID.',409);Object.assign(data,{payment_method:b.paymentMethod,payment_number:b.paymentNumber,transaction_id:b.transactionId})}else {let starts=new Date(),expires=new Date(starts);expires.setMonth(expires.getMonth()+plan.duration_months);Object.assign(data,{payment_method:'other',payment_number:'free',transaction_id:'free-'+crypto.randomUUID(),starts_at:starts.toISOString(),expires_at:expires.toISOString(),reviewed_at:starts.toISOString(),review_note:'Automatically approved free license plan'})}let [r]=await db(env,'licenses',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});if(plan.price===0)await db(env,'rpc/apply_current_entitlement',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_license_id:r.id})});return json(r,201)}}
  if(path==='invoice-number'&&method==='GET'){let kind=new URL(request.url).searchParams.get('kind');if(!['sale','purchase'].includes(kind))return fail('Invalid invoice type.');let number=await db(env,'rpc/peek_ems_invoice_number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_kind:kind})});return json({invoiceNumber:number})}
  if(path==='invoice-items'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let kind=new URL(request.url).searchParams.get('kind'),section=kind==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(kind)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,unit,sale_price,total_stock,active,category&order=description.asc`))}
  if(path==='invoice-parties'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let kind=new URL(request.url).searchParams.get('kind'),section=kind==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(kind)||!allowed(s,section,'view'))return fail('Permission denied.',403);let table=kind==='purchase'?'suppliers':'customers',code=kind==='purchase'?'supplier_code':'customer_code';return json(await db(env,`${table}?store_id=eq.${s.storeId}&select=id,name,address,phone,${code}&order=name.asc`))}
- if(path.match(/^invoices\/[^/]+$/)&&method==='DELETE'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[1],[inv]=await db(env,`invoices?id=eq.${id}&store_id=eq.${s.storeId}&select=kind`);if(!inv)return fail('Invoice not found.',404);if(!allowed(s,inv.kind==='purchase'?'purchase':'sales','delete'))return fail('Permission denied.',403);await db(env,'rpc/delete_posted_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_store_id:s.storeId,p_invoice_id:id})});await audit(env,s,'delete',inv.kind+' invoice',id);return json({ok:true})}
- if(path==='invoices'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let q=new URL(request.url).searchParams.get('kind'),section=q==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(q)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${q}&select=*,invoice_lines(*,inventory_items(item_code,description,unit))&order=created_at.desc`))}if(method==='POST'){let b=await body(request), section=b.kind==='purchase'?'purchase':'sales';if(!allowed(s,section,'add'))return fail('Permission denied.',403);let payload={p_store_id:s.storeId,p_kind:b.kind,p_party_id:b.partyId||null,p_invoice_date:b.invoiceDate,p_payment_method:b.paymentMethod||'cash',p_transaction_id:b.transactionId||null,p_notes:b.notes||null,p_tax_percent:Number(b.taxPercent||0),p_discount:Number(b.discount||0),p_paid_amount:Number(b.paidAmount||0),p_created_by:s.id,p_lines:b.lines};let x=null,rj=null,lastErr=null;for(let attempt=0;attempt<4;attempt++){let actualInvoiceNumber=await db(env,'rpc/next_ems_invoice_number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_kind:b.kind})});try{rj=await db(env,'rpc/post_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,p_invoice_number:actualInvoiceNumber})})}catch(pe){lastErr=pe.message||'Invoice could not be posted';if(/duplicate|already exists|UNIQUE/i.test(lastErr))continue;throw Error(lastErr)}x=rj;break}if(!x)throw Error(lastErr||'Invoice could not be posted');if(b.kind==='sale'&&!b.partyId){let [updated]=await db(env,`invoices?id=eq.${x.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({custom_party_name:b.customPartyName||null,custom_party_address:b.customPartyAddress||null,custom_party_phone:b.customPartyPhone||null})});x=updated}await audit(env,s,'post',b.kind+' invoice',x.id);return json(x,201)}}
- if(path==='shop/settings'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [store]=await db(env,`stores?id=eq.${s.storeId}&select=name,shop_code,address,phone,phone2,email,website,low_stock_threshold,status`);return json(store)}
- if(path==='shop/activity-logs'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [logs,staffs,suppliers,customers,items,expenses,invoices]=await Promise.all([db(env,`activity_logs?store_id=eq.${s.storeId}&select=*&order=created_at.desc&limit=300`),db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`),db(env,`suppliers?store_id=eq.${s.storeId}&select=id,supplier_code`),db(env,`customers?store_id=eq.${s.storeId}&select=id,customer_code`),db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code`),db(env,`expenses?store_id=eq.${s.storeId}&select=id,expense_code`),db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number`)]);let staffMap=Object.fromEntries(staffs.map(x=>[x.id,{userId:x.user_id,name:x.full_name}])),details={};for(let a of [suppliers,customers,items,expenses,invoices])for(let r of a)details[r.id]=r.supplier_code||r.customer_code||r.item_code||r.expense_code||r.invoice_number;return json(logs.map(x=>({...x,detail:details[x.entity_id]||x.entity_id||'—',actor:staffMap[x.actor_id]||{userId:x.actor_type==='admin'?'ADMIN':'System',name:x.actor_type==='admin'?'Administrator':'System'}})))}
+ if(path.match(/^invoices\/[^/]+$/)&&method==='DELETE'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[1],[inv]=await db(env,`invoices?id=eq.${id}&store_id=eq.${s.storeId}&select=kind,invoice_number`);if(!inv)return fail('Invoice not found.',404);if(!allowed(s,inv.kind==='purchase'?'purchase':'sales','delete'))return fail('Permission denied.',403);try{await db(env,'rpc/delete_posted_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_store_id:s.storeId,p_invoice_id:id})});}catch(pe){return fail(pe.message||'Invoice could not be deleted.',400);}await audit(env,s,'delete',inv.kind+' invoice',id,{invoice_number:inv.invoice_number,kind:inv.kind});return json({ok:true})}
+ if(path==='invoices'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let q=new URL(request.url).searchParams.get('kind'),section=q==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(q)||!allowed(s,section,'view'))return fail('Permission denied.',403);return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${q}&select=*,invoice_lines(*,inventory_items(item_code,description,unit))&order=created_at.desc`))}if(method==='POST'){let b=await body(request), section=b.kind==='purchase'?'purchase':'sales';if(!allowed(s,section,'add'))return fail('Permission denied.',403);let payload={p_store_id:s.storeId,p_kind:b.kind,p_party_id:b.partyId||null,p_invoice_date:b.invoiceDate,p_payment_method:b.paymentMethod||'cash',p_transaction_id:b.transactionId||null,p_notes:b.notes||null,p_tax_percent:Number(b.taxPercent||0),p_discount:Number(b.discount||0),p_paid_amount:Number(b.paidAmount||0),p_created_by:s.id,p_lines:b.lines};let x=null,rj=null,lastErr=null;for(let attempt=0;attempt<4;attempt++){let actualInvoiceNumber=await db(env,'rpc/next_ems_invoice_number',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_kind:b.kind})});try{rj=await db(env,'rpc/post_invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...payload,p_invoice_number:actualInvoiceNumber})})}catch(pe){lastErr=pe.message||'Invoice could not be posted';if(/duplicate|already exists|UNIQUE/i.test(lastErr))continue;throw Error(lastErr)}x=rj;break}if(!x)throw Error(lastErr||'Invoice could not be posted');if(b.kind==='sale'&&!b.partyId){let [updated]=await db(env,`invoices?id=eq.${x.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({custom_party_name:b.customPartyName||null,custom_party_address:b.customPartyAddress||null,custom_party_phone:b.customPartyPhone||null})});x=updated}await audit(env,s,'post',b.kind+' invoice',x.id,{invoice_number:x.invoice_number||actualInvoiceNumber,kind:b.kind,party_id:b.partyId||null,total:x.subtotal,paid:x.paid_amount,due:x.total_due,payment_method:b.paymentMethod||'cash'});return json(x,201)}}
+ if(path==='inventory/damaged-defective'&&method==='GET'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(!allowed(s,'inventory','view')&&!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+  let [returnsList, exchangesList]=await Promise.all([
+   db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,return_date,customer_name,invoice_id,invoices(invoice_number),return_items(*,inventory_items(item_code,description,unit,category))&order=created_at.desc`).catch(()=>[]),
+   db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,exchange_date,customer_name,invoice_id,invoices(invoice_number),exchange_items(*,inventory_items(item_code,description,unit,category))&order=created_at.desc`).catch(()=>[])
+  ]);
+  let list=[];
+  for(let r of (returnsList||[])){
+   for(let it of (r.return_items||[])){
+    if(it.condition==='Damaged'||it.condition==='Defective'){
+     list.push({
+      id:it.id,
+      return_id:r.id,
+      exchange_id:null,
+      source_type:'return',
+      return_number:r.return_number,
+      return_date:r.return_date,
+      customer_name:r.customer_name||'Walk-in Customer',
+      invoice_number:r.invoices?.invoice_number||'—',
+      item_id:it.item_id,
+      item_code:it.inventory_items?.item_code||'—',
+      description:it.inventory_items?.description||'Item',
+      unit:it.inventory_items?.unit||'pcs',
+      original_category:it.inventory_items?.category||'Uncategorized',
+      category:'Damage/Defective',
+      quantity:Number(it.quantity),
+      unit_price:Number(it.unit_price),
+      return_amount:Number(it.return_amount||0),
+      condition:it.condition,
+      reason:it.reason,
+      reason_note:it.reason_note||null,
+      created_at:it.created_at
+     });
+    }
+   }
+  }
+  for(let exc of (exchangesList||[])){
+   for(let it of (exc.exchange_items||[])){
+    if(it.item_type==='returned'&&(it.condition==='Damaged'||it.condition==='Defective')){
+     list.push({
+      id:it.id,
+      return_id:null,
+      exchange_id:exc.id,
+      source_type:'exchange',
+      return_number:exc.exchange_number,
+      return_date:exc.exchange_date,
+      customer_name:exc.customer_name||'Walk-in Customer',
+      invoice_number:exc.invoices?.invoice_number||'—',
+      item_id:it.item_id,
+      item_code:it.inventory_items?.item_code||'—',
+      description:it.inventory_items?.description||'Item',
+      unit:it.inventory_items?.unit||'pcs',
+      original_category:it.inventory_items?.category||'Uncategorized',
+      category:'Damage/Defective',
+      quantity:Number(it.quantity),
+      unit_price:Number(it.unit_price),
+      return_amount:Number(it.total_amount||0),
+      condition:it.condition,
+      reason:it.reason||'—',
+      reason_note:it.reason_note||null,
+      created_at:it.created_at
+     });
+    }
+   }
+  }
+  list.sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
+  return json(list);
+ }
+ if(path==='returns/invoice-lookup'&&method==='GET'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+  let invNum=String(new URL(request.url).searchParams.get('invoice_number')||'').trim();
+  if(!invNum)return fail('Invoice number is required.',400);
+  let invoices=await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&select=*,invoice_lines(*,inventory_items(id,item_code,description,unit,sale_price,total_stock))`);
+  let inv=invoices.find(x=>x.invoice_number.toLowerCase()===invNum.toLowerCase());
+  if(!inv)return fail('Sales invoice "'+invNum+'" not found in this shop.',404);
+  let party=inv.party_id?(await db(env,`customers?id=eq.${inv.party_id}&select=*`))[0]:null;
+  let [existingReturns, existingExchanges]=await Promise.all([
+   db(env,`returns?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,return_items(*)`).catch(()=>[]),
+   db(env,`exchanges?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,exchange_items(*)`).catch(()=>[])
+  ]);
+  let returnedMap={};
+  for(let ret of (existingReturns||[])){
+   for(let it of (ret.return_items||[])){
+    let k=it.invoice_line_id||it.item_id;
+    returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+   }
+  }
+  for(let exc of (existingExchanges||[])){
+   for(let it of (exc.exchange_items||[])){
+    if(it.item_type==='returned'){
+     let k=it.invoice_line_id||it.item_id;
+     returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+    }
+   }
+  }
+  let lines=(inv.invoice_lines||[]).map(l=>{
+   let already=returnedMap[l.id]||returnedMap[l.item_id]||0;
+   let returnable=Math.max(0,Math.round((Number(l.quantity)-already)*1000)/1000);
+   return {
+    ...l,
+    already_returned_quantity:already,
+    returnable_quantity:returnable,
+    is_fully_returned:returnable<=0
+   };
+  });
+  return json({invoice:inv,customer:party,lines,existingReturns,existingExchanges});
+ }
+ if(path==='returns'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(method==='GET'){
+   if(!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+   let q=new URL(request.url).searchParams.get('invoice_id');
+   let filter=q?`&invoice_id=eq.${q}`:'';
+   let rows=await db(env,`returns?store_id=eq.${s.storeId}${filter}&select=*,invoices(invoice_number,invoice_date,total_due,paid_amount,subtotal),customers(name,phone,customer_code),return_items(*,inventory_items(item_code,description,unit))&order=created_at.desc`);
+   return json(rows);
+  }
+  if(method==='POST'){
+   if(!allowed(s,'returns_refunds','add')&&!allowed(s,'sales','add'))return fail('Permission denied.',403);
+   let b=await body(request);
+   if(!b.invoice_id||!Array.isArray(b.items)||!b.items.length)return fail('Invoice ID and at least one return item are required.',400);
+   let [inv]=await db(env,`invoices?id=eq.${b.invoice_id}&store_id=eq.${s.storeId}&kind=eq.sale&select=*,invoice_lines(*)`);
+   if(!inv)return fail('Sales invoice not found in this shop.',404);
+   let [existingReturns, existingExchanges]=await Promise.all([
+    db(env,`returns?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,return_items(*)`).catch(()=>[]),
+    db(env,`exchanges?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,exchange_items(*)`).catch(()=>[])
+   ]);
+   let returnedMap={};
+   for(let ret of (existingReturns||[])){
+    for(let it of (ret.return_items||[])){
+     let k=it.invoice_line_id||it.item_id;
+     returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+    }
+   }
+   for(let exc of (existingExchanges||[])){
+    for(let it of (exc.exchange_items||[])){
+     if(it.item_type==='returned'){
+      let k=it.invoice_line_id||it.item_id;
+      returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+     }
+    }
+   }
+   let validReasons=['Customer Changed Mind','Defective','Wrong Product','Damaged','Wrong Specification','Other'];
+   let validConditions=['Sellable','Damaged','Defective'];
+   let processedItems=[],subtotalSum=0,taxSum=0,discSum=0,penaltySum=0,grandTotal=0;
+   for(let itemReq of b.items){
+    let line=inv.invoice_lines.find(l=>l.id===itemReq.invoice_line_id||l.item_id===itemReq.item_id);
+    if(!line)return fail('Selected item does not belong to this invoice.',400);
+    let qty=Number(itemReq.quantity);
+    if(isNaN(qty)||qty<=0)return fail('Return quantity must be greater than zero.',400);
+    let already=returnedMap[line.id]||0;
+    let returnable=Math.max(0,Math.round((Number(line.quantity)-already)*1000)/1000);
+    if(qty>returnable+0.0001)return fail(`Return quantity (${qty}) exceeds remaining returnable quantity (${returnable}).`,400);
+    returnedMap[line.id]=already+qty;
+    let reason=String(itemReq.reason||'').trim();
+    if(!validReasons.includes(reason))return fail('Valid return reason is required.',400);
+    let reasonNote=itemReq.reason_note?String(itemReq.reason_note).trim():null;
+    if(reason==='Other'&&!reasonNote)return fail('Note is required when return reason is Other.',400);
+    let condition=String(itemReq.condition||'').trim();
+    if(!validConditions.includes(condition))return fail('Valid condition is required.',400);
+    let uPrice=Number(line.unit_price);
+    let lSub=Math.round(qty*uPrice*100)/100;
+    let taxPct=Number(line.tax_percent||inv.tax_percent||0);
+    let lTax=Math.round(lSub*taxPct)/100;
+    let origSoldQty=Number(line.quantity);
+    let lineOrigDisc=Number(line.discount||0);
+    let lDisc=origSoldQty>0?Math.round((qty/origSoldQty)*lineOrigDisc*100)/100:0;
+    let penalty=Math.max(0,Math.round(Number(itemReq.penalty||0)*100)/100);
+    let lineTotal=Math.max(0,Math.round((lSub+lTax-lDisc-penalty)*100)/100);
+    subtotalSum+=lSub;taxSum+=lTax;discSum+=lDisc;penaltySum+=penalty;grandTotal+=lineTotal;
+    processedItems.push({
+     invoice_line_id:line.id,
+     item_id:line.item_id,
+     quantity:qty,
+     unit_price:uPrice,
+     tax_percent:taxPct,
+     tax_amount:lTax,
+     discount:lDisc,
+     penalty:penalty,
+     return_amount:lineTotal,
+     reason,
+     reason_note:reasonNote,
+     condition,
+     imei_serial:null
+    });
+   }
+   let year=new Date().getFullYear();
+   let prefix=`RET-${year}-`;
+   let existingReturnsList=await db(env,`returns?store_id=eq.${s.storeId}&select=return_number`);
+   let maxNum=0;
+   for(let r of (existingReturnsList||[])){
+    let rNum=String(r.return_number||'');
+    if(rNum.startsWith(prefix)){
+     let p=parseInt(rNum.slice(prefix.length),10);
+     if(!isNaN(p)&&p>maxNum)maxNum=p;
+    }
+   }
+   let returnNumber=`${prefix}${String(maxNum+1).padStart(5,'0')}`;
+   let party=inv.party_id?(await db(env,`customers?id=eq.${inv.party_id}&select=id,name`))[0]:null;
+   let custName=party?.name||inv.custom_party_name||'Walk-in Customer';
+   let refundMethod=String(b.refund_method||'cash').toLowerCase().trim();
+   if(!['cash','bank','bkash','nagad','other','none'].includes(refundMethod))refundMethod='cash';
+   let trxId=b.transaction_id?String(b.transaction_id).trim():null;
+   let finalRefundAmt=Math.round(grandTotal*100)/100;
+   let retPayload = {
+    store_id:s.storeId,
+    invoice_id:inv.id,
+    return_number:returnNumber,
+    verification_token:crypto.randomUUID(),
+    customer_id:party?.id||null,
+    customer_name:custName,
+    return_date:new Date().toISOString().slice(0,10),
+    subtotal:Math.round(subtotalSum*100)/100,
+    tax_amount:Math.round(taxSum*100)/100,
+    discount_amount:Math.round(discSum*100)/100,
+    penalty_amount:Math.round(penaltySum*100)/100,
+    total_return_amount:finalRefundAmt,
+    refunded_amount:finalRefundAmt,
+    refund_method:refundMethod,
+    transaction_id:trxId,
+    status:'refunded',
+    notes:b.notes?String(b.notes).trim():null,
+    created_by:s.id
+   };
+   let ret = null;
+   try {
+    [ret] = await db(env,'returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(retPayload)});
+   } catch(err) {
+    if (err.message && err.message.includes('verification_token')) {
+      delete retPayload.verification_token;
+      [ret] = await db(env,'returns',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(retPayload)});
+    } else {
+      throw err;
+    }
+   }
+   for(let it of processedItems){
+    await db(env,'return_items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+     ...it,
+     return_id:ret.id
+    })});
+    let [itemRow]=await db(env,`inventory_items?id=eq.${it.item_id}&store_id=eq.${s.storeId}&select=*`);
+    let stockBefore=Number(itemRow?.total_stock||0);
+    let stockAfter=stockBefore;
+    let movType='return_restock';
+    if(it.condition==='Sellable'){
+     stockAfter=stockBefore+it.quantity;
+     await db(env,`inventory_items?id=eq.${it.item_id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({
+      total_stock:stockAfter,
+      updated_at:new Date().toISOString()
+     })});
+    }else if(it.condition==='Damaged')movType='return_damaged';
+    else if(it.condition==='Defective')movType='return_defective';
+    await db(env,'inventory_stock_movements',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+     store_id:s.storeId,
+     item_id:it.item_id,
+     return_id:ret.id,
+     movement_type:movType,
+     quantity:it.quantity,
+     stock_before:stockBefore,
+     stock_after:stockAfter,
+     condition:it.condition,
+     notes:it.reason+(it.reason_note?` (${it.reason_note})`:''),
+     created_by:s.id
+    })});
+   }
+   await audit(env,s,'create sales return','returns',ret.id,{return_number:returnNumber,invoice_number:inv.invoice_number,amount:ret.total_return_amount,refunded_amount:ret.refunded_amount,refund_method:ret.refund_method});
+   return json({ok:true,return:ret,returnNumber},201);
+  }
+ }
+ if(path.match(/^returns\/[^/]+$/)&&method==='GET'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+  let id=path.split('/')[1];
+  let [ret]=await db(env,`returns?id=eq.${id}&store_id=eq.${s.storeId}&select=*,invoices(*),customers(*),return_items(*,inventory_items(item_code,description,unit)),inventory_stock_movements(*,inventory_items(item_code,description,unit))`);
+  if(!ret)return fail('Return not found.',404);
+  let staffList=await db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`);
+  let staffMap=Object.fromEntries(staffList.map(st=>[st.id,st]));
+  ret.created_by_user=staffMap[ret.created_by]?.user_id||staffMap[ret.created_by]?.full_name||'Administrator';
+  return json(ret);
+ }
+ if(path==='exchanges'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(method==='GET'){
+   if(!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+   let q=new URL(request.url).searchParams.get('invoice_id');
+   let filter=q?`&invoice_id=eq.${q}`:'';
+   let rows=await db(env,`exchanges?store_id=eq.${s.storeId}${filter}&select=*,invoices(invoice_number,invoice_date,total_due,paid_amount,subtotal),customers(name,phone,customer_code),exchange_items(*,inventory_items(item_code,description,unit)),inventory_stock_movements(*)&order=created_at.desc`);
+   return json(rows);
+  }
+  if(method==='POST'){
+   if(!allowed(s,'returns_refunds','add')&&!allowed(s,'sales','add'))return fail('Permission denied.',403);
+   let b=await body(request);
+   if(!b.invoice_id)return fail('Original invoice ID is required.',400);
+   if(!Array.isArray(b.returned_items)||!b.returned_items.length)return fail('At least one returned item is required for exchange.',400);
+   if(!Array.isArray(b.new_items)||!b.new_items.length)return fail('At least one replacement/new item is required for exchange.',400);
+
+   let [inv]=await db(env,`invoices?id=eq.${b.invoice_id}&store_id=eq.${s.storeId}&kind=eq.sale&select=*,invoice_lines(*)`);
+   if(!inv)return fail('Sales invoice not found in this shop.',404);
+
+   let [existingReturns, existingExchanges]=await Promise.all([
+    db(env,`returns?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,return_items(*)`).catch(()=>[]),
+    db(env,`exchanges?store_id=eq.${s.storeId}&invoice_id=eq.${inv.id}&select=*,exchange_items(*)`).catch(()=>[])
+   ]);
+
+   let returnedMap={};
+   for(let ret of (existingReturns||[])){
+    for(let it of (ret.return_items||[])){
+     let k=it.invoice_line_id||it.item_id;
+     returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+    }
+   }
+   for(let exc of (existingExchanges||[])){
+    for(let it of (exc.exchange_items||[])){
+     if(it.item_type==='returned'){
+      let k=it.invoice_line_id||it.item_id;
+      returnedMap[k]=(returnedMap[k]||0)+Number(it.quantity);
+     }
+    }
+   }
+
+   let validReasons=['Customer Changed Mind','Defective','Wrong Product','Damaged','Wrong Specification','Other'];
+   let validConditions=['Sellable','Damaged','Defective'];
+   let processedReturnedItems=[], returnedTotalSum=0;
+
+   for(let itemReq of b.returned_items){
+    let line=inv.invoice_lines.find(l=>l.id===itemReq.invoice_line_id||l.item_id===itemReq.item_id);
+    if(!line)return fail('Selected returned product does not belong to this invoice.',400);
+    let qty=Number(itemReq.quantity);
+    if(isNaN(qty)||qty<=0)return fail('Exchange quantity must be greater than zero.',400);
+    let already=returnedMap[line.id]||0;
+    let returnable=Math.max(0,Math.round((Number(line.quantity)-already)*1000)/1000);
+    if(qty>returnable+0.0001)return fail(`Exchange quantity (${qty}) exceeds remaining returnable quantity (${returnable}).`,400);
+    returnedMap[line.id]=already+qty;
+
+    let reason=String(itemReq.reason||'').trim();
+    if(!validReasons.includes(reason))return fail('Valid return reason is required.',400);
+    let reasonNote=itemReq.reason_note?String(itemReq.reason_note).trim():null;
+    if(reason==='Other'&&!reasonNote)return fail('Note is required when return reason is Other.',400);
+    let condition=String(itemReq.condition||'').trim();
+    if(!validConditions.includes(condition))return fail('Valid condition is required.',400);
+
+    let uPrice=Number(line.unit_price);
+    let lSub=Math.round(qty*uPrice*100)/100;
+    let taxPct=Number(line.tax_percent||inv.tax_percent||0);
+    let lTax=Math.round(lSub*taxPct)/100;
+    let origSoldQty=Number(line.quantity);
+    let lineOrigDisc=Number(line.discount||0);
+    let lDisc=origSoldQty>0?Math.round((qty/origSoldQty)*lineOrigDisc*100)/100:0;
+    let lineTotal=Math.max(0,Math.round((lSub+lTax-lDisc)*100)/100);
+    returnedTotalSum+=lineTotal;
+
+    processedReturnedItems.push({
+     invoice_line_id:line.id,
+     item_id:line.item_id,
+     quantity:qty,
+     unit_price:uPrice,
+     tax_percent:taxPct,
+     tax_amount:lTax,
+     discount:lDisc,
+     total_amount:lineTotal,
+     reason,
+     reason_note:reasonNote,
+     condition
+    });
+   }
+
+   let processedNewItems=[], newSubtotal=0, newTax=0, newDisc=0, newTotalSum=0;
+   for(let itemReq of b.new_items){
+    let [invItem]=await db(env,`inventory_items?id=eq.${itemReq.item_id}&store_id=eq.${s.storeId}&select=*`);
+    if(!invItem)return fail('Replacement product not found in inventory.',404);
+    if(invItem.active===false)return fail(`Product "${invItem.description}" is inactive.`,400);
+    let qty=Number(itemReq.quantity);
+    if(isNaN(qty)||qty<=0)return fail('Replacement quantity must be greater than zero.',400);
+    let curStock=Number(invItem.total_stock||0);
+    if(curStock<qty)return fail(`Insufficient stock for "${invItem.description}". Available: ${curStock}, Requested: ${qty}.`,400);
+
+    let price=itemReq.unit_price!=null&&!isNaN(Number(itemReq.unit_price))?Number(itemReq.unit_price):Number(invItem.sale_price||0);
+    if(price<0)return fail('Product price cannot be negative.',400);
+    let taxPct=Math.max(0,Number(itemReq.tax_percent||0));
+    let disc=Math.max(0,Number(itemReq.discount||0));
+    let lSub=Math.round(qty*price*100)/100;
+    let lTax=Math.round(lSub*taxPct)/100;
+    if(disc>lSub+lTax)return fail('Discount cannot exceed line subtotal and tax.',400);
+    let lineTotal=Math.max(0,Math.round((lSub+lTax-disc)*100)/100);
+
+    newSubtotal+=lSub;
+    newTax+=lTax;
+    newDisc+=disc;
+    newTotalSum+=lineTotal;
+
+    processedNewItems.push({
+     item_id:invItem.id,
+     quantity:qty,
+     unit_price:price,
+     tax_percent:taxPct,
+     tax_amount:lTax,
+     discount:disc,
+     total_amount:lineTotal,
+     invItem
+    });
+   }
+
+   returnedTotalSum=Math.round(returnedTotalSum*100)/100;
+   newTotalSum=Math.round(newTotalSum*100)/100;
+   let diff=Math.round((newTotalSum-returnedTotalSum)*100)/100;
+   let actionType='even';
+   let payMethod=String(b.payment_method||'cash').toLowerCase();
+
+   if(diff>0){
+    actionType='payment';
+    if(!['cash','bank','bkash','nagad','other'].includes(payMethod))return fail('Valid payment method is required for additional payment.',400);
+   }else if(diff<0){
+    actionType='refund';
+    if(!['cash','bank','bkash','nagad','other'].includes(payMethod))return fail('Valid refund method is required for customer refund.',400);
+   }else{
+    actionType='even';
+    payMethod='none';
+   }
+   let trxId=b.transaction_id?String(b.transaction_id).trim():null;
+
+   let year=new Date().getFullYear();
+   let prefix=`EXC-${year}-`;
+   let existingExchangesList=await db(env,`exchanges?store_id=eq.${s.storeId}&select=exchange_number`);
+   let maxNum=0;
+   for(let r of (existingExchangesList||[])){
+    let exNum=String(r.exchange_number||'');
+    if(exNum.startsWith(prefix)){
+     let p=parseInt(exNum.slice(prefix.length),10);
+     if(!isNaN(p)&&p>maxNum)maxNum=p;
+    }
+   }
+   let exchangeNumber=`${prefix}${String(maxNum+1).padStart(5,'0')}`;
+   let party=inv.party_id?(await db(env,`customers?id=eq.${inv.party_id}&select=*`))[0]:null;
+   let custName=party?.name||inv.custom_party_name||'Walk-in Customer';
+
+   let excPayload = {
+    store_id:s.storeId,
+    invoice_id:inv.id,
+    exchange_number:exchangeNumber,
+    verification_token:crypto.randomUUID(),
+    customer_id:inv.party_id||null,
+    customer_name:custName,
+    exchange_date:new Date().toISOString().slice(0,10),
+    returned_total:returnedTotalSum,
+    new_items_subtotal:newSubtotal,
+    new_items_tax:newTax,
+    new_items_discount:newDisc,
+    new_items_total:newTotalSum,
+    difference_amount:diff,
+    action_type:actionType,
+    payment_method:payMethod,
+    transaction_id:trxId,
+    status:'completed',
+    notes:b.notes?String(b.notes).trim():null,
+    created_by:s.id
+   };
+   let excRecord = null;
+   try {
+    [excRecord] = await db(env,'exchanges',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(excPayload)});
+   } catch(err) {
+    if (err.message && err.message.includes('verification_token')) {
+      delete excPayload.verification_token;
+      [excRecord] = await db(env,'exchanges',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(excPayload)});
+    } else {
+      throw err;
+    }
+   }
+
+   // Insert returned items
+   for(let rit of processedReturnedItems){
+    await db(env,'exchange_items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+     exchange_id:excRecord.id,
+     item_type:'returned',
+     invoice_line_id:rit.invoice_line_id,
+     item_id:rit.item_id,
+     quantity:rit.quantity,
+     unit_price:rit.unit_price,
+     tax_percent:rit.tax_percent,
+     tax_amount:rit.tax_amount,
+     discount:rit.discount,
+     total_amount:rit.total_amount,
+     reason:rit.reason,
+     reason_note:rit.reason_note,
+     condition:rit.condition
+    })});
+
+    if(rit.condition==='Sellable'){
+     let [cur]=await db(env,`inventory_items?id=eq.${rit.item_id}&select=total_stock`);
+     let curStock=Number(cur?.total_stock||0);
+     let newStock=Math.round((curStock+rit.quantity)*1000)/1000;
+     await db(env,`inventory_items?id=eq.${rit.item_id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({total_stock:newStock,updated_at:new Date().toISOString()})});
+     await db(env,'inventory_stock_movements',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      store_id:s.storeId,
+      item_id:rit.item_id,
+      exchange_id:excRecord.id,
+      movement_type:'exchange_restock',
+      quantity:rit.quantity,
+      stock_before:curStock,
+      stock_after:newStock,
+      condition:'Sellable',
+      notes:`Restocked from exchange ${exchangeNumber} (Original: ${inv.invoice_number})`,
+      created_by:s.id
+     })});
+    }else{
+     await db(env,'inventory_stock_movements',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      store_id:s.storeId,
+      item_id:rit.item_id,
+      exchange_id:excRecord.id,
+      movement_type:rit.condition==='Damaged'?'exchange_damaged':'exchange_defective',
+      quantity:rit.quantity,
+      stock_before:null,
+      stock_after:null,
+      condition:rit.condition,
+      notes:`Quarantined (${rit.condition}) from exchange ${exchangeNumber} - excluded from stock`,
+      created_by:s.id
+     })});
+    }
+   }
+
+   // Insert new items and deduct stock
+   for(let nit of processedNewItems){
+    await db(env,'exchange_items',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+     exchange_id:excRecord.id,
+     item_type:'new',
+     invoice_line_id:null,
+     item_id:nit.item_id,
+     quantity:nit.quantity,
+     unit_price:nit.unit_price,
+     tax_percent:nit.tax_percent,
+     tax_amount:nit.tax_amount,
+     discount:nit.discount,
+     total_amount:nit.total_amount,
+     reason:null,
+     reason_note:null,
+     condition:'Sellable'
+    })});
+
+    let [cur]=await db(env,`inventory_items?id=eq.${nit.item_id}&select=total_stock`);
+    let curStock=Number(cur?.total_stock||0);
+    let newStock=Math.max(0,Math.round((curStock-nit.quantity)*1000)/1000);
+    await db(env,`inventory_items?id=eq.${nit.item_id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({total_stock:newStock,updated_at:new Date().toISOString()})});
+    await db(env,'inventory_stock_movements',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+     store_id:s.storeId,
+     item_id:nit.item_id,
+     exchange_id:excRecord.id,
+     movement_type:'exchange_out',
+     quantity:-nit.quantity,
+     stock_before:curStock,
+     stock_after:newStock,
+     condition:'Sellable',
+     notes:`Deducted for exchange ${exchangeNumber} (Original: ${inv.invoice_number})`,
+     created_by:s.id
+    })});
+   }
+
+   await audit(env,s,'create sales exchange','exchanges',excRecord.id,{exchange_number:exchangeNumber,invoice_number:inv.invoice_number,returned_total:retTotal,new_items_total:newTotal,difference:diff,action_type:actionType});
+   return json({ok:true,exchange:excRecord,exchangeNumber},201);
+  }
+ }
+ if(path.match(/^exchanges\/[^/]+$/)&&method==='GET'){
+  if(!s.storeId)return fail('Shop access required.',403);
+  if(!allowed(s,'returns_refunds','view')&&!allowed(s,'sales','view'))return fail('Permission denied.',403);
+  let id=path.split('/')[1];
+  let [exc]=await db(env,`exchanges?id=eq.${id}&store_id=eq.${s.storeId}&select=*,invoices(*),customers(*),exchange_items(*,inventory_items(item_code,description,unit)),inventory_stock_movements(*,inventory_items(item_code,description,unit))`);
+  if(!exc)return fail('Exchange not found.',404);
+  let [staff]=exc.created_by?await db(env,`staff?id=eq.${exc.created_by}&select=user_id,full_name`):[];
+  exc.created_by_user=staff?(staff.user_id||staff.full_name):'Administrator';
+  return json(exc);
+ }
+ if(path==='shop/settings'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let [store]=await db(env,`stores?id=eq.${s.storeId}&select=name,shop_code,address,phone,phone2,email,website,low_stock_threshold,status,category`);return json(store)}if(method==='PATCH'){if(!allowed(s,'settings','edit')&&s.role!=='admin')return fail('Permission denied.',403);let b=await body(request),allowedKeys=['address','phone','phone2','email','website','low_stock_threshold','category'],patchData={};for(let k of allowedKeys){if(b[k]!==undefined)patchData[k]=b[k];}if(patchData.low_stock_threshold!==undefined)patchData.low_stock_threshold=Number(patchData.low_stock_threshold);let [updated]=await db(env,`stores?id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(patchData))});await audit(env,s,'update store settings','settings',s.storeId,{fields:Object.keys(patchData)});return json(updated)}}
+ if(path==='shop/audit-log'&&method==='POST'){if(!s.storeId)return fail('Shop access required.',403);let b=await body(request);await audit(env,s,b.action||'client action',b.entity_type||'system',b.entity_id||null,b.metadata||{});return json({ok:true})}
+ if(path==='shop/activity-logs'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [logs,staffs,suppliers,customers,items,expenses,invoices,returnsList,exchangesList,storesList,adminsList]=await Promise.all([db(env,`activity_logs?store_id=eq.${s.storeId}&select=*&order=created_at.desc&limit=500`),db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`),db(env,`suppliers?store_id=eq.${s.storeId}&select=id,supplier_code,name`),db(env,`customers?store_id=eq.${s.storeId}&select=id,customer_code,name`),db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,sale_price`),db(env,`expenses?store_id=eq.${s.storeId}&select=id,expense_code,total,category`),db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number,kind,subtotal,paid_amount,total_due,payment_method`),db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,total_return_amount,refunded_amount,refund_method,invoice_id`).catch(()=>[]),db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,difference_amount,invoice_id`).catch(()=>[]),db(env,`stores?id=eq.${s.storeId}&select=id,name,admin_id,shop_code,category`).catch(()=>[]),db(env,`administrators?select=id,name,email,admin_code`).catch(()=>[])]);let currentStore=storesList[0]||{},adminMap=Object.fromEntries(adminsList.map(a=>[a.id,a])),storeAdmin=adminMap[currentStore.admin_id]||null,staffMap=Object.fromEntries(staffs.map(x=>[x.id,x])),supplierMap=Object.fromEntries(suppliers.map(x=>[x.id,x])),customerMap=Object.fromEntries(customers.map(x=>[x.id,x])),itemMap=Object.fromEntries(items.map(x=>[x.id,x])),expenseMap=Object.fromEntries(expenses.map(x=>[x.id,x])),invoiceMap=Object.fromEntries(invoices.map(x=>[x.id,x])),returnMap=Object.fromEntries(returnsList.map(x=>[x.id,x])),exchangeMap=Object.fromEntries(exchangesList.map(x=>[x.id,x]));let out=logs.map(x=>{let meta=typeof x.metadata==='string'?JSON.parse(x.metadata||'{}'):(x.metadata||{});let actor={userId:'SYSTEM',name:'System',role:'System',tone:'zinc'};if(x.actor_type==='admin'){let a=adminMap[x.actor_id]||storeAdmin;actor={userId:a?.admin_code?`ADMIN-${a.admin_code}`:'ADMIN',name:a?.name||'Administrator',role:'Administrator',email:a?.email||null,tone:'sky'}}else if(x.actor_type==='staff'){let st=staffMap[x.actor_id];actor={userId:st?.user_id||meta?.user_id||'STAFF',name:st?.full_name||meta?.staff_name||'Staff Member',role:'Staff',tone:'emerald'}}else if(x.actor_type==='owner'){actor={userId:'OWNER',name:'Platform Owner',role:'EMS Owner',tone:'violet'}};let ent=String(x.entity_type||'').toLowerCase(),act=String(x.action||'').toLowerCase(),where={module:'General',slug:'dashboard',icon:'grid',tone:'zinc'};if(ent.includes('sale invoice')||ent==='sales'||(act.includes('sale')&&!act.includes('return')&&!act.includes('exchange')))where={module:'Sales',slug:'sales',icon:'receipt',tone:'emerald'};else if(ent.includes('purchase invoice')||ent==='purchases'||ent==='purchase'||act.includes('purchase'))where={module:'Purchases',slug:'purchases',icon:'cart',tone:'amber'};else if(ent==='returns'||ent==='exchanges'||act.includes('return')||act.includes('exchange'))where={module:'Return & Exchange',slug:'returns-refunds',icon:'rotate-ccw',tone:'cyan'};else if(ent==='inventory'||act.includes('stock')||ent.includes('item'))where={module:'Inventory',slug:'inventory',icon:'package',tone:'sky'};else if(ent==='customer'||act.includes('customer'))where={module:'Customers',slug:'customers',icon:'users',tone:'violet'};else if(ent==='supplier'||act.includes('supplier'))where={module:'Suppliers',slug:'suppliers',icon:'truck',tone:'amber'};else if(ent==='expense'||act.includes('expense'))where={module:'Expense',slug:'expense',icon:'wallet',tone:'rose'};else if(act.includes('due')||ent.includes('due'))where={module:'Due Recover',slug:'due-recover',icon:'coins',tone:'sky'};else if(ent==='staff'||act.includes('staff account'))where={module:'Staff Manager',slug:'staff-manager',icon:'user-check',tone:'blue'};else if(ent==='attendance'||act.includes('attendance'))where={module:'Attendance',slug:'attendance',icon:'clock',tone:'indigo'};else if(ent==='staff_salary'||act.includes('salary'))where={module:'Salary',slug:'salary',icon:'banknote',tone:'emerald'};else if(ent==='connectx'||act.includes('connectx')||act.includes('email'))where={module:'ConnectX',slug:'connectx',icon:'mail',tone:'sky'};else if(ent==='zudo'||act.includes('zudo'))where={module:'Zudo AI',slug:'zudo',icon:'sparkles',tone:'purple'};else if(ent==='vaultium'||act.includes('vaultium')||act.includes('file'))where={module:'Vaultium',slug:'vaultium',icon:'file',tone:'teal'};else if(ent==='report'||act.includes('report')||act.includes('health'))where={module:'Report',slug:'report',icon:'chart',tone:'blue'};else if(ent==='store'||ent==='settings'||act.includes('setting'))where={module:'Settings',slug:'settings',icon:'settings',tone:'zinc'};else if(ent==='session'||act.includes('login')||act.includes('access'))where={module:'Access & Auth',slug:'dashboard',icon:'shield',tone:'emerald'};let inv=invoiceMap[x.entity_id],ret=returnMap[x.entity_id],exc=exchangeMap[x.entity_id],itm=itemMap[x.entity_id],cst=customerMap[x.entity_id],sup=supplierMap[x.entity_id],exp=expenseMap[x.entity_id],stf=staffMap[x.entity_id];let code=meta.invoice_number||meta.return_number||meta.exchange_number||meta.code||inv?.invoice_number||ret?.return_number||exc?.exchange_number||itm?.item_code||cst?.customer_code||sup?.supplier_code||exp?.expense_code||stf?.user_id||(x.entity_id?shortId(x.entity_id):'—');let name=meta.name||meta.description||meta.full_name||meta.category||itm?.description||cst?.name||sup?.name||exp?.category||stf?.full_name||'';let actionLabel=x.action,actionTone='zinc',summary='';if(act==='post'&&ent.includes('sale')){actionLabel='Sale Invoice Posted';actionTone='emerald';let tot=meta.total??inv?.subtotal,paid=meta.paid??meta.paid_amount??inv?.paid_amount;summary=`Posted sales invoice ${code}${tot!==undefined?` (Total: ৳ ${tot}${paid!==undefined?`, Paid: ৳ ${paid}`:''})`:''}`;}else if(act==='post'&&ent.includes('purchase')){actionLabel='Purchase Invoice Posted';actionTone='amber';let tot=meta.total??inv?.subtotal;summary=`Posted purchase invoice ${code}${tot!==undefined?` (Total: ৳ ${tot})`:''}`;}else if(act==='delete'&&ent.includes('invoice')){actionLabel='Invoice Deleted';actionTone='rose';summary=`Deleted invoice ${code}`;}else if(act.includes('return')){actionLabel='Sales Return & Refund';actionTone='cyan';let amt=meta.amount??ret?.total_return_amount;summary=`Processed return ${code} for invoice ${meta.invoice_number||'order'}${amt?` (Refund: ৳ ${amt})`:''}`;}else if(act.includes('exchange')){actionLabel='Sales Exchange';actionTone='cyan';let diff=meta.difference??exc?.difference_amount;summary=`Processed exchange ${code} for invoice ${meta.invoice_number||'order'}${diff!==undefined?` (Difference: ৳ ${diff})`:''}`;}else if(act.includes('recover due')){actionLabel='Due Recovered';actionTone='sky';let amt=meta.amount;summary=`Recovered due on ${code}${amt?` (Amount: ৳ ${amt}${meta.paymentMethod?' via '+meta.paymentMethod:''})`:''}`;}else if(act==='create'&&ent==='inventory'){actionLabel='Item Created';actionTone='emerald';summary=`Added inventory item ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='inventory'){actionLabel='Item Updated';actionTone='amber';summary=`Updated inventory item ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='inventory'){actionLabel='Item Deleted';actionTone='rose';summary=`Deleted inventory item ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='customer'){actionLabel='Customer Added';actionTone='emerald';summary=`Registered customer ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='customer'){actionLabel='Customer Updated';actionTone='amber';summary=`Updated customer ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='customer'){actionLabel='Customer Deleted';actionTone='rose';summary=`Deleted customer ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='supplier'){actionLabel='Supplier Added';actionTone='emerald';summary=`Registered supplier ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='supplier'){actionLabel='Supplier Updated';actionTone='amber';summary=`Updated supplier ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='supplier'){actionLabel='Supplier Deleted';actionTone='rose';summary=`Deleted supplier ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='expense'){actionLabel='Expense Recorded';actionTone='rose';let tot=meta.total??exp?.total;summary=`Recorded shop expense ${code}${tot?` (Total: ৳ ${tot})`:''}`;}else if(act==='update'&&ent==='expense'){actionLabel='Expense Updated';actionTone='amber';summary=`Updated shop expense ${code}`;}else if(act==='delete'&&ent==='expense'){actionLabel='Expense Deleted';actionTone='rose';summary=`Deleted shop expense ${code}`;}else if(act==='create'&&ent==='staff'){actionLabel='Staff Account Created';actionTone='emerald';summary=`Created staff account ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='staff'){actionLabel='Staff Account Updated';actionTone='amber';summary=`Updated staff account ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='staff'){actionLabel='Staff Account Deleted';actionTone='rose';summary=`Removed staff account ${code}`;}else if(act.includes('attendance')){actionLabel='Attendance Logged';actionTone='indigo';summary=`Recorded attendance for ${meta.staff_count||meta.count||'staff members'}${meta.date?` on ${meta.date}`:''}`;}else if(act==='create salary invoice'){actionLabel='Salary Issued';actionTone='blue';summary=`Created salary invoice ${code}${meta.staff_name?` for ${meta.staff_name}`:''}${meta.total?` (৳ ${meta.total})`:''}`;}else if(act==='delete salary invoice'){actionLabel='Salary Voided';actionTone='rose';summary=`Voided salary invoice ${code}`;}else if(act.includes('sms')||ent==='sms'){actionLabel=act.includes('delete')||act.includes('cancel')?'ConnectX SMS Cancelled':'ConnectX SMS Queued';actionTone=act.includes('delete')?'rose':'sky';summary=act.includes('delete')?`Cancelled queued SMS to ${meta.to_phone||'recipient'}`:`Queued ConnectX SMS to ${meta.recipient_name||meta.to_phone||'recipient'} (${meta.message_type||'SMS'})`;}else if(act.includes('email')||act.includes('connectx')){actionLabel=act.includes('hide')?'ConnectX Archived':'ConnectX Email Sent';actionTone=act.includes('hide')?'zinc':'sky';summary=act.includes('hide')?`Archived ConnectX email record`:`Dispatched business email to ${meta.to||'recipient'}${meta.documentType?` (${meta.documentType})`:''}`;}else if(act.includes('zudo')){actionLabel=act.includes('hide')?'Zudo Query Cleared':'Zudo AI Request';actionTone=act.includes('hide')?'zinc':'purple';summary=act.includes('hide')?`Archived Zudo AI conversation`:`Executed Zudo AI analytical query`;}else if(act.includes('vaultium')||act.includes('file')){actionLabel=act.includes('delete')?'Vaultium File Deleted':'Vaultium File Uploaded';actionTone=act.includes('delete')?'rose':'teal';summary=act.includes('delete')?`Deleted attachment from Vaultium: ${meta.filename||'file'}`:`Uploaded ${meta.count||1} file(s) to Vaultium${meta.filenames?': '+meta.filenames.join(', '):''}`;}else if(act.includes('health')||ent.includes('health')){actionLabel='AI Health Diagnostic';actionTone='blue';summary=`Generated AI Business Health diagnosis report${meta.score?` (Score: ${meta.score}/100)`:''}`;}else if(act==='staff login'){actionLabel='Staff Sign-In';actionTone='emerald';summary=`Staff member ${actor.name} (${actor.userId}) signed in to shop terminal`;}else if(act==='administrator shop login'){actionLabel='Admin Sign-In';actionTone='sky';summary=`Administrator ${actor.name} signed in to shop terminal`;}else if(act==='administrator shop access'){actionLabel='Admin Console Switch';actionTone='sky';summary=`Administrator switched into shop terminal from admin console`;}else if(ent==='store'||ent==='settings'||act.includes('setting')){actionLabel='Settings Updated';actionTone='zinc';summary=`Updated shop configuration${meta.fields?.length?` (${meta.fields.join(', ')})`:''}`;}else{actionLabel=x.action;summary=`${x.action} on ${x.entity_type||'record'} ${code}`;}return {id:x.id,created_at:x.created_at,actor,who:actor,where,what:{action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,label:actionLabel,tone:actionTone,code,name,summary,metadata:meta},action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,detail:code,summary,metadata:meta};});return json(out)}
  if(path==='addons/coupon'&&s.role==='admin'&&method==='GET'){let code=(new URL(request.url).searchParams.get('code')||'').trim().toUpperCase();if(!code)return fail('Enter a coupon code.',400);let [c]=await db(env,`addon_coupons?code=eq.${encodeURIComponent(code)}&active=is.true&select=*`);if(!c)return fail('Invalid or inactive coupon code.',404);return json({code:c.code,percent_off:Number(c.percent_off||0)})}
  if(path==='addons'&&s.role==='admin'){
   if(method==='GET'){let [settings,purchases,entitlement,payinfo]=await Promise.all([db(env,'addon_settings?select=*&order=addon_key'),db(env,`addon_purchases?admin_id=eq.${s.id}&select=*&order=created_at.desc`),currentEntitlement(env,s.id),db(env,'addon_checkout_settings?select=payment_info')]);return json({settings,purchases,entitlement,payment_info:(payinfo[0]||{}).payment_info||''})}
  }
  if(path==='addon-checkout'&&s.role==='admin'&&method==='POST'){
   let b=await body(request),items=Array.isArray(b.items)?b.items:[];if(!items.length)return fail('Cart is empty.',400);let payMethod=b.payment_method,payNumber=String(b.payment_number||'').trim(),trxId=String(b.transaction_id||'').trim();if(!['bkash','nagad'].includes(payMethod)||!payNumber||!trxId)return fail('Payment method, payment number, and transaction ID are required.',400);let coupon=null,percent=0;if(String(b.coupon||'').trim()){let code=String(b.coupon).trim().toUpperCase();let [c]=await db(env,`addon_coupons?code=eq.${encodeURIComponent(code)}&active=is.true&select=*`);if(!c)return fail('Invalid or inactive coupon code.',400);coupon=c.code;percent=Number(c.percent_off||0)}let prior=await db(env,`addon_purchases?transaction_id=eq.${encodeURIComponent(trxId)}&select=id`);if(prior.length)return fail('This transaction ID has already been submitted. Use the correct unique bKash/Nagad transaction ID.',409);let ent=await currentEntitlement(env,s.id),created=[];
-  for(let item of items){let [cfg]=await db(env,`addon_settings?addon_key=eq.${item.addon_key}&enabled=is.true&select=*`),days=Number(item.validity_days),limit=item.addon_key==='truebill'?1:Number(item.daily_limit);if(item.addon_key==='connectx'&&ent?.connectx_enabled)return fail('ConnectX is already included in your active license.',409);if(item.addon_key==='zudo'&&ent?.zudo_enabled)return fail('Zudo AI is already included in your active license.',409);if(item.addon_key==='business_health'&&ent?.business_health_enabled)return fail('AI Business Health is already included in your active license.',409);if(item.addon_key==='truebill'&&ent?.truebill_enabled)return fail('TrueBill is already included in your active license.',409);if(item.addon_key==='vaultium'&&ent&&Number(ent.vaultium_gb||0)>0)return fail('Vaultium is already included in your active license.',409);if(!cfg||days<cfg.min_days||days>cfg.max_days||limit<cfg.min_daily_limit||limit>cfg.max_daily_limit)return fail('Invalid add-on selection.',400);let [active]=await db(env,`addon_purchases?admin_id=eq.${s.id}&addon_key=eq.${item.addon_key}&status=eq.active&expires_at=gt.${new Date().toISOString()}&select=id`);if(active)return fail('This add-on is already active.',409);let [pending]=await db(env,`addon_purchases?admin_id=eq.${s.id}&addon_key=eq.${item.addon_key}&status=eq.pending&select=id`);if(pending)return fail('A purchase request for this add-on is already pending review.',409);let amount=(item.addon_key==='vaultium'?days*Number(cfg.unit_price):days*limit*Number(cfg.unit_price)),discount=Math.round(amount*percent)/100,[x]=await db(env,'addon_purchases',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({admin_id:s.id,addon_key:item.addon_key,validity_days:days,daily_limit:limit,unit_price:cfg.unit_price,amount,coupon_code:coupon,discount_amount:discount,payment_method:payMethod,payment_number:payNumber,transaction_id:trxId,status:'pending'})});created.push(x)}return json(created,201)
+  for(let item of items){let [cfg]=await db(env,`addon_settings?addon_key=eq.${item.addon_key}&enabled=is.true&select=*`),days=Number(item.validity_days),limit=item.addon_key==='truebill'?1:Number(item.daily_limit);if(item.addon_key==='connectx'&&ent?.connectx_enabled)return fail('ConnectX is already included in your active license.',409);if(item.addon_key==='zudo'&&ent?.zudo_enabled)return fail('Zudo AI is already included in your active license.',409);if(item.addon_key==='business_health'&&ent?.business_health_enabled)return fail('AI Business Health is already included in your active license.',409);if(item.addon_key==='truebill'&&ent?.truebill_enabled)return fail('TrueBill is already included in your active license.',409);if(item.addon_key==='vaultium'&&ent&&Number(ent.vaultium_gb||0)>0)return fail('Vaultium is already included in your active license.',409);if(!cfg||days<cfg.min_days||days>cfg.max_days||limit<cfg.min_daily_limit||limit>cfg.max_daily_limit)return fail('Invalid add-on selection.',400);let [active]=await db(env,`addon_purchases?admin_id=eq.${s.id}&addon_key=eq.${item.addon_key}&status=eq.active&expires_at=gt.${new Date().toISOString()}&select=id`);if(active)return fail('This add-on is already active.',409);let [pending]=await db(env,`addon_purchases?admin_id=eq.${s.id}&addon_key=eq.${item.addon_key}&status=eq.pending&select=id`);if(pending)return fail('A purchase request for this add-on is already pending review.',409);let amount=days*limit*Number(cfg.unit_price),discount=Math.round(amount*percent)/100,[x]=await db(env,'addon_purchases',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({admin_id:s.id,addon_key:item.addon_key,validity_days:days,daily_limit:limit,unit_price:cfg.unit_price,amount,coupon_code:coupon,discount_amount:discount,payment_method:payMethod,payment_number:payNumber,transaction_id:trxId,status:'pending'})});created.push(x)}return json(created,201)
  }
  if(path==='platform/addon-checkout'){if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [settings]=await db(env,'addon_checkout_settings?select=*');return json({settings,coupons:await db(env,'addon_coupons?select=*&order=created_at.desc')})}if(method==='PATCH'){let b=await body(request);await db(env,'addon_checkout_settings?on_conflict=id',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:true,payment_info:String(b.payment_info||''),updated_by:s.id,updated_at:new Date().toISOString()})});if(String(b.code||'').trim())await db(env,'addon_coupons?on_conflict=code',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({code:String(b.code).trim().toUpperCase(),percent_off:Number(b.percent_off||0),active:true})});return json({ok:true})}}
  if(path==='platform/addon-coupons'){
@@ -253,7 +893,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='platform/addon-purchases'){
   if(s.role!=='owner')return fail('Forbidden',403);
   if(method==='GET')return json(await db(env,'addon_purchases?select=*,administrators(name,admin_code)&order=created_at.desc'));
-  if(method==='PATCH'){let b=await body(request),[r]=await db(env,`addon_purchases?id=eq.${b.id}&select=*`);if(!r)return fail('Purchase not found.',404);let starts=b.status==='active'?new Date():null,expires=starts?new Date(starts):null;if(expires){if(r.addon_key==='vaultium')expires.setMonth(expires.getMonth()+Number(r.validity_days));else expires.setDate(expires.getDate()+Number(r.validity_days))}let [x]=await db(env,`addon_purchases?id=eq.${r.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:b.status,starts_at:starts?.toISOString(),expires_at:expires?.toISOString(),reviewed_at:new Date().toISOString()})});return json(x)}
+  if(method==='PATCH'){let b=await body(request),[r]=await db(env,`addon_purchases?id=eq.${b.id}&select=*`);if(!r)return fail('Purchase not found.',404);let starts=b.status==='active'?new Date():null,expires=starts?new Date(starts):null;if(expires){expires.setDate(expires.getDate()+Number(r.validity_days))}let [x]=await db(env,`addon_purchases?id=eq.${r.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:b.status,starts_at:starts?.toISOString(),expires_at:expires?.toISOString(),reviewed_at:new Date().toISOString()})});return json(x)}
  }
  if(path==='truebill/availability'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [plan,ever,cfg]=await Promise.all([truebillPlan(env,s.storeId),featureEver(env,s.storeId,'truebill'),db(env,'addon_settings?addon_key=eq.truebill&select=url')]);return json({enabled:!!plan,ever,url:(cfg[0]&&cfg[0].url)||null})}
  if(path==='admin/business-health-usage'&&method==='GET'){
@@ -279,7 +919,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   const days=Math.max(1,Math.round((ed-sd)/86400000)+1);
   const prevEnd=new Date(sd.getTime()-86400000),prevStart=new Date(prevEnd.getTime()-(days-1)*86400000);
   const ps=ymd(prevStart),pe=ymd(prevEnd);
-  let [store,sales,purchases,expenses,recoveries,errors,activity,customers,suppliers,staff,prevSales,prevPurchases,prevExpenses,inventory]=await Promise.all([
+  let [store,sales,purchases,expenses,recoveries,errors,activity,customers,suppliers,staff,prevSales,prevPurchases,prevExpenses,inventory,returnsList,exchangesList,prevReturnsList,prevExchangesList]=await Promise.all([
    db(env,`stores?id=eq.${s.storeId}&select=id,name,address,phone,phone2,email,website,low_stock_threshold`),
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,custom_party_name,created_by,invoice_date,subtotal,discount,tax_amount,paid_amount,total_due`),
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&invoice_date=gte.${start}&invoice_date=lte.${end}&select=party_id,invoice_date,subtotal,paid_amount`),
@@ -293,12 +933,19 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&invoice_date=gte.${ps}&invoice_date=lte.${pe}&select=subtotal`),
    db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&invoice_date=gte.${ps}&invoice_date=lte.${pe}&select=subtotal`),
    db(env,`expenses?store_id=eq.${s.storeId}&expense_date=gte.${ps}&expense_date=lte.${pe}&select=total`),
-   db(env,`inventory_items?store_id=eq.${s.storeId}&active=is.true&select=id,item_code,description,total_stock,sale_price&order=total_stock.asc&limit=500`)
+   db(env,`inventory_items?store_id=eq.${s.storeId}&active=is.true&select=id,item_code,description,total_stock,sale_price&order=total_stock.asc&limit=500`),
+   db(env,`returns?store_id=eq.${s.storeId}&return_date=gte.${start}&return_date=lte.${end}&select=total_return_amount,refunded_amount,subtotal,penalty_amount`).catch(()=>[]),
+   db(env,`exchanges?store_id=eq.${s.storeId}&exchange_date=gte.${start}&exchange_date=lte.${end}&select=returned_total,new_items_total,difference_amount,action_type`).catch(()=>[]),
+   db(env,`returns?store_id=eq.${s.storeId}&return_date=gte.${ps}&return_date=lte.${pe}&select=total_return_amount`).catch(()=>[]),
+   db(env,`exchanges?store_id=eq.${s.storeId}&exchange_date=gte.${ps}&exchange_date=lte.${pe}&select=new_items_total`).catch(()=>[])
   ]);
   let money=v=>Number(v||0),sum=(rows,f)=>rows.reduce((n,r)=>n+money(f(r)),0),pct=(a,b)=>b>0?Math.round((a-b)/b*100):null;
   let salesTotal=sum(sales,r=>r.subtotal),salesDiscount=sum(sales,r=>r.discount),salesCollected=sum(sales,r=>r.paid_amount),purchaseTotal=sum(purchases,r=>r.subtotal),purchasePaid=sum(purchases,r=>r.paid_amount),expenseTotal=sum(expenses,r=>r.total),expensePaid=sum(expenses,r=>r.paid),recovered=sum(recoveries,r=>r.amount),dueTotal=sum(sales,r=>r.total_due);
+  let returnsTotal=sum(returnsList,r=>r.total_return_amount),refundsTotal=sum(returnsList,r=>r.refunded_amount),exchangesTotal=sum(exchangesList,r=>r.new_items_total);
+  let prevReturnsTotal=sum(prevReturnsList,r=>r.total_return_amount),prevExchangesTotal=sum(prevExchangesList,r=>r.new_items_total);
   let prevSalesTotal=sum(prevSales,r=>r.subtotal),prevPurchaseTotal=sum(prevPurchases,r=>r.subtotal),prevExpenseTotal=sum(prevExpenses,r=>r.total);
-  let profit=salesTotal-purchaseTotal-expenseTotal,prevProfit=prevSalesTotal-prevPurchaseTotal-prevExpenseTotal;
+  let netSales=Math.max(0,salesTotal-returnsTotal);
+  let profit=netSales-purchaseTotal-expenseTotal,prevProfit=Math.max(0,prevSalesTotal-prevReturnsTotal)-prevPurchaseTotal-prevExpenseTotal;
   let avgSale=sales.length?Math.round(salesTotal/sales.length):0;
   let uniqueCustomers=new Set(sales.map(r=>r.party_id||r.custom_party_name).filter(Boolean)).size;
   let threshold=Number(store[0]?.low_stock_threshold||5);
@@ -311,7 +958,8 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let topCustomers=top(sales,'party_id',cName),topSuppliers=top(purchases,'party_id',sName),topSalesStaff=top(sales,'created_by',stName);
   let storeRow=store[0]||{};
   let missing=[];if(!storeRow.address)missing.push('address');if(!storeRow.phone)missing.push('phone');if(!storeRow.email)missing.push('email');
-  let collectionRate=salesTotal>0?Math.round(salesCollected/salesTotal*100):null,dueRate=salesTotal>0?Math.round(dueTotal/salesTotal*100):null,discountRate=salesTotal>0?Math.round(salesDiscount/salesTotal*100):null,expenseRatio=salesTotal>0?Math.round(expenseTotal/salesTotal*100):null,recoveryRate=(dueTotal+recovered)>0?Math.round(recovered/(dueTotal+recovered)*100):null,marginPct=salesTotal>0?Math.round(profit/salesTotal*100):null;
+  let returnRate=salesTotal>0?Math.round(returnsTotal/salesTotal*100):0;
+  let collectionRate=salesTotal>0?Math.round(salesCollected/salesTotal*100):null,dueRate=salesTotal>0?Math.round(dueTotal/salesTotal*100):null,discountRate=salesTotal>0?Math.round(salesDiscount/salesTotal*100):null,expenseRatio=salesTotal>0?Math.round(expenseTotal/salesTotal*100):null,recoveryRate=(dueTotal+recovered)>0?Math.round(recovered/(dueTotal+recovered)*100):null,marginPct=netSales>0?Math.round(profit/netSales*100):null;
   let fmtB=v=>money(v).toLocaleString('en-BD')+' BDT';
   let findings=[];
   if(sales.length===0)findings.push('No sales were recorded in the selected period — records may be missing or the shop was inactive.');
@@ -319,6 +967,9 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   if(collectionRate!==null&&collectionRate<60)findings.push('Collection rate is only '+collectionRate+'% — more than 40% of sales value is leaving the shop as due.');
   if(dueRate!==null&&dueRate>50)findings.push('Due level is high: '+dueRate+'% of sales value is still owed by customers.');
   if(discountRate!==null&&discountRate>20)findings.push('Discounts are unusually high at '+discountRate+'% of sales ('+fmtB(salesDiscount)+').');
+  if(returnsTotal>0)findings.push('Customer returns totaled '+fmtB(returnsTotal)+' across '+returnsList.length+' return(s) ('+returnRate+'% of gross sales refunded).');
+  if(returnRate>15)findings.push('High return rate: '+returnRate+'% of sales value was returned or refunded.');
+  if(exchangesList.length>0)findings.push(exchangesList.length+' sales exchange(s) processed representing '+fmtB(exchangesTotal)+' in replacement merchandise.');
   if(profit<0&&salesTotal>0)findings.push('Purchases and expenses ('+fmtB(purchaseTotal+expenseTotal)+') exceeded sales ('+fmtB(salesTotal)+') — the period ran at a loss of '+fmtB(Math.abs(profit))+'.');
   else if(marginPct!==null&&marginPct<10)findings.push('Operating margin is thin at '+marginPct+'% — costs are eating most of the sales value.');
   if(outStock.length)findings.push(outStock.length+' item(s) are completely out of stock and may be losing walk-in sales.');
@@ -331,13 +982,14 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   if(salesTotal<=0)score-=15;else score-=Math.min(25,Math.round((dueRate||0)/100*25));
   if(collectionRate!==null&&collectionRate<60)score-=10;
   if(discountRate!==null)score-=Math.min(10,Math.max(0,Math.round((discountRate-10)/2)));
+  if(returnRate>10)score-=Math.min(10,Math.round((returnRate-10)/2));
   if(salesTotal>0){if(profit<0)score-=15;else if((marginPct||0)<10)score-=8}
   score-=Math.min(10,lowStock.length*2);
   score-=Math.min(10,missing.length*3);
   score-=Math.min(10,errors.length*3);
   score=Math.max(0,Math.min(100,Math.round(score)));
-  let trend={sales:{now:salesTotal,prev:prevSalesTotal,pct:pct(salesTotal,prevSalesTotal)},purchase:{now:purchaseTotal,prev:prevPurchaseTotal,pct:pct(purchaseTotal,prevPurchaseTotal)},expense:{now:expenseTotal,prev:prevExpenseTotal,pct:pct(expenseTotal,prevExpenseTotal)},profit:{now:profit,prev:prevProfit,pct:pct(profit,prevProfit)}};
-  let snapshot={period:{start,end,days,previousStart:ps,previousEnd:pe},sales:{total:salesTotal,count:sales.length,collected:salesCollected,discount:salesDiscount,avg:avgSale,uniqueCustomers},purchase:{total:purchaseTotal,count:purchases.length,paid:purchasePaid},expense:{total:expenseTotal,count:expenses.length,paid:expensePaid},profit:{value:profit,marginPct},due:{total:dueTotal,recovered,recoveryRate},ratios:{collectionRate,dueRate,discountRate,expenseRatio},trend,inventory:{lowStockCount:lowStock.length,outStockCount:outStock.length,lowStockItems:lowStock.slice(0,8).map(r=>({name:r.description||r.item_code,stock:Number(r.total_stock||0)}))},busiestDay:busiestDay?{date:busiestDay[0],total:busiestDay[1]}:null,people:{customersCount:customers.length,suppliersCount:suppliers.length,staffCount:staff.length},errors:errors.length,activityCount:activity.length,findings,missing,topCustomers,topSuppliers,topSalesStaff};
+  let trend={sales:{now:salesTotal,prev:prevSalesTotal,pct:pct(salesTotal,prevSalesTotal)},netSales:{now:netSales,prev:Math.max(0,prevSalesTotal-prevReturnsTotal),pct:pct(netSales,Math.max(0,prevSalesTotal-prevReturnsTotal))},returns:{now:returnsTotal,prev:prevReturnsTotal,pct:pct(returnsTotal,prevReturnsTotal)},exchanges:{now:exchangesTotal,prev:prevExchangesTotal,pct:pct(exchangesTotal,prevExchangesTotal)},purchase:{now:purchaseTotal,prev:prevPurchaseTotal,pct:pct(purchaseTotal,prevPurchaseTotal)},expense:{now:expenseTotal,prev:prevExpenseTotal,pct:pct(expenseTotal,prevExpenseTotal)},profit:{now:profit,prev:prevProfit,pct:pct(profit,prevProfit)}};
+  let snapshot={period:{start,end,days,previousStart:ps,previousEnd:pe,returnAmount:returnsTotal,exchangeTotal:exchangesTotal,refundAmount:refundsTotal},sales:{total:salesTotal,count:sales.length,collected:salesCollected,discount:salesDiscount,avg:avgSale,uniqueCustomers},netSales,returns:{total:returnsTotal,refunded:refundsTotal,count:returnsList.length,returnRate},exchanges:{total:exchangesTotal,count:exchangesList.length},purchase:{total:purchaseTotal,count:purchases.length,paid:purchasePaid},expense:{total:expenseTotal,count:expenses.length,paid:expensePaid},profit:{value:profit,marginPct},due:{total:dueTotal,recovered,recoveryRate},ratios:{collectionRate,dueRate,discountRate,expenseRatio,returnRate},trend,inventory:{lowStockCount:lowStock.length,outStockCount:outStock.length,lowStockItems:lowStock.slice(0,8).map(r=>({name:r.description||r.item_code,stock:Number(r.total_stock||0)}))},busiestDay:busiestDay?{date:busiestDay[0],total:busiestDay[1]}:null,people:{customersCount:customers.length,suppliersCount:suppliers.length,staffCount:staff.length},errors:errors.length,activityCount:activity.length,findings,missing,topCustomers,topSuppliers,topSalesStaff};
   let activeModel=modernModel(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
   let systemPrompt='You are the EMS Business Health Advisor — a warm, practical retail business coach for Bangladeshi shopkeepers. You write an organized, easy-to-relate-to health report from the shop\'s own numbers. Use simple business language (no jargon), short paragraphs and bullet lists. Money is BDT (you may use ৳). Base every statement on the supplied DATA only — never invent figures, names or dates. Be specific and quote the real numbers. Format your reply with exactly these markdown headings, in this order:\n# Business health overview\n2-3 friendly sentences: the headline result for the period, how it compares with the previous period, and one strength plus one concern.\n# What is working well\n3 to 5 bullets that reference real figures (e.g. collection, recovery, top customers, margin, low errors).\n# What needs attention\n3 to 5 bullets, each naming the actual number and what it means in plain words.\n# Your 7-day action plan\nExactly 5 numbered, specific, doable steps (dues to chase, items to reorder, discounts to review, records to complete) that this exact shop can act on this week.\n# Cash and due collection guidance\n2 to 3 practical bullets about collecting dues and managing cash.\n# Growth ideas\n2 to 3 simple, realistic suggestions that fit a shop with this data (e.g. reorder best-sellers, follow up top customers, bundle slow items).\nDo not add any other sections and do not reveal field names or JSON.';
   let prompt='Period: '+start+' to '+end+' ('+days+' day(s)), compared with the previous '+days+' day(s): '+ps+' to '+pe+'.\n\nDATA SNAPSHOT (all money in BDT):\n'+JSON.stringify({store:{name:storeRow.name,address:storeRow.address,phone:storeRow.phone,email:storeRow.email},snapshot})+'\n\nWrite the full health report now. Make it about 30% more detailed than a short summary, but stay skimmable; every section above must be present and reference real numbers.';
@@ -358,7 +1010,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   if(!s.storeId||!allowedAddon(s,'zudo','add'))return fail('Permission denied.',403);
   let plan=await zudoPlan(env,s.storeId);
   if(!plan)return fail('Zudo is not available for this shop. Purchase a Zudo AI add-on or an eligible license.',403);
-  let b=await body(request),question=String(b.message||'').trim();
+  let b=await body(request),question=String(b.message||b.question||'').trim();
   if(question.length<2||question.length>2000)return fail('Enter a question between 2 and 2000 characters.');
   let [cfg]=await db(env,'zudo_settings?select=*');
   if(!cfg?.enabled)return fail('Zudo is currently disabled by EMS Owner.',403);
@@ -374,12 +1026,12 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let conversationId=b.conversationId,[conversation]=conversationId?await db(env,`zudo_conversations?id=eq.${conversationId}&store_id=eq.${s.storeId}&user_id=eq.${s.id}&select=*`):[];
   if(!conversation){let [x]=await db(env,'zudo_conversations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,title:question.slice(0,80)})});conversation=x;conversationId=x.id}
   await db(env,'zudo_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({conversation_id:conversationId,store_id:s.storeId,user_id:s.id,role:'user',content:question})});
-  let [sales,purchases,expenses,items,customers,connectxMessages,administrators,licenses,entitlements,history,pages,blogs,plans,addonCatalog,checkoutCfg,activeAddons]=await Promise.all([
-   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&select=subtotal,total_due,invoice_date,party_id,invoice_number&order=invoice_date.desc&limit=100`),
-   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&select=subtotal,total_due,invoice_date&order=invoice_date.desc&limit=100`),
-   db(env,`expenses?store_id=eq.${s.storeId}&select=total,paid,due,expense_date&order=expense_date.desc&limit=100`),
-   db(env,`inventory_items?store_id=eq.${s.storeId}&select=item_code,description,unit,total_stock,sale_price,active&order=total_stock.asc&limit=100`),
-   db(env,`customers?store_id=eq.${s.storeId}&select=customer_code,name,address,phone,phone2,email&limit=100`),
+  let [sales,purchases,expenses,items,customers,connectxMessages,administrators,licenses,entitlements,history,pages,blogs,plans,addonCatalog,checkoutCfg,activeAddons,returnsData,exchangesData,suppliers,staffList,dueRecoveries,damagedDefective]=await Promise.all([
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.sale&select=subtotal,total_due,paid_amount,tax_amount,discount,invoice_date,party_id,invoice_number&order=invoice_date.desc&limit=250`),
+   db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.purchase&select=subtotal,total_due,paid_amount,tax_amount,discount,invoice_date,party_id,invoice_number&order=invoice_date.desc&limit=250`),
+   db(env,`expenses?store_id=eq.${s.storeId}&select=expense_code,total,paid,due,expense_date,details&order=expense_date.desc&limit=250`),
+   db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,unit,category,total_stock,sale_price,active&order=total_stock.asc&limit=500`),
+   db(env,`customers?store_id=eq.${s.storeId}&select=customer_code,name,address,phone,phone2,email&limit=250`),
    db(env,`connectx_messages?store_id=eq.${s.storeId}&shop_deleted_at=is.null&select=created_at,sent_at,status,recipient_type,from_email,to_emails,cc_emails,bcc_emails,subject,custom_body,invoice_id,error_message&order=created_at.desc&limit=100`),
    db(env,`administrators?id=eq.${store.admin_id}&select=admin_code,name,address,phone,email,active,created_at`),
    db(env,`licenses?admin_id=eq.${store.admin_id}&select=id,plan_id,duration_months,amount,max_stores,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,status,transaction_type,starts_at,expires_at,created_at,license_plans(title)&order=created_at.desc&limit=25`),
@@ -390,16 +1042,67 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
    db(env,'license_plans?active=is.true&select=id,title,duration_months,max_stores,benefits,payment_details,price,connectx_enabled,connectx_daily_limit,zudo_enabled,zudo_daily_limit,business_health_enabled,business_health_daily_limit,truebill_enabled,vaultium_gb&order=price.asc').catch(()=>[]),
    db(env,'addon_settings?enabled=is.true&select=addon_key,title,details,unit_price,min_days,max_days,min_daily_limit,max_daily_limit,url&order=unit_price.asc').catch(()=>[]),
    db(env,'addon_checkout_settings?select=payment_info&limit=1').catch(()=>[]),
-   db(env,`addon_purchases?admin_id=eq.${store.admin_id}&select=addon_key,status,validity_days,daily_limit,amount,starts_at,expires_at,created_at&order=created_at.desc&limit=25`).catch(()=>[])
+   db(env,`addon_purchases?admin_id=eq.${store.admin_id}&select=addon_key,status,validity_days,daily_limit,amount,starts_at,expires_at,created_at&order=created_at.desc&limit=25`).catch(()=>[]),
+   db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,return_date,customer_name,total_return_amount,refunded_amount,penalty_amount,payment_method,reason,return_items(*,inventory_items(item_code,description,unit,category))&order=created_at.desc&limit=100`).catch(()=>[]),
+   db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,exchange_date,customer_name,returned_total,new_items_total,difference_amount,action_type,payment_method,exchange_items(*,inventory_items(item_code,description,unit,category))&order=created_at.desc&limit=100`).catch(()=>[]),
+   db(env,`suppliers?store_id=eq.${s.storeId}&select=supplier_code,name,address,phone,email&limit=150`).catch(()=>[]),
+   db(env,`staff?store_id=eq.${s.storeId}&select=user_id,full_name,role,phone,email,active&limit=50`).catch(()=>[]),
+   db(env,`due_recoveries?store_id=eq.${s.storeId}&select=source_type,amount,remaining_due,payment_method,transaction_id,created_at&order=created_at.desc&limit=50`).catch(()=>[]),
+   Promise.resolve().then(async()=>{
+     let [retList, excList] = await Promise.all([
+       db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,return_date,customer_name,return_items(*,inventory_items(item_code,description,unit,category))`).catch(()=>[]),
+       db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,exchange_date,customer_name,exchange_items(*,inventory_items(item_code,description,unit,category))`).catch(()=>[])
+     ]);
+     let q = [];
+     for(let r of (retList||[])){
+       for(let it of (r.return_items||[])){
+         if(it.condition==='Damaged'||it.condition==='Defective'){
+           q.push({
+             item_code: it.inventory_items?.item_code || '—',
+             description: it.inventory_items?.description || 'Item',
+             category: it.inventory_items?.category || 'Damage/Defective',
+             condition: it.condition,
+             quantity: Number(it.quantity),
+             unit: it.inventory_items?.unit || 'pcs',
+             reason: it.reason,
+             reason_note: it.reason_note || '',
+             source: 'Return #' + r.return_number,
+             customer: r.customer_name || 'Customer',
+             date: r.return_date
+           });
+         }
+       }
+     }
+     for(let exc of (excList||[])){
+       for(let it of (exc.exchange_items||[])){
+         if(it.item_type==='returned' && (it.condition==='Damaged'||it.condition==='Defective')){
+           q.push({
+             item_code: it.inventory_items?.item_code || '—',
+             description: it.inventory_items?.description || 'Item',
+             category: it.inventory_items?.category || 'Damage/Defective',
+             condition: it.condition,
+             quantity: Number(it.quantity),
+             unit: it.inventory_items?.unit || 'pcs',
+             reason: it.reason,
+             reason_note: it.reason_note || '',
+             source: 'Exchange #' + exc.exchange_number,
+             customer: exc.customer_name || 'Customer',
+             date: exc.exchange_date
+           });
+         }
+       }
+     }
+     return q;
+   }).catch(()=>[])
   ]);
   let shopData={...store};delete shopData.admin_id;
   let website={pages:(pages||[]).map(p=>({page:p.slug,title:p.title,content:p.body,updatedAt:p.updated_at})),blogPosts:blogs||[]};
   let purchasable={licensePlans:(plans||[]).map(p=>({name:p.title,durationMonths:p.duration_months,maxShops:p.max_stores,priceBDT:Number(p.price||0),features:p.benefits||p.payment_details||'',connectxDaily:p.connectx_enabled?p.connectx_daily_limit:0,zudoDaily:p.zudo_enabled?p.zudo_daily_limit:0,businessHealthDaily:p.business_health_enabled?p.business_health_daily_limit:0,truebillIncluded:!!p.truebill_enabled,vaultiumGB:Number(p.vaultium_gb||0)})),addOns:(addonCatalog||[]).map(a=>({key:a.addon_key,name:a.title,description:a.details,pricePerDayBDT:Number(a.unit_price||0),minDays:a.min_days,maxDays:a.max_days,minDailyLimit:a.min_daily_limit,maxDailyLimit:a.max_daily_limit,setupUrl:a.url||null})),paymentInstructions:(checkoutCfg&&checkoutCfg[0]&&checkoutCfg[0].payment_info)||null,currentAddOnPurchases:(activeAddons||[]).map(a=>({addon:a.addon_key,status:a.status,validityDays:a.validity_days,dailyLimit:a.daily_limit,starts:a.starts_at,expires:a.expires_at}))};
-  let context=JSON.stringify({shop:shopData,administrator:administrators[0]||null,license:{currentEntitlement:entitlements[0]||null,history:licenses},zudo:{dailyLimit:plan.zudo_daily_limit,usedToday:shopUsed.length,remaining:Math.max(0,Number(plan.zudo_daily_limit)-shopUsed.length)},connectx:{messages:connectxMessages},sales,purchases,expenses,inventory:items,customers,website,purchasable});
+  let context=JSON.stringify({shop:shopData,administrator:administrators[0]||null,license:{currentEntitlement:entitlements[0]||null,history:licenses},zudo:{dailyLimit:plan.zudo_daily_limit,usedToday:shopUsed.length,remaining:Math.max(0,Number(plan.zudo_daily_limit)-shopUsed.length)},connectx:{messages:connectxMessages},sales,purchases,expenses,returns:returnsData,exchanges:exchangesData,inventory:items,quarantine_damaged_defective:damagedDefective,suppliers,staff:staffList,due_recoveries:dueRecoveries,customers,website,purchasable});
   let priorHistory=history.slice(0,-1).map(x=>({role:x.role,content:x.content}));
   let activeModel=modernModel(cfg.model||'@cf/meta/llama-3.2-3b-instruct');
   let result=null,aiError=null;
-  try{result=await runAI(env,activeModel,[{role:'system',content:"You are Zudo, the friendly in-app business assistant for EMS V1 (powered by DoxTox). Shop owners and staff ask you about their shop, the product, pricing, and the public website, and you answer from the data provided.\n\nYOUR PERSONALITY:\n- Talk like a warm, sharp, reassuring human business advisor — never like a robot reading a database.\n- Greet naturally when greeted. Be encouraging, and explain things simply for a busy shopkeeper, as if chatting on WhatsApp.\n- LANGUAGE RULE (very important) — follow the user's LATEST message exactly, ignoring the language of earlier messages:\n  * English writing (Latin letters, English words) -> reply ONLY in English.\n  * Banglish, meaning Bengali written in Roman/Latin letters (words like ami, amar, koto, ache, korbo, chai, dao, bolo, kivabe, keno) -> reply ONLY in warm, simple Banglish (Roman Bengali letters). Do NOT use Bengali script for Banglish.\n  * Bengali/Bangla script (\u0985-\u09df letters: \u0986\u09ae\u09bf, \u0995\u09a4) -> reply ONLY in natural Bengali/Bangla script.\n  * Any other language (Hindi, Arabic, etc.) -> reply in that same language and script.\n  Never mix scripts: a Banglish question must get Roman-letter Banglish; a Bengali-script question must get Bengali-script Bangla; an English question must get English only.\n- Use short, natural sentences. Light emoji are welcome when they make an answer friendlier (💰 📦 ⚠️ ✅), but do not overdo them.\n\nWHAT YOU CAN ANSWER:\n- Shop operations: sales, purchases, expenses, inventory & low stock, customers, dues, attendance/salary context, and ConnectX emails — always pull the real numbers from CURRENT SHOP DATA.\n- Pricing & upgrades: the purchasable.licensePlans and purchasable.addOns arrays list exactly what is available with prices (BDT), durations, shop limits, feature flags and daily quotas. Explain them clearly, compare options, recommend the best fit, and mention the purchasable.paymentInstructions if present. Tell them the shop Administrator activates plans/add-ons (bKash/Nagad checkout) — you cannot purchase or change anything yourself.\n- The product & website: answer \"what is EMS\", About, Terms, Contact details and published blog highlights from website.pages and website.blogPosts. If a page body is empty, say the page has no published content yet.\n- Their current plan/quota: license.currentEntitlement, license.history, zudo usage limits and purchasable.currentAddOnPurchases.\n\nHOW TO FORMAT:\n- Answer the question COMPLETELY — never stop mid-sentence, mid-list or cut the answer short; use as many words as the question genuinely needs.\n- Lead with the direct answer, then use short headings or bullet lists when they genuinely help. Short questions get short answers; detailed questions get full step-by-step answers.\n- Turn raw figures into friendly insight: totals, what stands out, and one practical suggestion (for example a stock to reorder or a due to chase).\n- Money is Bangladeshi Taka — write it as ৳ or BDT. Render dates in a readable form (e.g. 16 Sep 2026).\n- Keep it skimmable and avoid repeating the question, but completeness beats brevity.\n\nRULES:\n- The supplied data is the only source of truth. Never invent numbers, prices, dates, names, or features.\n- If the data does not contain the answer, say so honestly in plain words and suggest what to check or whom to ask.\n- You are read-only: you cannot create, edit, delete, buy, or send anything — never imply otherwise.\n- Never reveal passwords, hashes, API keys, tokens, or internal IDs/field names.\n- Never output JSON, raw arrays, code, SQL, or database column names — convert everything into normal human language."},...priorHistory,{role:'user',content:'CURRENT SHOP DATA: '+context+'\n\nQUESTION: '+question+'\n\nLANGUAGE FOR THIS REPLY (highest priority, overrides every earlier message):\n'+zudoLangDirective(question)+'\n\nWrite a COMPLETE answer and never stop mid-sentence or mid-list.'}],0.3)}catch(e){aiError=e.message||'AI provider failed to respond'}
+  try{result=await runAI(env,activeModel,[{role:'system',content:"You are Zudo, the friendly in-app business assistant for EMS V1 (powered by DoxTox). Shop owners and staff ask you about their shop, the product, pricing, and the public website, and you answer from the data provided.\n\nYOUR PERSONALITY:\n- Talk like a warm, sharp, reassuring human business advisor — never like a robot reading a database.\n- Greet naturally when greeted. Be encouraging, and explain things simply for a busy shopkeeper, as if chatting on WhatsApp.\n- LANGUAGE RULE (very important) — follow the user's LATEST message exactly, ignoring the language of earlier messages:\n  * English writing (Latin letters, English words) -> reply ONLY in English.\n  * Banglish, meaning Bengali written in Roman/Latin letters (words like ami, amar, koto, ache, korbo, chai, dao, bolo, kivabe, keno) -> reply ONLY in warm, simple Banglish (Roman Bengali letters). Do NOT use Bengali script for Banglish.\n  * Bengali/Bangla script (\u0985-\u09df letters: \u0986\u09ae\u09bf, \u0995\u09a4) -> reply ONLY in natural Bengali/Bangla script.\n  * Any other language (Hindi, Arabic, etc.) -> reply in that same language and script.\n  Never mix scripts: a Banglish question must get Roman-letter Banglish; a Bengali-script question must get Bengali-script Bangla; an English question must get English only.\n- Use short, natural sentences. Light emoji are welcome when they make an answer friendlier (💰 📦 ⚠️ ✅), but do not overdo them.\n\nWHAT YOU CAN ANSWER:\n- Shop operations & full database: sales, purchases, expenses, due recoveries, customers, suppliers, staff, attendance/salary context, returns, refunds, exchanges, and ConnectX emails — always pull the real numbers from CURRENT SHOP DATA.\n- Complete Inventory: live stock levels, categories, units, sale prices, low stock, out-of-stock items, and active status.\n- Quarantine (Damage/Defective Products): you have full direct visibility into the quarantine list (quarantine_damaged_defective) — all returned or exchanged products marked Damaged or Defective, their condition, quantity, reasons, notes, customer names, dates, and slip numbers. Explain that quarantined defective/damaged products are isolated from normal sellable inventory.\n- Pricing & upgrades: the purchasable.licensePlans and purchasable.addOns arrays list exactly what is available with prices (BDT), durations, shop limits, feature flags and daily quotas. Explain them clearly, compare options, recommend the best fit, and mention the purchasable.paymentInstructions if present. Tell them the shop Administrator activates plans/add-ons (bKash/Nagad checkout) — you cannot purchase or change anything yourself.\n- The product & website: answer \"what is EMS\", About, Terms, Contact details and published blog highlights from website.pages and website.blogPosts. If a page body is empty, say the page has no published content yet.\n- Their current plan/quota: license.currentEntitlement, license.history, zudo usage limits and purchasable.currentAddOnPurchases.\n\nHOW TO FORMAT:\n- Answer the question COMPLETELY — never stop mid-sentence, mid-list or cut the answer short; use as many words as the question genuinely needs.\n- Lead with the direct answer, then use short headings or bullet lists when they genuinely help. Short questions get short answers; detailed questions get full step-by-step answers.\n- Turn raw figures into friendly insight: totals, what stands out, and one practical suggestion (for example a stock to reorder or a due to chase).\n- Money is Bangladeshi Taka — write it as ৳ or BDT. Render dates in a readable form (e.g. 16 Sep 2026).\n- Keep it skimmable and avoid repeating the question, but completeness beats brevity.\n\nRULES:\n- The supplied data is the only source of truth. Never invent numbers, prices, dates, names, or features.\n- If the data does not contain the answer, say so honestly in plain words and suggest what to check or whom to ask.\n- You are read-only: you cannot create, edit, delete, buy, or send anything — never imply otherwise.\n- Never reveal passwords, hashes, API keys, tokens, or internal IDs/field names.\n- Never output JSON, raw arrays, code, SQL, or database column names — convert everything into normal human language."},...priorHistory,{role:'user',content:'CURRENT SHOP DATA: '+context+'\n\nQUESTION: '+question+'\n\nLANGUAGE FOR THIS REPLY (highest priority, overrides every earlier message):\n'+zudoLangDirective(question)+'\n\nWrite a COMPLETE answer and never stop mid-sentence or mid-list.'}],0.3)}catch(e){aiError=e.message||'AI provider failed to respond'}
   let answer=String(result||'').trim();
   if(!answer)answer=aiError?('⚠️ I could not reach my AI brain just now ('+String(aiError).slice(0,140)+'). Your conversation is saved — please send the message again.'):'Zudo could not generate a response. Please try again.';
   await db(env,'zudo_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({conversation_id:conversationId,store_id:s.storeId,user_id:s.id,role:'assistant',content:answer})});
@@ -409,10 +1112,121 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  }
  if(path==='connectx/availability'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let entitlement=await connectxPlan(env,s.storeId),ever=await featureEver(env,s.storeId,'connectx'),today=new Date().toISOString().slice(0,10),used=await db(env,`connectx_messages?store_id=eq.${s.storeId}&created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`);if(!entitlement)return json({enabled:false,history:ever,dailyLimit:0,usedToday:used.length,remaining:0});return json({enabled:true,history:true,dailyLimit:entitlement.connectx_daily_limit,usedToday:used.length,remaining:Math.max(0,entitlement.connectx_daily_limit-used.length),expiresAt:entitlement.expires_at})}
  if(path==='connectx/contacts'&&method==='GET'){if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);let type=new URL(request.url).searchParams.get('type'),table={customer:'customers',supplier:'suppliers',staff:'staff'}[type];if(!table)return fail('Invalid contact type.');let select=type==='staff'?'id,full_name,phone,email,user_id':type==='customer'?'id,name,address,phone,email,customer_code':'id,name,address,phone,email,supplier_code';return json(await db(env,`${table}?store_id=eq.${s.storeId}&select=${select}&order=created_at.desc`))}
- if(path==='connectx/invoices'&&method==='GET'){if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);let kind=new URL(request.url).searchParams.get('kind');if(!['sale','purchase'].includes(kind))return fail('Invalid document type.');return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${kind}&select=id,invoice_number,invoice_date,subtotal,total_due,party_id&order=created_at.desc&limit=200`))}
+ if(path==='connectx/invoices'&&method==='GET'){
+  if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);
+  let kind=new URL(request.url).searchParams.get('kind');
+  let partyId=new URL(request.url).searchParams.get('party_id');
+  let partyFilter=partyId?`&party_id=eq.${partyId}`:'';
+  if(!['sale','purchase','return','exchange'].includes(kind))return fail('Invalid document type.');
+  if(kind==='return'){
+    let custFilter=partyId?`&customer_id=eq.${partyId}`:'';
+    let rows=await db(env,`returns?store_id=eq.${s.storeId}${custFilter}&select=id,return_number,return_date,total_return_amount,refunded_amount,refund_method,customer_id,customer_name,invoice_id,invoices(invoice_number),return_items(id,quantity)&order=created_at.desc&limit=200`).catch(()=>[]);
+    return json(rows.map(r=>({id:r.id,invoice_number:r.return_number,original_invoice_number:r.invoices?.invoice_number||null,invoice_date:r.return_date,subtotal:r.total_return_amount,paid_amount:r.refunded_amount,total_due:0,refund_amount:r.refunded_amount,refund_method:r.refund_method||'Cash',party_id:r.customer_id,customer_name:r.customer_name,item_count:(r.return_items||[]).reduce((a,x)=>a+Number(x.quantity||1),0)||(r.return_items?.length||1),document_type:'return'})));
+  }
+  if(kind==='exchange'){
+    let custFilter=partyId?`&customer_id=eq.${partyId}`:'';
+    let rows=await db(env,`exchanges?store_id=eq.${s.storeId}${custFilter}&select=id,exchange_number,exchange_date,new_items_total,difference_amount,action_type,payment_method,customer_id,customer_name,invoice_id,invoices(invoice_number),exchange_items(id,quantity,item_type)&order=created_at.desc&limit=200`).catch(()=>[]);
+    return json(rows.map(r=>({id:r.id,invoice_number:r.exchange_number,original_invoice_number:r.invoices?.invoice_number||null,invoice_date:r.exchange_date,subtotal:r.new_items_total,paid_amount:r.new_items_total,total_due:r.difference_amount,difference_amount:r.difference_amount,action_type:r.action_type,payment_method:r.payment_method||'Cash',party_id:r.customer_id,customer_name:r.customer_name,item_count:(r.exchange_items||[]).filter(x=>x.item_type==='new').reduce((a,x)=>a+Number(x.quantity||1),0)||(r.exchange_items?.length||1),document_type:'exchange'})));
+  }
+  let rows=await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${kind}${partyFilter}&select=id,invoice_number,invoice_date,subtotal,paid_amount,total_due,payment_method,party_id,custom_party_name,invoice_lines(id,quantity)&order=created_at.desc&limit=200`);
+  return json(rows.map(r=>({id:r.id,invoice_number:r.invoice_number,invoice_date:r.invoice_date,subtotal:r.subtotal,paid_amount:r.paid_amount,total_due:r.total_due,payment_method:r.payment_method,party_id:r.party_id,party_name:r.custom_party_name,item_count:(r.invoice_lines||[]).reduce((a,x)=>a+Number(x.quantity||1),0)||(r.invoice_lines?.length||1),document_type:r.kind})));
+ }
+ if(path.match(/^connectx\/sms\/messages\/[^/]+$/)&&method==='DELETE'){if(!s.storeId||(!allowed(s,'connectx','delete')&&s.role!=='admin'&&!s.adminAccess))return fail('Permission denied.',403);let id=path.split('/')[3];let [x]=await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);if(!x)return fail('SMS record not found.',404);await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}`,{method:'DELETE'});await audit(env,s,'cancel ConnectX SMS','connectx',id,{to_phone:x.to_phone,recipient_name:x.recipient_name,status:x.status});return json({ok:true})}
+ if(path==='connectx/sms/queue'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);return json(await db(env,`connectx_sms_messages?store_id=eq.${s.storeId}&status=eq.queued&select=*&order=created_at.asc&limit=50`))}
+ if(path.match(/^connectx\/sms\/status\/[^/]+$/)&&method==='PATCH'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[3];let b=await body(request),allowedStatus=['queued','sending','sent','failed'];if(b.status&&!allowedStatus.includes(b.status))return fail('Invalid SMS status',400);let patch={};if(b.status)patch.status=b.status;if(b.device_id)patch.device_id=b.device_id;if(b.attempts!==undefined)patch.attempts=Number(b.attempts);if(b.error_message!==undefined)patch.error_message=b.error_message;if(b.status==='sent')patch.sent_at=new Date().toISOString();let [upd]=await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(patch)});return json(upd||{ok:true})}
+ if(path==='connectx/sms/messages'&&method==='GET'){if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);let qs=new URL(request.url).searchParams,st=qs.get('status'),rec=qs.get('recipient_type'),filter=`store_id=eq.${s.storeId}`;if(st)filter+=`&status=eq.${encodeURIComponent(st)}`;if(rec)filter+=`&recipient_type=eq.${encodeURIComponent(rec)}`;return json(await db(env,`connectx_sms_messages?${filter}&select=*&order=created_at.desc&limit=250`))}
+ if(path==='connectx/sms/send'&&method==='POST'){
+  if(!s.storeId||(!allowedAddon(s,'connectx','send')&&!allowed(s,'connectx','add')&&s.role!=='admin'&&!s.adminAccess))return fail('Permission denied.',403);
+  let b=await body(request),toPhone=String(b.toPhone||b.to||'').trim(),cleanDigits=toPhone.replace(/[^0-9+]/g,'');
+  if(!cleanDigits||cleanDigits.length<6)return fail('Valid recipient phone number is required.',400);
+  let msgBody=String(b.messageBody||b.message||'').trim();
+  if(!msgBody)return fail('SMS message body cannot be empty.',400);
+  let entitlement=await connectxPlan(env,s.storeId);
+  if(!entitlement)return fail('ConnectX is not available for this shop. Purchase a ConnectX add-on or an eligible license.',403);
+  let today=new Date().toISOString().slice(0,10);
+  let [usedToday]=await Promise.all([db(env,`connectx_sms_messages?store_id=eq.${s.storeId}&created_at=gte.${today}T00:00:00Z&status=in.(queued,sending,sent)&select=id`)]);
+  let maxDaily=entitlement.connectx_daily_limit||100;
+  if(usedToday.length>=maxDaily)return fail(`Your shop has reached its daily ConnectX SMS limit (${maxDaily}/day).`,429);
+  let fiveSecAgo=new Date(Date.now()-5000).toISOString();
+  let recentDup=await db(env,`connectx_sms_messages?store_id=eq.${s.storeId}&to_phone=eq.${encodeURIComponent(cleanDigits)}&created_at=gte.${fiveSecAgo}&select=id`);
+  if(recentDup.length)return fail('Duplicate SMS detected. Please wait a few seconds before retrying.',409);
+  let recType=['customer','supplier','staff','manual'].includes(b.recipientType)?b.recipientType:'customer';
+  let [record]=await db(env,'connectx_sms_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,recipient_type:recType,recipient_id:b.recipientId||null,recipient_name:String(b.recipientName||'').trim()||null,to_phone:cleanDigits,message_type:String(b.messageType||'Custom Message').trim(),invoice_id:b.invoiceId||null,message_body:msgBody,status:'queued',attempts:0,created_at:new Date().toISOString()})});
+  await audit(env,s,'queue ConnectX SMS','connectx',record.id,{to_phone:cleanDigits,recipient_name:record.recipient_name,message_type:record.message_type,invoice_id:record.invoice_id});
+  return json({ok:true,id:record.id,status:'queued',message:'✓ SMS queued for ConnectX'},201);
+ }
  if(path.match(/^connectx\/messages\/[^/]+$/)&&method==='DELETE'){if(!s.storeId||!allowed(s,'connectx','delete'))return fail('Permission denied.',403);let id=path.split('/')[2];let [x]=await db(env,`connectx_messages?id=eq.${id}&store_id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({shop_deleted_at:new Date().toISOString(),shop_deleted_by:s.id})});if(!x)return fail('Message not found.',404);await audit(env,s,'hide ConnectX history','connectx',id);return json({ok:true})}
  if(path==='connectx/messages'&&method==='GET'){if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);return json(await db(env,`connectx_messages?store_id=eq.${s.storeId}&shop_deleted_at=is.null&select=*&order=created_at.desc&limit=100`))}
- if(path==='connectx/send'&&method==='POST'){if(!s.storeId||!allowedAddon(s,'connectx','send'))return fail('Permission denied.',403);let b=await body(request),to=emailList(b.to),cc=emailList(b.cc),bcc=emailList(b.bcc);if(!to.length||![...to,...cc,...bcc].every(validEmail)||!String(b.subject||'').trim())return fail('Valid recipient email and subject are required.');let [cfg]=await db(env,'connectx_settings?select=*');if(!cfg?.enabled)return fail('ConnectX sending is not enabled by EMS Owner.',403);if(!env.BREVO_API_KEY)return fail('ConnectX provider is not configured. Contact EMS Owner.',503);let [shop]=await db(env,`stores?id=eq.${s.storeId}&select=name`);let senderName=shop?.name||cfg.from_name;let today=new Date().toISOString().slice(0,10),[globalUsed,shopUsed]=await Promise.all([db(env,`connectx_messages?created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`),db(env,`connectx_messages?store_id=eq.${s.storeId}&created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`)]);let entitlement=await connectxPlan(env,s.storeId);if(!entitlement)return fail('ConnectX is not available for this shop. Purchase a ConnectX add-on or an eligible license.',403);if(globalUsed.length>=cfg.global_daily_limit)return fail('ConnectX daily global email limit has been reached.',429);if(shopUsed.length>=entitlement.connectx_daily_limit)return fail('Your shop has reached its daily ConnectX email limit.',429);let html='<div style="font-family:Arial,sans-serif;color:#172033;line-height:1.55">'+safeText(b.body||'').replace(/\n/g,'<br>');if(b.documentType&&!b.invoiceId)return fail('Select an invoice before sending.',400);if(b.invoiceId){let [inv]=await db(env,`invoices?id=eq.${b.invoiceId}&store_id=eq.${s.storeId}&select=*,invoice_lines(*,inventory_items(item_code,description,unit)),stores(name,address,phone,phone2,email,website)`);if(!inv)return fail('Selected invoice was not found in this shop.',404);let partyTable=inv.kind==='sale'?'customers':'suppliers',[party]=inv.party_id?await db(env,`${partyTable}?id=eq.${inv.party_id}&select=*`):[],partyName=party?.name||inv.custom_party_name||'—',partyAddress=party?.address||inv.custom_party_address||'—',partyPhone=party?.phone||inv.custom_party_phone||'—',partyCode=party?.customer_code||party?.supplier_code||(inv.custom_party_name?'Custom customer':'—'),money=v=>Number(v||0).toLocaleString('en-BD',{minimumFractionDigits:2});html+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #dddddd;font-family:Arial,sans-serif;color:#141414"><tr><td style="padding:20px;border-bottom:2px solid #111111"><table role="presentation" width="100%"><tr><td style="vertical-align:top"><b style="font-size:19px">'+safeText(inv.stores.name)+'</b><br><span style="font-size:12px;color:#555">'+safeText(inv.stores.address||'')+'<br>'+safeText(inv.stores.phone||'')+'<br>'+safeText(inv.stores.email||'')+'</span></td><td style="vertical-align:top;text-align:right"><b style="font-size:20px">'+safeText(inv.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE')+'</b><br><span style="font-size:12px"># '+safeText(inv.invoice_number)+'</span><br><span style="display:inline-block;margin-top:8px;padding:4px 10px;background:'+(Number(inv.total_due)<=0?'#2e7d32':'#b7791f')+';color:#ffffff;font-size:11px">'+(Number(inv.total_due)<=0?'PAID':'DUE')+'</span></td></tr></table></td></tr><tr><td style="padding:20px"><table role="presentation" width="100%"><tr><td width="50%" style="vertical-align:top"><b style="font-size:11px">'+safeText(inv.kind==='sale'?'BILL TO':'SUPPLIER')+'</b><br><span style="font-size:12px;line-height:1.6">ID: '+safeText(partyCode)+'<br>Name: '+safeText(partyName)+'<br>Address: '+safeText(partyAddress)+'<br>Phone: '+safeText(partyPhone)+'</span></td><td width="50%" style="vertical-align:top"><b style="font-size:11px">INVOICE DETAILS</b><br><span style="font-size:12px;line-height:1.6">Date: '+safeText(inv.invoice_date)+'<br>Payment: '+safeText(inv.payment_method)+'<br>Transaction: '+safeText(inv.transaction_id||'—')+'</span></td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;border-collapse:collapse"><tr style="background:#111111;color:#ffffff"><th style="padding:8px;text-align:left;font-size:11px">ITEM</th><th style="padding:8px;font-size:11px">QTY</th><th style="padding:8px;font-size:11px">UNIT</th><th style="padding:8px;font-size:11px">UNIT PRICE</th><th style="padding:8px;font-size:11px">VAT</th><th style="padding:8px;font-size:11px">DISC.</th><th style="padding:8px;text-align:right;font-size:11px">TOTAL</th></tr>'+inv.invoice_lines.map(x=>'<tr><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px">'+safeText(x.inventory_items?.description||'Item')+'<br><span style="font-size:10px;color:#777">'+safeText(x.inventory_items?.item_code||'')+'</span></td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+safeText(x.quantity)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+safeText(x.inventory_items?.unit||'')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+money(x.unit_price)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+(Number(x.tax_percent||0)?money(Math.round(Number(x.quantity)*Number(x.unit_price)*Number(x.tax_percent)/100*100)/100):'—')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+(Number(x.discount||0)?'−'+money(x.discount):'—')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:right">'+money(x.line_total)+'</td></tr>').join('')+'</table><table role="presentation" align="right" width="280" style="margin-top:18px"><tr><td style="padding:4px;font-size:12px">Subtotal</td><td style="padding:4px;text-align:right;font-size:12px">'+money(inv.subtotal)+'</td></tr>'+(Number(inv.line_tax_amount||0)?'<tr><td style="padding:4px;font-size:12px">Item VAT</td><td style="padding:4px;text-align:right;font-size:12px">+'+money(inv.line_tax_amount)+'</td></tr>':'')+'<tr><td style="padding:4px;font-size:12px">Tax</td><td style="padding:4px;text-align:right;font-size:12px">'+money(inv.tax_amount)+'</td></tr><tr><td style="padding:4px;font-size:12px">Discount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.discount)+'</td></tr>'+(Number(inv.line_discount_amount||0)?'<tr><td style="padding:4px;font-size:12px">Item discount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.line_discount_amount)+'</td></tr>':'')+'<tr><td style="padding:4px;font-size:12px">Paid Amount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.paid_amount)+'</td></tr><tr><td style="padding:9px 4px;border-top:1px solid #111;font-size:15px"><b>Total Due</b></td><td style="padding:9px 4px;border-top:1px solid #111;text-align:right;font-size:15px"><b>'+money(inv.total_due)+'</b></td></tr></table><div style="clear:both"></div></td></tr></table>' }html+='</div>';let [msg]=await db(env,'connectx_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,recipient_type:b.recipientType||'manual',recipient_id:b.recipientId||null,invoice_id:b.invoiceId||null,from_email:cfg.from_email,to_emails:to,cc_emails:cc,bcc_emails:bcc,subject:String(b.subject).trim(),custom_body:String(b.body||''),body_html:html,provider:'brevo_api',status:'sending'})});let res=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':env.BREVO_API_KEY,'content-type':'application/json'},body:JSON.stringify({sender:{name:senderName,email:cfg.from_email},replyTo:cfg.reply_to?{email:cfg.reply_to}:undefined,to:to.map(email=>({email})),...(cc.length?{cc:cc.map(email=>({email}))}:{}),...(bcc.length?{bcc:bcc.map(email=>({email}))}:{}),subject:msg.subject,htmlContent:html})}),out=await res.json().catch(()=>({}));if(!res.ok){await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'failed',error_message:out.message||'Provider rejected message'})});return fail('Email could not be sent. Please try again later.',502)}await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'sent',provider_message_id:out.messageId||null,sent_at:new Date().toISOString()})});await audit(env,s,'send ConnectX email','connectx',msg.id,{to,invoiceId:b.invoiceId||null});return json({ok:true,id:msg.id},201)}
+ if(path==='connectx/send'&&method==='POST'){
+  if(!s.storeId||!allowedAddon(s,'connectx','send'))return fail('Permission denied.',403);
+  let b=await body(request),to=emailList(b.to),cc=emailList(b.cc),bcc=emailList(b.bcc);
+  if(!to.length||![...to,...cc,...bcc].every(validEmail)||!String(b.subject||'').trim())return fail('Valid recipient email and subject are required.');
+  let [cfg]=await db(env,'connectx_settings?select=*');
+  if(!cfg?.enabled)return fail('ConnectX sending is not enabled by EMS Owner.',403);
+  if(!env.BREVO_API_KEY&&env.MOCK_EMAIL!=='1')return fail('ConnectX provider is not configured. Contact EMS Owner.',503);
+  let [shop]=await db(env,`stores?id=eq.${s.storeId}&select=name`);
+  let senderName=shop?.name||cfg.from_name;
+  let today=new Date().toISOString().slice(0,10),[globalUsed,shopUsed]=await Promise.all([
+    db(env,`connectx_messages?created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`),
+    db(env,`connectx_messages?store_id=eq.${s.storeId}&created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`)
+  ]);
+  let entitlement=await connectxPlan(env,s.storeId);
+  if(!entitlement)return fail('ConnectX is not available for this shop. Purchase a ConnectX add-on or an eligible license.',403);
+  if(globalUsed.length>=cfg.global_daily_limit)return fail('ConnectX daily global email limit has been reached.',429);
+  if(shopUsed.length>=entitlement.connectx_daily_limit)return fail('Your shop has reached its daily ConnectX email limit.',429);
+  let html='<div style="font-family:Arial,sans-serif;color:#172033;line-height:1.55">'+safeText(b.body||'').replace(/\n/g,'<br>');
+  if(b.documentType&&!b.invoiceId)return fail('Select a document before sending.',400);
+  let attachedInvoiceId=null;
+  if(b.invoiceId){
+    let money=v=>Number(v||0).toLocaleString('en-BD',{minimumFractionDigits:2});
+    let originUrl=new URL(request.url).origin;
+    let tbPlan=await truebillPlan(env,s.storeId);
+    let tbActive=!!tbPlan;
+    if(b.documentType==='return'){
+      let [ret]=await db(env,`returns?id=eq.${b.invoiceId}&store_id=eq.${s.storeId}&select=*,return_items(*,inventory_items(item_code,description,unit)),stores(name,address,phone,phone2,email,website)`);
+      if(!ret)return fail('Selected return slip was not found in this shop.',404);
+      attachedInvoiceId=ret.invoice_id||null;
+      let [party]=ret.customer_id?await db(env,`customers?id=eq.${ret.customer_id}&select=*`):[];
+      let [origInv]=ret.invoice_id?await db(env,`invoices?id=eq.${ret.invoice_id}&select=invoice_number`):[];
+      let partyName=party?.name||ret.customer_name||'Customer',partyAddress=party?.address||'—',partyPhone=party?.phone||'—',partyCode=party?.customer_code||'—';
+      let qrUrl=tbActive&&ret.verification_token?`${originUrl}/?verify=${ret.verification_token}`:'';
+      html+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #dddddd;font-family:Arial,sans-serif;color:#141414"><tr><td style="padding:20px;border-bottom:2px solid #111111"><table role="presentation" width="100%"><tr><td style="vertical-align:top"><b style="font-size:19px">'+safeText(ret.stores?.name||shop?.name||'')+'</b><br><span style="font-size:12px;color:#555">'+safeText(ret.stores?.address||'')+'<br>'+safeText(ret.stores?.phone||'')+'<br>'+safeText(ret.stores?.email||'')+'</span></td><td style="vertical-align:top;text-align:right"><b style="font-size:20px;color:#b91c1c">RETURN SLIP</b><br><span style="font-size:12px"># '+safeText(ret.return_number)+'</span><br><span style="display:inline-block;margin-top:8px;padding:4px 10px;background:#2e7d32;color:#ffffff;font-size:11px">REFUNDED</span></td></tr></table></td></tr><tr><td style="padding:20px"><table role="presentation" width="100%"><tr><td width="50%" style="vertical-align:top"><b style="font-size:11px">CUSTOMER</b><br><span style="font-size:12px;line-height:1.6">ID: '+safeText(partyCode)+'<br>Name: '+safeText(partyName)+'<br>Address: '+safeText(partyAddress)+'<br>Phone: '+safeText(partyPhone)+'</span></td><td width="50%" style="vertical-align:top"><b style="font-size:11px">RETURN DETAILS</b><br><span style="font-size:12px;line-height:1.6">Date: '+safeText(ret.return_date)+'<br>Original Invoice: '+(origInv?safeText(origInv.invoice_number):'—')+'<br>Refund Method: '+safeText(ret.payment_method||'Cash')+'<br>Reason: '+safeText(ret.reason||'Customer Return')+'</span></td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;border-collapse:collapse"><tr style="background:#111111;color:#ffffff"><th style="padding:8px;text-align:left;font-size:11px">RETURNED ITEM</th><th style="padding:8px;font-size:11px">CONDITION</th><th style="padding:8px;font-size:11px">QTY</th><th style="padding:8px;font-size:11px">UNIT PRICE</th><th style="padding:8px;text-align:right;font-size:11px">TOTAL</th></tr>'+(ret.return_items||[]).map(x=>'<tr><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px">'+safeText(x.inventory_items?.description||'Item')+'<br><span style="font-size:10px;color:#777">'+safeText(x.inventory_items?.item_code||'')+'</span></td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center"><span style="text-transform:capitalize">'+safeText(x.condition||'sellable')+'</span></td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+safeText(x.quantity)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+money(x.unit_price)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:right">'+money(x.total_amount||x.line_total)+'</td></tr>').join('')+'</table><table role="presentation" align="right" width="280" style="margin-top:18px"><tr><td style="padding:4px;font-size:12px">Subtotal</td><td style="padding:4px;text-align:right;font-size:12px">'+money(ret.subtotal||ret.total_return_amount)+'</td></tr>'+(Number(ret.penalty_amount||0)?'<tr><td style="padding:4px;font-size:12px">Deduction / Fee</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(ret.penalty_amount)+'</td></tr>':'')+'<tr><td style="padding:9px 4px;border-top:1px solid #111;font-size:15px"><b>Refunded Amount</b></td><td style="padding:9px 4px;border-top:1px solid #111;text-align:right;font-size:15px;color:#2e7d32"><b>'+money(ret.refunded_amount||ret.total_return_amount)+'</b></td></tr></table><div style="clear:both"></div>'+(qrUrl?'<div style="margin-top:16px;padding-top:12px;border-top:1px dashed #ccc;font-size:11px;color:#666">TrueBill Digital Verification: <a href="'+qrUrl+'" target="_blank" style="color:#0284c7">Verify Online</a></div>':'')+'</td></tr></table>';
+    }else if(b.documentType==='exchange'){
+      let [exc]=await db(env,`exchanges?id=eq.${b.invoiceId}&store_id=eq.${s.storeId}&select=*,exchange_items(*,inventory_items(item_code,description,unit)),stores(name,address,phone,phone2,email,website)`);
+      if(!exc)return fail('Selected exchange slip was not found in this shop.',404);
+      attachedInvoiceId=exc.invoice_id||null;
+      let [party]=exc.customer_id?await db(env,`customers?id=eq.${exc.customer_id}&select=*`):[];
+      let [origInv]=exc.invoice_id?await db(env,`invoices?id=eq.${exc.invoice_id}&select=invoice_number`):[];
+      let partyName=party?.name||exc.customer_name||'Customer',partyAddress=party?.address||'—',partyPhone=party?.phone||'—',partyCode=party?.customer_code||'—';
+      let qrUrl=tbActive&&exc.verification_token?`${originUrl}/?verify=${exc.verification_token}`:'';
+      let actionBadge=exc.action_type==='customer_pays'?'CUSTOMER PAID':exc.action_type==='shop_refunds'?'STORE REFUNDED':'EVEN EXCHANGE';
+      let badgeColor=exc.action_type==='shop_refunds'?'#2e7d32':exc.action_type==='customer_pays'?'#0284c7':'#4b5563';
+      let retItems=(exc.exchange_items||[]).filter(x=>x.item_type==='returned');
+      let newItems=(exc.exchange_items||[]).filter(x=>x.item_type==='new');
+      html+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #dddddd;font-family:Arial,sans-serif;color:#141414"><tr><td style="padding:20px;border-bottom:2px solid #111111"><table role="presentation" width="100%"><tr><td style="vertical-align:top"><b style="font-size:19px">'+safeText(exc.stores?.name||shop?.name||'')+'</b><br><span style="font-size:12px;color:#555">'+safeText(exc.stores?.address||'')+'<br>'+safeText(exc.stores?.phone||'')+'<br>'+safeText(exc.stores?.email||'')+'</span></td><td style="vertical-align:top;text-align:right"><b style="font-size:20px;color:#d97706">EXCHANGE SLIP</b><br><span style="font-size:12px"># '+safeText(exc.exchange_number)+'</span><br><span style="display:inline-block;margin-top:8px;padding:4px 10px;background:'+badgeColor+';color:#ffffff;font-size:11px">'+actionBadge+'</span></td></tr></table></td></tr><tr><td style="padding:20px"><table role="presentation" width="100%"><tr><td width="50%" style="vertical-align:top"><b style="font-size:11px">CUSTOMER</b><br><span style="font-size:12px;line-height:1.6">ID: '+safeText(partyCode)+'<br>Name: '+safeText(partyName)+'<br>Address: '+safeText(partyAddress)+'<br>Phone: '+safeText(partyPhone)+'</span></td><td width="50%" style="vertical-align:top"><b style="font-size:11px">EXCHANGE DETAILS</b><br><span style="font-size:12px;line-height:1.6">Date: '+safeText(exc.exchange_date)+'<br>Original Invoice: '+(origInv?safeText(origInv.invoice_number):'—')+'<br>Settlement: '+safeText(exc.payment_method||'Cash')+'<br>Notes: '+safeText(exc.notes||'—')+'</span></td></tr></table>'+
+      '<div style="margin-top:14px;font-weight:bold;font-size:12px;color:#b91c1c">RETURNED ITEMS</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;border-collapse:collapse"><tr style="background:#fef2f2;color:#991b1b"><th style="padding:6px 8px;text-align:left;font-size:11px">ITEM</th><th style="padding:6px 8px;font-size:11px">CONDITION</th><th style="padding:6px 8px;font-size:11px">QTY</th><th style="padding:6px 8px;font-size:11px">UNIT PRICE</th><th style="padding:6px 8px;text-align:right;font-size:11px">TOTAL</th></tr>'+retItems.map(x=>'<tr><td style="padding:6px 8px;border-bottom:1px solid #fee2e2;font-size:12px">'+safeText(x.inventory_items?.description||'Item')+'</td><td style="padding:6px 8px;border-bottom:1px solid #fee2e2;font-size:12px;text-align:center"><span style="text-transform:capitalize">'+safeText(x.condition||'sellable')+'</span></td><td style="padding:6px 8px;border-bottom:1px solid #fee2e2;font-size:12px;text-align:center">'+safeText(x.quantity)+'</td><td style="padding:6px 8px;border-bottom:1px solid #fee2e2;font-size:12px;text-align:center">'+money(x.unit_price)+'</td><td style="padding:6px 8px;border-bottom:1px solid #fee2e2;font-size:12px;text-align:right">'+money(x.total_amount)+'</td></tr>').join('')+'</table>'+
+      '<div style="margin-top:14px;font-weight:bold;font-size:12px;color:#047857">NEW / REPLACEMENT ITEMS</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:6px;border-collapse:collapse"><tr style="background:#ecfdf5;color:#065f46"><th style="padding:6px 8px;text-align:left;font-size:11px">ITEM</th><th style="padding:6px 8px;font-size:11px">QTY</th><th style="padding:6px 8px;font-size:11px">UNIT PRICE</th><th style="padding:6px 8px;text-align:right;font-size:11px">TOTAL</th></tr>'+newItems.map(x=>'<tr><td style="padding:6px 8px;border-bottom:1px solid #d1fae5;font-size:12px">'+safeText(x.inventory_items?.description||'Item')+'</td><td style="padding:6px 8px;border-bottom:1px solid #d1fae5;font-size:12px;text-align:center">'+safeText(x.quantity)+'</td><td style="padding:6px 8px;border-bottom:1px solid #d1fae5;font-size:12px;text-align:center">'+money(x.unit_price)+'</td><td style="padding:6px 8px;border-bottom:1px solid #d1fae5;font-size:12px;text-align:right">'+money(x.total_amount)+'</td></tr>').join('')+'</table>'+
+      '<table role="presentation" align="right" width="280" style="margin-top:18px"><tr><td style="padding:4px;font-size:12px">Returned Items Total</td><td style="padding:4px;text-align:right;font-size:12px">'+money(exc.returned_total)+'</td></tr><tr><td style="padding:4px;font-size:12px">New Items Total</td><td style="padding:4px;text-align:right;font-size:12px">'+money(exc.new_items_total)+'</td></tr><tr><td style="padding:9px 4px;border-top:1px solid #111;font-size:15px"><b>Settlement ('+actionBadge+')</b></td><td style="padding:9px 4px;border-top:1px solid #111;text-align:right;font-size:15px"><b>'+money(exc.difference_amount)+'</b></td></tr></table><div style="clear:both"></div>'+(qrUrl?'<div style="margin-top:16px;padding-top:12px;border-top:1px dashed #ccc;font-size:11px;color:#666">TrueBill Digital Verification: <a href="'+qrUrl+'" target="_blank" style="color:#0284c7">'+qrUrl+'</a></div>':'')+'</td></tr></table>';
+    }else{
+      let [inv]=await db(env,`invoices?id=eq.${b.invoiceId}&store_id=eq.${s.storeId}&select=*,invoice_lines(*,inventory_items(item_code,description,unit)),stores(name,address,phone,phone2,email,website)`);
+      if(!inv)return fail('Selected invoice was not found in this shop.',404);
+      attachedInvoiceId=inv.id;
+      let partyTable=inv.kind==='sale'?'customers':'suppliers',[party]=inv.party_id?await db(env,`${partyTable}?id=eq.${inv.party_id}&select=*`):[],partyName=party?.name||inv.custom_party_name||'—',partyAddress=party?.address||inv.custom_party_address||'—',partyPhone=party?.phone||inv.custom_party_phone||'—',partyCode=party?.customer_code||party?.supplier_code||(inv.custom_party_name?'Custom customer':'—');
+      html+='<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #dddddd;font-family:Arial,sans-serif;color:#141414"><tr><td style="padding:20px;border-bottom:2px solid #111111"><table role="presentation" width="100%"><tr><td style="vertical-align:top"><b style="font-size:19px">'+safeText(inv.stores.name)+'</b><br><span style="font-size:12px;color:#555">'+safeText(inv.stores.address||'')+'<br>'+safeText(inv.stores.phone||'')+'<br>'+safeText(inv.stores.email||'')+'</span></td><td style="vertical-align:top;text-align:right"><b style="font-size:20px">'+safeText(inv.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE')+'</b><br><span style="font-size:12px"># '+safeText(inv.invoice_number)+'</span><br><span style="display:inline-block;margin-top:8px;padding:4px 10px;background:'+(Number(inv.total_due)<=0?'#2e7d32':'#b7791f')+';color:#ffffff;font-size:11px">'+(Number(inv.total_due)<=0?'PAID':'DUE')+'</span></td></tr></table></td></tr><tr><td style="padding:20px"><table role="presentation" width="100%"><tr><td width="50%" style="vertical-align:top"><b style="font-size:11px">'+safeText(inv.kind==='sale'?'BILL TO':'SUPPLIER')+'</b><br><span style="font-size:12px;line-height:1.6">ID: '+safeText(partyCode)+'<br>Name: '+safeText(partyName)+'<br>Address: '+safeText(partyAddress)+'<br>Phone: '+safeText(partyPhone)+'</span></td><td width="50%" style="vertical-align:top"><b style="font-size:11px">INVOICE DETAILS</b><br><span style="font-size:12px;line-height:1.6">Date: '+safeText(inv.invoice_date)+'<br>Payment: '+safeText(inv.payment_method)+'<br>Transaction: '+safeText(inv.transaction_id||'—')+'</span></td></tr></table><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;border-collapse:collapse"><tr style="background:#111111;color:#ffffff"><th style="padding:8px;text-align:left;font-size:11px">ITEM</th><th style="padding:8px;font-size:11px">QTY</th><th style="padding:8px;font-size:11px">UNIT</th><th style="padding:8px;font-size:11px">UNIT PRICE</th><th style="padding:8px;font-size:11px">VAT</th><th style="padding:8px;font-size:11px">DISC.</th><th style="padding:8px;text-align:right;font-size:11px">TOTAL</th></tr>'+inv.invoice_lines.map(x=>'<tr><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px">'+safeText(x.inventory_items?.description||'Item')+'<br><span style="font-size:10px;color:#777">'+safeText(x.inventory_items?.item_code||'')+'</span></td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+safeText(x.quantity)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+safeText(x.inventory_items?.unit||'')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+money(x.unit_price)+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+(Number(x.tax_percent||0)?money(Math.round(Number(x.quantity)*Number(x.unit_price)*Number(x.tax_percent)/100*100)/100):'—')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:center">'+(Number(x.discount||0)?'−'+money(x.discount):'—')+'</td><td style="padding:8px;border-bottom:1px solid #ddd;font-size:12px;text-align:right">'+money(x.line_total)+'</td></tr>').join('')+'</table><table role="presentation" align="right" width="280" style="margin-top:18px"><tr><td style="padding:4px;font-size:12px">Subtotal</td><td style="padding:4px;text-align:right;font-size:12px">'+money(inv.subtotal)+'</td></tr>'+(Number(inv.line_tax_amount||0)?'<tr><td style="padding:4px;font-size:12px">Item VAT</td><td style="padding:4px;text-align:right;font-size:12px">+'+money(inv.line_tax_amount)+'</td></tr>':'')+'<tr><td style="padding:4px;font-size:12px">Tax</td><td style="padding:4px;text-align:right;font-size:12px">'+money(inv.tax_amount)+'</td></tr><tr><td style="padding:4px;font-size:12px">Discount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.discount)+'</td></tr>'+(Number(inv.line_discount_amount||0)?'<tr><td style="padding:4px;font-size:12px">Item discount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.line_discount_amount)+'</td></tr>':'')+'<tr><td style="padding:4px;font-size:12px">Paid Amount</td><td style="padding:4px;text-align:right;font-size:12px">−'+money(inv.paid_amount)+'</td></tr><tr><td style="padding:9px 4px;border-top:1px solid #111;font-size:15px"><b>Total Due</b></td><td style="padding:9px 4px;border-top:1px solid #111;text-align:right;font-size:15px"><b>'+money(inv.total_due)+'</b></td></tr></table><div style="clear:both"></div></td></tr></table>';
+    }
+  }
+  html+='</div>';
+  let [msg]=await db(env,'connectx_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,recipient_type:b.recipientType||'manual',recipient_id:b.recipientId||null,invoice_id:attachedInvoiceId,from_email:cfg.from_email,to_emails:to,cc_emails:cc,bcc_emails:bcc,subject:String(b.subject).trim(),custom_body:String(b.body||''),body_html:html,provider:'brevo_api',status:'sending'})});
+  let out={messageId:'mock-msg-'+Date.now()};
+  if(env.MOCK_EMAIL!=='1'){
+    let res=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':env.BREVO_API_KEY,'content-type':'application/json'},body:JSON.stringify({sender:{name:senderName,email:cfg.from_email},replyTo:cfg.reply_to?{email:cfg.reply_to}:undefined,to:to.map(email=>({email})),...(cc.length?{cc:cc.map(email=>({email}))}:{}),...(bcc.length?{bcc:bcc.map(email=>({email}))}:{}),subject:msg.subject,htmlContent:html})});
+    out=await res.json().catch(()=>({}));
+    if(!res.ok){await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'failed',error_message:out.message||'Provider rejected message'})});return fail('Email could not be sent. Please try again later.',502)}
+  }
+  await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'sent',provider_message_id:out.messageId||null,sent_at:new Date().toISOString()})});
+  await audit(env,s,'send ConnectX email','connectx',msg.id,{to,documentType:b.documentType||null,invoiceId:b.invoiceId||null});
+  return json({ok:true,id:msg.id},201)
+ }
  if(path==='due'){
   if(!s.storeId)return fail('Shop access required.',403);
   let qs=new URL(request.url).searchParams,type=qs.get('type')||'sale',id=s.storeId;
@@ -447,7 +1261,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
       await db(env,`expenses?id=eq.${source.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({paid:Math.round((Number(source.paid)+amount)*100)/100})});
       let [upd]=await db(env,`expenses?id=eq.${source.id}&select=*`);
       let [r]=await db(env,'due_recoveries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:id,source_type:b.sourceType,source_id:b.sourceId,amount,note:b.note||null,recovered_by:s.id})});
-      await audit(env,s,'recover due',b.sourceType,b.sourceId,{amount});
+      await audit(env,s,'recover due','expense',b.sourceId,{amount,code:source.expense_code||('EXP-'+shortId(source.id)),total:source.total});
       return json({...r,remaining_due:upd?Math.round(Number(upd.due)*100)/100:Math.round((due-amount)*100)/100},201)
     }
     /* sale / purchase — optional tax & discount adjustment plus payment details.
@@ -473,12 +1287,45 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
         recBody={store_id:id,source_type:b.sourceType,source_id:b.sourceId,amount,note:b.note||null,recovered_by:s.id};
     if(payCols){recBody.payment_method=['cash','bkash','nagad','bank','other'].includes(b.paymentMethod)?b.paymentMethod:null;recBody.transaction_id=b.transactionId?String(b.transactionId).slice(0,120):null}
     let [r]=await db(env,'due_recoveries',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(recBody)});
-    await audit(env,s,'recover due',b.sourceType,b.sourceId,{amount,taxPercent,discount,paymentMethod:recBody.payment_method||null});
+    await audit(env,s,'recover due',b.sourceType+' invoice',b.sourceId,{amount,code:source.invoice_number,invoice_number:source.invoice_number,taxPercent,discount,paymentMethod:recBody.payment_method||null});
     return json({...r,remaining_due:newDue},201)
   }
  }
- if(path==='dashboard/activity-snapshot'){let id=s.storeId;if(!id)return fail('Shop access required.',403);let since=new Date(Date.now()-86400000).toISOString(),[invoices,expenses,inventory,logs,staffs]=await Promise.all([db(env,`invoices?store_id=eq.${id}&created_at=gte.${since}&select=kind,invoice_number,subtotal,paid_amount,total_due,created_at,created_by`),db(env,`expenses?store_id=eq.${id}&created_at=gte.${since}&select=id,total,paid,due,created_at,created_by`),db(env,`inventory_items?store_id=eq.${id}&select=id,item_code`),db(env,`activity_logs?store_id=eq.${id}&created_at=gte.${since}&entity_type=eq.inventory&select=action,entity_id,actor_id,created_at`),db(env,`staff?store_id=eq.${id}&select=id,user_id`)]);let users=Object.fromEntries(staffs.map(x=>[x.id,x.user_id])),items=Object.fromEntries(inventory.map(x=>[x.id,x.item_code]));let snapshots=[...invoices.map(x=>({label:x.kind==='sale'?'Sale':'Purchase',id:x.invoice_number,total:x.subtotal,paid:x.paid_amount,due:x.total_due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...expenses.map(x=>({label:'Expense',id:'EXP-'+shortId(x.id),total:x.total,paid:x.paid,due:x.due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...logs.filter(x=>items[x.entity_id]).map(x=>({label:'Inventory',id:items[x.entity_id],total:'—',paid:'—',due:'—',submittedBy:users[x.actor_id]||'Administrator',createdAt:x.created_at}))].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return json(snapshots)}
- if(path==='dashboard'){let id=s.storeId;if(!id)return fail('Choose a store.',400);let [store]=await db(env,`stores?id=eq.${id}&select=low_stock_threshold`);let [sales,purchase,expense,low,recent]=await Promise.all([db(env,`invoices?store_id=eq.${id}&kind=eq.sale&select=subtotal,total_due,invoice_date`),db(env,`invoices?store_id=eq.${id}&kind=eq.purchase&select=subtotal,invoice_date`),db(env,`expenses?store_id=eq.${id}&select=total,expense_date`),db(env,`inventory_items?store_id=eq.${id}&active=is.true&select=*&total_stock=lte.${store.low_stock_threshold}`),db(env,`activity_logs?store_id=eq.${id}&select=*&order=created_at.desc&limit=10`)]);let sum=a=>a.reduce((x,y)=>x+Number(y.subtotal??y.total),0),due=a=>a.reduce((x,y)=>x+Number(y.total_due||0),0),today=new Date().toISOString().slice(0,10);return json({sales:{lifetime:sum(sales),today:sum(sales.filter(x=>x.invoice_date===today)),dueLifetime:due(sales),dueToday:due(sales.filter(x=>x.invoice_date===today))},purchase:{lifetime:sum(purchase),today:sum(purchase.filter(x=>x.invoice_date===today))},expense:{lifetime:sum(expense),today:sum(expense.filter(x=>x.expense_date===today))},lowStock:low,recent});}
+ if(path==='dashboard/activity-snapshot'){let id=s.storeId;if(!id)return fail('Shop access required.',403);let since=new Date(Date.now()-86400000).toISOString(),[invoices,expenses,inventory,logs,staffs,recentReturns,recentExchanges]=await Promise.all([db(env,`invoices?store_id=eq.${id}&created_at=gte.${since}&select=kind,invoice_number,subtotal,paid_amount,total_due,created_at,created_by`),db(env,`expenses?store_id=eq.${id}&created_at=gte.${since}&select=id,total,paid,due,created_at,created_by`),db(env,`inventory_items?store_id=eq.${id}&select=id,item_code`),db(env,`activity_logs?store_id=eq.${id}&created_at=gte.${since}&entity_type=eq.inventory&select=action,entity_id,actor_id,created_at`),db(env,`staff?store_id=eq.${id}&select=id,user_id`),db(env,`returns?store_id=eq.${id}&created_at=gte.${since}&select=return_number,total_return_amount,refunded_amount,created_at,created_by`).catch(()=>[]),db(env,`exchanges?store_id=eq.${id}&created_at=gte.${since}&select=exchange_number,new_items_total,difference_amount,created_at,created_by`).catch(()=>[])]);let users=Object.fromEntries(staffs.map(x=>[x.id,x.user_id])),items=Object.fromEntries(inventory.map(x=>[x.id,x.item_code]));let snapshots=[...invoices.map(x=>({label:x.kind==='sale'?'Sale':'Purchase',id:x.invoice_number,total:x.subtotal,paid:x.paid_amount,due:x.total_due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...recentReturns.map(x=>({label:'Return',id:x.return_number,total:x.total_return_amount,paid:x.refunded_amount,due:0,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...recentExchanges.map(x=>({label:'Exchange',id:x.exchange_number,total:x.new_items_total,paid:x.new_items_total,due:x.difference_amount,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...expenses.map(x=>({label:'Expense',id:'EXP-'+shortId(x.id),total:x.total,paid:x.paid,due:x.due,submittedBy:users[x.created_by]||'Administrator',createdAt:x.created_at})),...logs.filter(x=>items[x.entity_id]).map(x=>({label:'Inventory',id:items[x.entity_id],total:'—',paid:'—',due:'—',submittedBy:users[x.actor_id]||'Administrator',createdAt:x.created_at}))].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return json(snapshots)}
+ if(path==='dashboard'){
+  let id=s.storeId;if(!id)return fail('Choose a store.',400);
+  let [store]=await db(env,`stores?id=eq.${id}&select=low_stock_threshold`);
+  let [sales,purchase,expense,returnsList,exchangesList,salariesList,low,recent]=await Promise.all([
+    db(env,`invoices?store_id=eq.${id}&kind=eq.sale&select=subtotal,total_due,invoice_date`),
+    db(env,`invoices?store_id=eq.${id}&kind=eq.purchase&select=subtotal,invoice_date`),
+    db(env,`expenses?store_id=eq.${id}&select=total,expense_date`),
+    db(env,`returns?store_id=eq.${id}&select=total_return_amount,refunded_amount,return_date`).catch(()=>[]),
+    db(env,`exchanges?store_id=eq.${id}&select=returned_total,new_items_total,difference_amount,action_type,exchange_date`).catch(()=>[]),
+    db(env,`staff_salary_invoices?store_id=eq.${id}&select=total,paid,due,created_at`).catch(()=>[]),
+    db(env,`inventory_items?store_id=eq.${id}&active=is.true&select=*&total_stock=lte.${store.low_stock_threshold}`),
+    db(env,`activity_logs?store_id=eq.${id}&select=*&order=created_at.desc&limit=10`)
+  ]);
+  let sum=a=>a.reduce((x,y)=>x+Number(y.subtotal??y.total??0),0),
+      due=a=>a.reduce((x,y)=>x+Number(y.total_due??y.due??0),0),
+      today=new Date().toISOString().slice(0,10);
+
+  let returnSum=a=>a.reduce((x,y)=>x+Number(y.total_return_amount||0),0);
+  let refundSum=a=>a.reduce((x,y)=>x+Number(y.refunded_amount||0),0);
+  let exchangeSum=a=>a.reduce((x,y)=>x+Number(y.new_items_total||0),0);
+  let salarySum=a=>a.reduce((x,y)=>x+Number(y.paid||y.total||0),0);
+
+  return json({
+    sales:{lifetime:sum(sales),today:sum(sales.filter(x=>x.invoice_date===today)),dueLifetime:due(sales),dueToday:due(sales.filter(x=>x.invoice_date===today))},
+    purchase:{lifetime:sum(purchase),today:sum(purchase.filter(x=>x.invoice_date===today))},
+    expense:{lifetime:sum(expense),today:sum(expense.filter(x=>x.expense_date===today))},
+    returns:{lifetime:returnSum(returnsList),today:returnSum(returnsList.filter(x=>x.return_date===today)),countLifetime:returnsList.length,countToday:returnsList.filter(x=>x.return_date===today).length},
+    refunds:{lifetime:refundSum(returnsList),today:refundSum(returnsList.filter(x=>x.return_date===today))},
+    exchanges:{lifetime:exchangeSum(exchangesList),today:exchangeSum(exchangesList.filter(x=>x.exchange_date===today)),countLifetime:exchangesList.length,countToday:exchangesList.filter(x=>x.exchange_date===today).length},
+    salary:{lifetime:salarySum(salariesList),today:salarySum(salariesList.filter(x=>String(x.created_at||'').slice(0,10)===today))},
+    lowStock:low,
+    recent
+  });
+ }
 
 
  /* Notifications — SHOP scope only: stock, overdue invoices/expenses, business health. Never administrator-panel items. */
@@ -761,13 +1608,14 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
     let [r]=await db(env,'vaultium_files',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(row)});
     out.push(r);
   }
+  await audit(env,s,'upload file','vaultium',null,{filenames:files.map(f=>f.name),count:files.length,invoice_number:invoiceNumber,expense_code:expenseCode});
   return json(out,201);
  }
  if(path.match(/^vaultium\/file\/[^/]+$/)&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[2],inline=new URL(request.url).searchParams.get('view')==='1';let [file]=await db(env,`vaultium_files?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);if(!env.VAULTIUM)return fail('Vaultium R2 bucket is not configured.',503);let obj=await env.VAULTIUM.get(file.r2_key);if(!obj)return fail('File missing from storage.',404);let disposition=(inline?'inline':'attachment')+'; filename="'+encodeURIComponent(file.filename)+'"';return new Response(obj.body,{headers:{'content-type':file.content_type||'application/octet-stream','content-disposition':disposition,'cache-control':'private'}})}
- if(path==='vaultium/delete'&&method==='POST'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','delete'))return fail('Permission denied.',403);let b=await body(request);if(!b.id)return fail('File id required.',400);let [file]=await db(env,`vaultium_files?id=eq.${b.id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);try{await env.VAULTIUM.delete(file.r2_key)}catch{}await db(env,`vaultium_files?id=eq.${file.id}`,{method:'DELETE'});return json({ok:true})}
+ if(path==='vaultium/delete'&&method==='POST'){if(!s.storeId)return fail('Shop access required.',403);if(!allowed(s,'vaultium','delete'))return fail('Permission denied.',403);let b=await body(request);if(!b.id)return fail('File id required.',400);let [file]=await db(env,`vaultium_files?id=eq.${b.id}&store_id=eq.${s.storeId}&select=*`);if(!file)return fail('File not found.',404);try{await env.VAULTIUM.delete(file.r2_key)}catch{}await db(env,`vaultium_files?id=eq.${file.id}`,{method:'DELETE'});await audit(env,s,'delete file','vaultium',file.id,{filename:file.filename,invoice_number:file.invoice_number,expense_code:file.expense_code});return json({ok:true})}
  if(path==='platform/vaultium'&&s.role==='owner'&&method==='GET'){let [rows,stores,admins,ents,addons]=await Promise.all([db(env,'vaultium_files?select=store_id,admin_id,size_bytes'),db(env,'stores?select=id,shop_code,admin_id'),db(env,'administrators?select=id,admin_code,name'),db(env,'current_entitlements?select=admin_id,vaultium_gb,status,expires_at'),db(env,'addon_purchases?addon_key=eq.vaultium&select=admin_id,status,expires_at,validity_days,daily_limit&order=created_at.desc')]);let used=rows.reduce((n,r)=>n+Number(r.size_bytes||0),0);let storeMap=Object.fromEntries(stores.map(x=>[x.id,x])),adminMap=Object.fromEntries(admins.map(x=>[x.id,x]));let entMap={};for(const e of ents){if(!entMap[e.admin_id]||(Number(entMap[e.admin_id].gb||0)<=Number(e.vaultium_gb||0)))entMap[e.admin_id]={gb:Number(e.vaultium_gb||0),expires:e.expires_at,status:e.status}}let addonMap={};for(const a of addons){if(!addonMap[a.admin_id])addonMap[a.admin_id]=a}let byStore={};for(const r of rows){if(!r.store_id)continue;const s=storeMap[r.store_id];if(!s)continue;byStore[r.store_id]=(byStore[r.store_id]||0)+Number(r.size_bytes||0)}let breakdown=Object.entries(byStore).map(([sid,bytes])=>{const s=storeMap[sid]||{},a=adminMap[s.admin_id]||{},ent=entMap[s.admin_id],addon=addonMap[s.admin_id];let limit=Math.max(ent?.gb||0,Number(addon?.daily_limit||0));let expires=addon?.status==='active'?addon.expires_at:ent?.expires||null;let status=limit>0?(expires&&new Date(expires)>new Date()?'Active':'Expired'):'None';return {store_id:sid,shop_code:s.shop_code||null,admin_code:a.admin_code||null,admin_name:a.name||null,used:bytes,usedGB:(bytes/GB).toFixed(2),limit,expires,status}}).sort((a,b)=>b.used-a.used);return json({r2Binding:!!env.VAULTIUM,used,usedGB:(used/GB).toFixed(2),files:rows.length,breakdown})}
 
  if(path==='invoices/by-party'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let q=new URL(request.url).searchParams.get('kind'),party=new URL(request.url).searchParams.get('party_id'),section=q==='purchase'?'purchase':'sales';if(!['sale','purchase'].includes(q)||!allowed(s,section,'view'))return fail('Permission denied.',403);if(!party)return fail('Party id is required.',400);return json(await db(env,`invoices?store_id=eq.${s.storeId}&kind=eq.${q}&party_id=eq.${party}&select=*,invoice_lines(*,inventory_items(item_code,description,unit))&order=created_at.desc`))}
- let [kind,id]=path.split('/');let table=tables[kind];if(table){let section=perms[kind];if(!allowed(s,section,method==='GET'?'view':method==='POST'?'add':method==='PATCH'?'edit':'delete'))return fail('Permission denied.',403);let filter=`store_id=eq.${s.storeId}`;if(method==='GET'){let records=await db(env,`${table}?${filter}&select=*&order=created_at.desc`);return json(kind==='staff'?records.map(publicStaff):records)}if(method==='POST'){let b=await body(request);if(kind==='staff'){if(!b.password||b.password.length<10)return fail('Staff password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password;b.permissions=normalizePermissions(b.permissions)}if(kind==='inventory'&&!String(b.item_code||'').trim())delete b.item_code;let [r]=await db(env,table,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...clean(b),store_id:s.storeId,...(kind==='staff'||kind==='supplier'||kind==='customer'||kind==='inventory'?{}:{created_by:s.id})})});await audit(env,s,'create',kind,r.id);return json(kind==='staff'?publicStaff(r):r,201)}if(!id)return fail('Record ID required.');if(method==='PATCH'){let b=await body(request);if(kind==='staff'&&b.password){if(b.password.length<10)return fail('Staff password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password}if(kind==='staff'&&b.permissions)b.permissions=normalizePermissions(b.permissions);let [r]=await db(env,`${table}?id=eq.${id}&${filter}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});await audit(env,s,'update',kind,id);return json(kind==='staff'?publicStaff(r):r)}if(method==='DELETE'){await db(env,`${table}?id=eq.${id}&${filter}`,{method:'DELETE'});await audit(env,s,'delete',kind,id);return json({ok:true})}}
+ let [kind,id]=path.split('/');let table=tables[kind];if(table){let section=perms[kind];if(!allowed(s,section,method==='GET'?'view':method==='POST'?'add':method==='PATCH'?'edit':'delete'))return fail('Permission denied.',403);let filter=`store_id=eq.${s.storeId}`;if(method==='GET'){let records=await db(env,`${table}?${filter}&select=*&order=created_at.desc`);return json(kind==='staff'?records.map(publicStaff):records)}if(method==='POST'){let b=await body(request);if(kind==='staff'){if(!b.password||b.password.length<10)return fail('Staff password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password;b.permissions=normalizePermissions(b.permissions)}if(kind==='inventory'&&!String(b.item_code||'').trim())delete b.item_code;let [r]=await db(env,table,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({...clean(b),store_id:s.storeId,...(kind==='staff'||kind==='supplier'||kind==='customer'||kind==='inventory'?{}:{created_by:s.id})})});await audit(env,s,'create',kind,r.id,{code:r.item_code||r.customer_code||r.supplier_code||r.expense_code||r.user_id||null,name:r.name||r.description||r.full_name||r.category||null,total:r.total||r.sale_price||null});return json(kind==='staff'?publicStaff(r):r,201)}if(!id)return fail('Record ID required.');if(method==='PATCH'){let b=await body(request);if(kind==='staff'&&b.password){if(b.password.length<10)return fail('Staff password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password}if(kind==='staff'&&b.permissions)b.permissions=normalizePermissions(b.permissions);let [r]=await db(env,`${table}?id=eq.${id}&${filter}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});await audit(env,s,'update',kind,id,{code:r.item_code||r.customer_code||r.supplier_code||r.expense_code||r.user_id||null,name:r.name||r.description||r.full_name||r.category||null,fields:Object.keys(clean(b))});return json(kind==='staff'?publicStaff(r):r)}if(method==='DELETE'){let [target]=await db(env,`${table}?id=eq.${id}&${filter}&select=*`);await db(env,`${table}?id=eq.${id}&${filter}`,{method:'DELETE'});await audit(env,s,'delete',kind,id,{code:target?.item_code||target?.customer_code||target?.supplier_code||target?.expense_code||target?.user_id||null,name:target?.name||target?.description||target?.full_name||target?.category||null});return json({ok:true})}}
  return fail('Endpoint not found.',404);
  }catch(e){console.error(e);return fail(e.message||'Unexpected server error.',500)}}

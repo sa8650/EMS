@@ -1,3 +1,14 @@
+import qrcode from './qrcode.mjs';
+const getQrSvg=(data,margin=1)=>{
+  try{
+    let qr=qrcode(0,'M');
+    qr.addData(data);
+    qr.make();
+    return qr.createSvgTag({scalable:true,margin});
+  }catch(e){
+    return `<img src="https://api.qrserver.com/v1/create-qr-code/?size=165x165&data=${encodeURIComponent(data)}" alt="TrueBill QR code">`;
+  }
+};
 const $=s=>document.querySelector(s), app=$('#app');let state=JSON.parse(localStorage.getItem('ems.session')||'null');const api=async(path,opt={})=>{let r=await fetch('/api/'+path,{...opt,headers:{'content-type':'application/json',...(state?{authorization:'Bearer '+state.token}:{}),...(opt.headers||{})}}),x=await r.json();if(!r.ok)throw Error(x.error||'Request failed');return x};
 const apiUpload=async(path,formData)=>{let r=await fetch('/api/'+path,{method:'POST',headers:state?{authorization:'Bearer '+state.token}:{},body:formData});let x=await r.json();if(!r.ok)throw Error(x.error||'Upload failed');return x};const esc=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmtAI=t=>{let s=esc(String(t??''));let lines=s.split('\n'),out=[],ul=[],ol=[];const flush=()=>{if(ul.length){out.push('<ul class="aimd">'+ul.map(x=>`<li>${x}</li>`).join('')+'</ul>');ul=[]}if(ol.length){out.push('<ol class="aimd aimdo">'+ol.map(x=>`<li>${x}</li>`).join('')+'</ol>');ol=[]}};for(let line of lines){let t2=line.trim();if(!t2){flush();out.push('');continue}if(/^[-*•]\s/.test(t2)){flush();ul.push(t2.replace(/^[-*•]\s+/,''));continue}if(/^#{1,3}\s/.test(t2)){flush();let lvl=(t2.match(/^#+/)||[''])[0].length;out.push(`<b class="aimd-h${lvl}">${t2.replace(/^#+\s*/,'')}</b>`);continue}if(/^\d+[.)]\s/.test(t2)){flush();ol.push(t2.replace(/^\d+[.)]\s+/,''));continue}flush();out.push(t2)}flush();return out.map(x=>x===''?'<br>':x).join('').replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')};
@@ -18,6 +29,15 @@ function planCardHtml(p,o={}){const featured=!!o.featured,free=Number(p.price)==
   const info=free?'This plan is free — activate it instantly and start running your shop on EMS.':`This plan covers one license for ${p.duration_months} months, activated after bKash / Nagad payment verification.`;
   return `<article class="plan${featured?' featured':''}"><div class="inner">${featured?'<em class="plantag">Featured plan</em>':''}<span class="pricing"><span>${free?'Free':'৳ '+money(p.price)} <small>/ ${p.duration_months} mo</small></span></span><p class="title">${esc(p.title)}</p><p class="info">${info}</p><ul class="features">${rows.map(r=>`<li${r[1]?'':' class="off"'}><span class="icon">${r[1]?PLAN_ICON_ON:PLAN_ICON_OFF}</span><span>${r[0]}</span></li>`).join('')}</ul><div class="action"><button type="button" class="button" ${attr}="${p.id}">${label}</button></div></div></article>`}
 let sessionTimer,permissionSyncedFor=null,entitlementSyncedFor=null;function toast(x){let e=$('#toast');e.textContent=x;e.style.display='block';setTimeout(()=>e.style.display='none',3000)}function sessionExpiry(token){try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp*1000}catch{return 0}}function scheduleLogout(){clearTimeout(sessionTimer);if(!state?.token)return;let ms=sessionExpiry(state.token)-Date.now();if(ms<=0)return logout();sessionTimer=setTimeout(()=>{toast('Your session has expired. Please sign in again.');setTimeout(logout,900)},ms)}function save(s){state=s;localStorage.setItem('ems.session',JSON.stringify(s));scheduleLogout()}function logout(){clearTimeout(sessionTimer);localStorage.removeItem('ems.session');localStorage.removeItem('ems.admin.return');state=null;location.reload()}
+function getVerifyToken(){
+  let p=new URLSearchParams(location.search).get('verify');
+  if(p)return p.trim();
+  let m=location.pathname.match(/\/(?:invoice|verify)\/([a-zA-Z0-9_-]+)/);
+  if(m)return m[1].trim();
+  let h=location.hash.match(/(?:verify|invoice)=([a-zA-Z0-9_-]+)/);
+  if(h)return h[1].trim();
+  return null;
+}
 async function verificationPage(token){
   const shell = (inner)=>`<header class="sitehead"><a class="wordmark" href="/"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=contact">Contact</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main class="verifyPage">${inner}</main><footer class="sitefoot"><div class="wordmark"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><span>© ${new Date().getFullYear()} DoxTox. All rights reserved.</span><span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></span></footer><div class="authlayer" id="authlayer" hidden></div>`;
   const wire = ()=>{
@@ -26,15 +46,32 @@ async function verificationPage(token){
     const e=$('#emsLogin'); if(e)e.onclick=()=>showEmsLogin();
     api('public/branding').then(b=>{document.title=(b.website_name||'EMS V1')+' | DoxTox';document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});
   };
-  app.innerHTML = shell(`<section class="verifyCard verifyLoading"><div class="verifyStatus"><svg class="verifyRing" viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="24"/><circle class="spin" cx="26" cy="26" r="24"/></svg><h2>Checking invoice</h2><p>Verifying the official EMS record…</p></div></section>`);
+  app.innerHTML = shell(`<section class="verifyCard verifyLoading"><div class="verifyStatus"><svg class="verifyRing" viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="24"/><circle class="spin" cx="26" cy="26" r="24"/></svg><h2>Checking record</h2><p>Verifying the official EMS record…</p></div></section>`);
   wire();
   try{
-    let d=await api('public/invoice/'+encodeURIComponent(token)),r=d.invoice,p=d.party,shop=r.stores,paid=Number(r.total_due)<=0;
-    const inner=`<section class="verifyCard"><div class="verifyStatus success"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37 19"/></svg><h2>Invoice Verified</h2><p>This is an authentic EMS invoice record verified by TrueBill.</p></div><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(shop.name)}</h2><p>${esc(shop.address||'')}</p><p>${esc(shop.phone||'')}${shop.phone2?' · '+esc(shop.phone2):''}</p><p>${esc(shop.email||'')}</p>${shop.website?`<p>${esc(shop.website)}</p>`:''}</div><div class="invoiceTitleRight"><small class="verifiedLabel">✓ OFFICIAL EMS VERIFICATION</small><h1>${r.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE'}</h1><span># ${esc(r.invoice_number)}</span><b class="invoiceStatus verified">Verified</b><em class="verifyPayment ${paid?'paid':'due'}">${paid?'Paid':'Payment due'}</em></div></header><div class="verifyCols"><div><h3>${r.kind==='sale'?'Bill to':'Supplier'}</h3><p><b>ID:</b> ${esc(p?.customer_code||p?.supplier_code||(r.custom_party_name?'Custom customer':'Custom / not registered'))}</p><p><b>Name:</b> ${esc(p?.name||r.custom_party_name||'—')}</p><p><b>Address:</b> ${esc(p?.address||r.custom_party_address||'—')}</p><p><b>Phone:</b> ${esc(p?.phone||r.custom_party_phone||'—')}</p></div><div><h3>Invoice details</h3><p><b>Date:</b> ${esc(r.invoice_date)}</p><p><b>Payment:</b> ${esc(r.payment_method)}</p><p><b>Transaction:</b> ${esc(r.transaction_id||'—')}</p></div></div><div class="tablewrap"><table class="printItems"><thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Unit price</th><th>VAT</th><th>Disc.</th><th>Total</th></tr></thead><tbody>${r.invoice_lines.map(x=>`<tr><td>${esc(x.inventory_items?.description||'Item')}<br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td>${esc(x.quantity)}</td><td>${esc(x.inventory_items?.unit||'')}</td><td>${invoiceMoney(x.unit_price)}</td><td>${Number(x.tax_percent||0)?esc(x.tax_percent)+'%':'—'}</td><td>${Number(x.discount||0)?'−'+invoiceMoney(x.discount):'—'}</td><td>${invoiceMoney(x.line_total)}</td></tr>`).join('')}</tbody></table></div><div class="verifyTotal"><p>Subtotal <b>${invoiceMoney(r.subtotal)}</b></p>${Number(r.line_tax_amount||0)?`<p>Item VAT <b>+${invoiceMoney(r.line_tax_amount)}</b></p>`:''}<p>Tax <b>${invoiceMoney(r.tax_amount)}</b></p><p>Discount <b>${invoiceMoney(r.discount)}</b></p>${Number(r.line_discount_amount||0)?`<p>Item discount <b>−${invoiceMoney(r.line_discount_amount)}</b></p>`:''}<p>Paid <b>${invoiceMoney(r.paid_amount)}</b></p><p class="dueLine">Total due <b>${invoiceMoney(r.total_due)}</b></p></div><footer>Verified by <span data-brand-name>EMS V1</span> · <span data-powered-by>DoxTox</span></footer></section>`;
+    let d=await api('public/invoice/'+encodeURIComponent(token));
+    let inner='';
+    let kind = d.type || d.record_type || (d.return ? 'return' : d.exchange ? 'exchange' : 'invoice');
+    if(kind==='return' || d.return){
+      let ret=d.return || d.invoice,p=d.party,shop=ret.stores||{},origInv=ret.invoices||d.invoice||{};
+      inner=`<section class="verifyCard"><div class="verifyStatus success"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37 19"/></svg><h2>Return Slip Verified</h2><p>This is an authentic EMS return & refund record verified by TrueBill.</p></div><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(shop.name||'EMS Store')}</h2><p>${esc(shop.address||'')}</p><p>${esc(shop.phone||'')}${shop.phone2?' · '+esc(shop.phone2):''}</p><p>${esc(shop.email||'')}</p>${shop.website?`<p>${esc(shop.website)}</p>`:''}</div><div class="invoiceTitleRight"><small class="verifiedLabel">✓ OFFICIAL EMS VERIFICATION</small><h1 style="color:#b91c1c">RETURN SLIP</h1><span># ${esc(ret.return_number)}</span><b class="invoiceStatus verified">Verified</b><em class="verifyPayment paid">Refunded</em></div></header><div class="verifyCols"><div><h3>Customer</h3><p><b>ID:</b> ${esc(p?.customer_code||'Custom customer')}</p><p><b>Name:</b> ${esc(p?.name||ret.customer_name||'—')}</p><p><b>Address:</b> ${esc(p?.address||'—')}</p><p><b>Phone:</b> ${esc(p?.phone||'—')}</p></div><div><h3>Return details</h3><p><b>Date:</b> ${esc(ret.return_date)}</p><p><b>Original Invoice:</b> ${esc(origInv?.invoice_number||'—')}</p><p><b>Refund Method:</b> ${esc(ret.refund_method||ret.payment_method||'Cash')}</p><p><b>Reason:</b> ${esc(ret.return_items?.[0]?.reason||ret.reason||'Customer Return')}</p></div></div><div class="tablewrap"><table class="printItems"><thead><tr><th>Item</th><th>Condition</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${(ret.return_items||[]).map(x=>`<tr><td>${esc(x.inventory_items?.description||'Item')}<br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td style="text-transform:capitalize">${esc(x.condition||'sellable')}</td><td>${esc(x.quantity)} ${esc(x.inventory_items?.unit||'')}</td><td>${invoiceMoney(x.unit_price)}</td><td>${invoiceMoney(x.return_amount||x.total_amount||x.line_total)}</td></tr>`).join('')}</tbody></table></div><div class="verifyTotal"><p>Subtotal <b>${invoiceMoney(ret.subtotal||ret.total_return_amount)}</b></p>${Number(ret.penalty_amount||0)?`<p>Penalty / Deduction <b>−${invoiceMoney(ret.penalty_amount)}</b></p>`:''}<p class="dueLine">Refunded Amount <b>${invoiceMoney(ret.refunded_amount||ret.total_return_amount)}</b></p></div><footer>Verified by <span data-brand-name>EMS V1</span> · <span data-powered-by>DoxTox</span></footer></section>`;
+    } else if(kind==='exchange' || d.exchange){
+      let exc=d.exchange || d.invoice,p=d.party,shop=exc.stores||{},origInv=exc.invoices||d.invoice||{};
+      let actionLabel=exc.action_type==='customer_pays'?'Additional Payment Paid':exc.action_type==='shop_refunds'?'Store Refunded':'Even Exchange';
+      let retItems=(exc.exchange_items||[]).filter(x=>x.item_type==='returned');
+      let newItems=(exc.exchange_items||[]).filter(x=>x.item_type==='new');
+      inner=`<section class="verifyCard"><div class="verifyStatus success"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37 19"/></svg><h2>Exchange Invoice Verified</h2><p>This is an authentic EMS exchange invoice record verified by TrueBill.</p></div><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(shop.name||'EMS Store')}</h2><p>${esc(shop.address||'')}</p><p>${esc(shop.phone||'')}${shop.phone2?' · '+esc(shop.phone2):''}</p><p>${esc(shop.email||'')}</p>${shop.website?`<p>${esc(shop.website)}</p>`:''}</div><div class="invoiceTitleRight"><small class="verifiedLabel">✓ OFFICIAL EMS VERIFICATION</small><h1 style="color:#d97706">EXCHANGE INVOICE</h1><span># ${esc(exc.exchange_number)}</span><b class="invoiceStatus verified">Verified</b><em class="verifyPayment paid">${actionLabel}</em></div></header><div class="verifyCols"><div><h3>Customer</h3><p><b>ID:</b> ${esc(p?.customer_code||'Custom customer')}</p><p><b>Name:</b> ${esc(p?.name||exc.customer_name||'—')}</p><p><b>Address:</b> ${esc(p?.address||'—')}</p><p><b>Phone:</b> ${esc(p?.phone||'—')}</p></div><div><h3>Exchange details</h3><p><b>Date:</b> ${esc(exc.exchange_date)}</p><p><b>Original Invoice:</b> ${esc(origInv?.invoice_number||'—')}</p><p><b>Settlement:</b> ${esc(exc.payment_method||'Cash')}</p><p><b>Action:</b> ${actionLabel}</p></div></div>`+
+      (retItems.length?`<h4 style="margin:16px 0 6px;color:#b91c1c">Returned Items</h4><div class="tablewrap"><table class="printItems"><thead><tr><th>Item</th><th>Condition</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${retItems.map(x=>`<tr><td>${esc(x.inventory_items?.description||'Item')}<br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td style="text-transform:capitalize">${esc(x.condition||'sellable')}</td><td>${esc(x.quantity)}</td><td>${invoiceMoney(x.unit_price)}</td><td>${invoiceMoney(x.total_amount)}</td></tr>`).join('')}</tbody></table></div>`:'')+
+      (newItems.length?`<h4 style="margin:16px 0 6px;color:#047857">Replacement / New Items</h4><div class="tablewrap"><table class="printItems"><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${newItems.map(x=>`<tr><td>${esc(x.inventory_items?.description||'Item')}<br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td>${esc(x.quantity)}</td><td>${invoiceMoney(x.unit_price)}</td><td>${invoiceMoney(x.total_amount)}</td></tr>`).join('')}</tbody></table></div>`:'')+
+      `<div class="verifyTotal"><p>Returned Items Total <b>${invoiceMoney(exc.returned_total)}</b></p><p>Replacement Total <b>${invoiceMoney(exc.new_items_total)}</b></p><p class="dueLine">Difference (${actionLabel}) <b>${invoiceMoney(exc.difference_amount)}</b></p></div><footer>Verified by <span data-brand-name>EMS V1</span> · <span data-powered-by>DoxTox</span></footer></section>`;
+    } else {
+      let r=d.invoice,p=d.party,shop=r.stores||{},paid=Number(r.total_due)<=0;
+      inner=`<section class="verifyCard"><div class="verifyStatus success"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L37 19"/></svg><h2>Invoice Verified</h2><p>This is an authentic EMS invoice record verified by TrueBill.</p></div><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(shop.name||'EMS Store')}</h2><p>${esc(shop.address||'')}</p><p>${esc(shop.phone||'')}${shop.phone2?' · '+esc(shop.phone2):''}</p><p>${esc(shop.email||'')}</p>${shop.website?`<p>${esc(shop.website)}</p>`:''}</div><div class="invoiceTitleRight"><small class="verifiedLabel">✓ OFFICIAL EMS VERIFICATION</small><h1>${r.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE'}</h1><span># ${esc(r.invoice_number)}</span><b class="invoiceStatus verified">Verified</b><em class="verifyPayment ${paid?'paid':'due'}">${paid?'Paid':'Payment due'}</em></div></header><div class="verifyCols"><div><h3>${r.kind==='sale'?'Bill to':'Supplier'}</h3><p><b>ID:</b> ${esc(p?.customer_code||p?.supplier_code||(r.custom_party_name?'Custom customer':'Custom / not registered'))}</p><p><b>Name:</b> ${esc(p?.name||r.custom_party_name||'—')}</p><p><b>Address:</b> ${esc(p?.address||r.custom_party_address||'—')}</p><p><b>Phone:</b> ${esc(p?.phone||r.custom_party_phone||'—')}</p></div><div><h3>Invoice details</h3><p><b>Date:</b> ${esc(r.invoice_date)}</p><p><b>Payment:</b> ${esc(r.payment_method)}</p><p><b>Transaction:</b> ${esc(r.transaction_id||'—')}</p></div></div><div class="tablewrap"><table class="printItems"><thead><tr><th>Item</th><th>Qty</th><th>Unit</th><th>Unit price</th><th>VAT</th><th>Disc.</th><th>Total</th></tr></thead><tbody>${(r.invoice_lines||[]).map(x=>`<tr><td>${esc(x.inventory_items?.description||'Item')}<br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td>${esc(x.quantity)}</td><td>${esc(x.inventory_items?.unit||'')}</td><td>${invoiceMoney(x.unit_price)}</td><td>${Number(x.tax_percent||0)?esc(x.tax_percent)+'%':'—'}</td><td>${Number(x.discount||0)?'−'+invoiceMoney(x.discount):'—'}</td><td>${invoiceMoney(x.line_total)}</td></tr>`).join('')}</tbody></table></div><div class="verifyTotal"><p>Subtotal <b>${invoiceMoney(r.subtotal)}</b></p>${Number(r.line_tax_amount||0)?`<p>Item VAT <b>+${invoiceMoney(r.line_tax_amount)}</b></p>`:''}<p>Tax <b>${invoiceMoney(r.tax_amount)}</b></p><p>Discount <b>${invoiceMoney(r.discount)}</b></p>${Number(r.line_discount_amount||0)?`<p>Item discount <b>−${invoiceMoney(r.line_discount_amount)}</b></p>`:''}<p>Paid <b>${invoiceMoney(r.paid_amount)}</b></p><p class="dueLine">Total due <b>${invoiceMoney(r.total_due)}</b></p></div><footer>Verified by <span data-brand-name>EMS V1</span> · <span data-powered-by>DoxTox</span></footer></section>`;
+    }
     app.innerHTML = shell(inner);
     wire();
   }catch(e){
-    app.innerHTML = shell(`<section class="verifyCard"><div class="verifyStatus error"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M18 18l16 16M34 18L18 34"/></svg><h2>Invoice Not Verified</h2><p>${esc(e.message||'This record could not be verified.')}</p><a class="verifyHome" href="/">Return to EMS</a></div></section>`);
+    app.innerHTML = shell(`<section class="verifyCard"><div class="verifyStatus error"><svg class="verifyCheck" viewBox="0 0 52 52"><circle cx="26" cy="26" r="24"/><path d="M18 18l16 16M34 18L18 34"/></svg><h2>Record Not Verified</h2><p>${esc(e.message||'This record could not be verified.')}</p><a class="verifyHome" href="/">Return to EMS</a></div></section>`);
     wire();
   }
 }
@@ -65,7 +102,7 @@ async function publicPage(page){
   }catch(e){root.innerHTML=`<section class="publicHero"><h1>Page unavailable</h1><p>${esc(e.message)}</p></section>`}
 }
 
-function login(){let verifyToken=new URLSearchParams(location.search).get('verify'),publicRoute=new URLSearchParams(location.search).get('page');if(verifyToken)return verificationPage(verifyToken);if(publicRoute)return publicPage(publicRoute);app.innerHTML=`<header class="sitehead"><a class="wordmark" href="#top"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main id="top" class="website"><section class="hero"><div><p class="eyebrow">MULTI-SHOP MANAGEMENT, MADE SIMPLE</p><h1>Run every part of your shop with clarity.</h1><p class="lead">EMS V1 gives owners and staff one secure place for inventory, purchases, sales, expenses, customers, and store operations.</p><div class="heroactions"><button id="heroStart">Create administrator account</button><button class="secondary" id="heroShop">Shop staff login</button></div><div class="trust"><span>✓ Custom secure credentials</span><span>✓ Cloud-based access</span><span>✓ BDT pricing</span></div></div><div class="heroart"><div class="screen"><div class="screenbar"><i></i><i></i><i></i></div><p>Today at a glance</p><div class="artcards"><b>৳ 24,860<small>Sales today</small></b><b>18<small>Low-stock items</small></b></div><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>Sales performance</span></div></div></section><section class="logos"><span>Built for retail shops</span><span>Grocery &amp; general stores</span><span>Pharmacy &amp; cosmetics</span><span>Electronics &amp; wholesale</span></section><section id="features" class="section"><p class="eyebrow">ONE SYSTEM, EVERYDAY OPERATIONS</p><h2>Everything a growing shop needs</h2><p class="sectionlead">Designed for shop owners who need accurate records, controlled staff access, and practical decisions—not complicated software.</p><div class="featuregrid"><article><div class="featureicon">${lucide('store')}</div><h3>Multi-store control</h3><p>Create and manage multiple stores from one administrator account. Track license status, activation, and connected devices per shop.</p></article><article><div class="featureicon">${lucide('receipt')}</div><h3>Sales &amp; purchase invoices</h3><p>Prepare invoices that calculate tax, discount, paid amount, and due automatically — with full payment and transaction details.</p></article><article><div class="featureicon">${lucide('package')}</div><h3>Live inventory</h3><p>Stock updates instantly when purchases or sales are posted. Low-stock indicators help you replenish before items run out.</p></article><article><div class="featureicon">${lucide('users')}</div><h3>Customers &amp; suppliers</h3><p>Keep contact details organized and quickly select a customer or supplier with a smart search when creating invoices.</p></article><article><div class="featureicon">${lucide('wallet')}</div><h3>Expense tracking</h3><p>Record shop expenses with paid and due amounts, so you always know exactly where your money is going.</p></article><article><div class="featureicon">${lucide('coins')}</div><h3>Due recovery</h3><p>Track outstanding dues on sales, purchases, and expenses — and record recoveries the moment customers pay.</p></article><article><div class="featureicon">${lucide('user-check')}</div><h3>Staff permissions</h3><p>Create individual staff accounts and control who can view, add, edit, or delete in each operational area.</p></article><article><div class="featureicon">${lucide('chart')}</div><h3>Business reports</h3><p>Get summary, sales, purchase, and expense reports with clear totals and profit figures for any date range.</p></article><article><div class="featureicon">${lucide('shield')}</div><h3>Traceable activity</h3><p>Record operational activity, device logins, attendance, and system errors for stronger accountability.</p></article><article class="premium"><div class="featureicon">${lucide('mail')}</div><em class="featuretag">Premium</em><h3>ConnectX</h3><p>Send professional business emails to customers and suppliers directly through your shop — with invoice attachments.</p></article><article class="premium"><div class="featureicon">${lucide('sparkles')}</div><em class="featuretag">Premium</em><h3>Zudo AI</h3><p>A read-only AI assistant that answers questions about your sales, purchases, inventory, customers, and dues.</p></article><article class="premium"><div class="featureicon">${lucide('activity')}</div><em class="featuretag">Premium</em><h3>AI Business Health</h3><p>Generate a business-health report with a score, risk findings, and practical AI recommendations for any period.</p></article><article class="premium"><div class="featureicon">${lucide('qr')}</div><em class="featuretag">Premium</em><h3>TrueBill</h3><p>Put a scannable QR code on every invoice so customers can verify authenticity with one scan.</p></article><article class="premium"><div class="featureicon">${lucide('msg')}</div><em class="featuretag">Premium</em><h3>HelpDesk</h3><p>A built-in messenger that connects you directly with EMS support for fast help whenever you need it.</p></article></div></section><section class="stats section"><div class="statsgrid"><div class="stat"><b>All-in-one</b><span>Inventory, sales, purchases, expenses, customers &amp; staff in one place</span></div><div class="stat"><b>Multi-shop</b><span>Manage every store from a single administrator account</span></div><div class="stat"><b>Real-time</b><span>Stock and totals update the moment you post a transaction</span></div><div class="stat"><b>Secure</b><span>Custom credentials, device tracking and full activity logs</span></div></div></section>
+function login(){let verifyToken=getVerifyToken(),publicRoute=new URLSearchParams(location.search).get('page');if(verifyToken)return verificationPage(verifyToken);if(publicRoute)return publicPage(publicRoute);app.innerHTML=`<header class="sitehead"><a class="wordmark" href="#top"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main id="top" class="website"><section class="hero"><div><p class="eyebrow">MULTI-SHOP MANAGEMENT, MADE SIMPLE</p><h1>Run every part of your shop with clarity.</h1><p class="lead">EMS V1 gives owners and staff one secure place for inventory, purchases, sales, expenses, customers, and store operations.</p><div class="heroactions"><button id="heroStart">Create administrator account</button><button class="secondary" id="heroShop">Shop staff login</button></div><div class="trust"><span>✓ Custom secure credentials</span><span>✓ Cloud-based access</span><span>✓ BDT pricing</span></div></div><div class="heroart"><div class="screen"><div class="screenbar"><i></i><i></i><i></i></div><p>Today at a glance</p><div class="artcards"><b>৳ 24,860<small>Sales today</small></b><b>18<small>Low-stock items</small></b></div><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>Sales performance</span></div></div></section><section class="logos"><span>Built for retail shops</span><span>Grocery &amp; general stores</span><span>Pharmacy &amp; cosmetics</span><span>Electronics &amp; wholesale</span></section><section id="features" class="section"><p class="eyebrow">ONE SYSTEM, EVERYDAY OPERATIONS</p><h2>Everything a growing shop needs</h2><p class="sectionlead">Designed for shop owners who need accurate records, controlled staff access, and practical decisions—not complicated software.</p><div class="featuregrid"><article><div class="featureicon">${lucide('store')}</div><h3>Multi-store control</h3><p>Create and manage multiple stores from one administrator account. Track license status, activation, and connected devices per shop.</p></article><article><div class="featureicon">${lucide('receipt')}</div><h3>Sales &amp; purchase invoices</h3><p>Prepare invoices that calculate tax, discount, paid amount, and due automatically — with full payment and transaction details.</p></article><article><div class="featureicon">${lucide('package')}</div><h3>Live inventory</h3><p>Stock updates instantly when purchases or sales are posted. Low-stock indicators help you replenish before items run out.</p></article><article><div class="featureicon">${lucide('users')}</div><h3>Customers &amp; suppliers</h3><p>Keep contact details organized and quickly select a customer or supplier with a smart search when creating invoices.</p></article><article><div class="featureicon">${lucide('wallet')}</div><h3>Expense tracking</h3><p>Record shop expenses with paid and due amounts, so you always know exactly where your money is going.</p></article><article><div class="featureicon">${lucide('coins')}</div><h3>Due recovery</h3><p>Track outstanding dues on sales, purchases, and expenses — and record recoveries the moment customers pay.</p></article><article><div class="featureicon">${lucide('user-check')}</div><h3>Staff permissions</h3><p>Create individual staff accounts and control who can view, add, edit, or delete in each operational area.</p></article><article><div class="featureicon">${lucide('chart')}</div><h3>Business reports</h3><p>Get summary, sales, purchase, and expense reports with clear totals and profit figures for any date range.</p></article><article><div class="featureicon">${lucide('shield')}</div><h3>Traceable activity</h3><p>Record operational activity, device logins, attendance, and system errors for stronger accountability.</p></article><article class="premium"><div class="featureicon">${lucide('mail')}</div><em class="featuretag">Premium</em><h3>ConnectX</h3><p>Send professional business emails to customers and suppliers directly through your shop — with invoice attachments.</p></article><article class="premium"><div class="featureicon">${lucide('sparkles')}</div><em class="featuretag">Premium</em><h3>Zudo AI</h3><p>A read-only AI assistant that answers questions about your sales, purchases, inventory, customers, and dues.</p></article><article class="premium"><div class="featureicon">${lucide('activity')}</div><em class="featuretag">Premium</em><h3>AI Business Health</h3><p>Generate a business-health report with a score, risk findings, and practical AI recommendations for any period.</p></article><article class="premium"><div class="featureicon">${lucide('qr')}</div><em class="featuretag">Premium</em><h3>TrueBill</h3><p>Put a scannable QR code on every invoice so customers can verify authenticity with one scan.</p></article><article class="premium"><div class="featureicon">${lucide('msg')}</div><em class="featuretag">Premium</em><h3>HelpDesk</h3><p>A built-in messenger that connects you directly with EMS support for fast help whenever you need it.</p></article></div></section><section class="stats section"><div class="statsgrid"><div class="stat"><b>All-in-one</b><span>Inventory, sales, purchases, expenses, customers &amp; staff in one place</span></div><div class="stat"><b>Multi-shop</b><span>Manage every store from a single administrator account</span></div><div class="stat"><b>Real-time</b><span>Stock and totals update the moment you post a transaction</span></div><div class="stat"><b>Secure</b><span>Custom credentials, device tracking and full activity logs</span></div></div></section>
 <section class="section why"><p class="eyebrow">WHY EMS V1</p><h2>Built to run a real shop, not just record it</h2><p class="sectionlead">Every tool is designed around how retail businesses actually work — from the counter to the back office.</p><div class="whygrid"><div class="whycol"><h3>For shop owners</h3><ul><li>One dashboard for sales, stock, dues and expenses</li><li>Know your profit and outstanding dues at a glance</li><li>License-based multi-store control with staff limits</li><li>Approve or restrict staff actions per module</li></ul></div><div class="whycol"><h3>For staff</h3><ul><li>Fast invoice entry with smart customer &amp; item search</li><li>Clear permissions — see and do only what you should</li><li>Attendance and activity tracking built in</li><li>Works on any device with an internet connection</li></ul></div><div class="whycol"><h3>For your customers</h3><ul><li>Professional invoices with tax, discount and due</li><li>Scan-to-verify TrueBill QR codes for trust</li><li>Instant records of every transaction</li><li>Fast due recovery with clear payment history</li></ul></div></div></section>
 <section class="workflow"><div><p class="eyebrow">A CLEAR WORKFLOW</p><h2>From setup to sale in four steps</h2><ol><li><b>1</b><div><strong>Create your administrator account</strong><span>Set up your business profile with your own custom credentials.</span></div></li><li><b>2</b><div><strong>Add and activate a store</strong><span>Submit your license payment information for manual verification.</span></div></li><li><b>3</b><div><strong>Add staff, products, and contacts</strong><span>Control what each staff member can access.</span></div></li><li><b>4</b><div><strong>Record purchases and sales</strong><span>Let EMS update stock and financial totals as you work.</span></div></li></ol></div><aside><small>EMS V1 PROMISE</small><h3>Business records that stay organized.</h3><p>Use a single cloud-based workspace for daily shop operations, with access from approved devices.</p><button id="workflowAdmin">Get started as administrator</button></aside></section><section id="pricing" class="section pricing"><p class="eyebrow">STRAIGHTFORWARD PRICING</p><h2>Choose your license period</h2><p class="sectionlead">One store license per selected period. Submit bKash or Nagad payment details after creating a store; each claim is manually verified before activation.</p><div id="publicPricing" class="planGrid"><p class="muted">Loading current EMS license plans…</p></div><p class="fineprint">Payment methods: bKash and Nagad. A transaction ID is required. Payments are subject to manual verification.</p></section><section class="cta"><div><h2>Ready to bring your shop operations together?</h2><p>Create an administrator account and set up your first store.</p></div><button id="ctaStart">Get started</button></section><section class="faq section"><p class="eyebrow">FREQUENTLY ASKED QUESTIONS</p><h2>Before you begin</h2><details><summary>Does EMS use Google, Facebook, or third-party login?</summary><p>No. Administrators and shop staff use custom EMS credentials stored through the application’s secure backend.</p></details><details><summary>When does a store become active?</summary><p>A store is activated after a license payment claim is manually checked and approved.</p></details><details><summary>Can I have different staff access levels?</summary><p>Yes. Staff permissions can be assigned per module for viewing, adding, editing, and deleting records.</p></details><details><summary>What payment methods do you accept?</summary><p>License payments are accepted via bKash and Nagad. Each payment is manually verified before activation.</p></details><details><summary>Can I manage more than one shop?</summary><p>Yes. One administrator account can create and manage multiple shops, depending on the license plan you choose.</p></details><details><summary>What are the premium add-ons?</summary><p>Premium add-ons are optional paid services — ConnectX email, Zudo AI assistant, AI Business Health reports, TrueBill invoice verification, and HelpDesk support chat.</p></details><details><summary>How is inventory tracked?</summary><p>Stock levels update automatically when you post purchases or sales, and low-stock alerts help you reorder before items run out.</p></details><details><summary>Can I verify an invoice is genuine?</summary><p>Yes. TrueBill puts a scannable QR code on invoices, so customers can instantly verify authenticity on our website.</p></details></section></main><footer><div class="wordmark"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><span>© ${new Date().getFullYear()} DoxTox. All rights reserved.</span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></footer><div class="authlayer" id="authlayer" hidden></div>`;let open=m=>showAuth(m);['adminLogin','workflowAdmin','heroStart','ctaStart'].forEach(id=>$('#'+id).onclick=()=>open('admin'));['shopLogin','heroShop'].forEach(id=>$('#'+id).onclick=()=>open('shop'));$('#emsLogin').onclick=()=>showEmsLogin();document.querySelectorAll('[data-plan]').forEach(x=>x.onclick=()=>open('admin'));api('public/branding').then(b=>{document.title=(b.website_name||'EMS V1')+' | DoxTox';document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});api('public/license-plans').then(plans=>{let box=$('#publicPricing');box.innerHTML=plans.length?plans.map((p,i)=>planCardHtml(p,{featured:i===1,attr:'data-public-plan'})).join(''):'<p class="muted">No license plans are currently published.</p>';document.querySelectorAll('[data-public-plan]').forEach(x=>x.onclick=()=>open('admin'))}).catch(()=>{$('#publicPricing').innerHTML='<p class="muted">License plans are temporarily unavailable.</p>'})}
 function forgotPassword(type){
@@ -159,15 +196,15 @@ folder:'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6
 paperclip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
 upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
 plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',
-banknote:'<rect width="20" height="12" x="2" y="6" rx="2"/><circle cx="12" cy="12" r="2"/><path d="M6 12h.01M18 12h.01"/>',
 percent:'<line x1="19" x2="5" y1="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/>',
 tag:'<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5"/>',
 menu:'<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>',
 bell:'<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
-x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'
+x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+'rotate-ccw':'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
 };
 const lucide=n=>`<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUCIDE[n]||LUCIDE.circle}</svg>`;
-const menus=[['Dashboard','dashboard','dashboard'],['Suppliers','supplier','truck'],['Customers','customer','users'],['Inventory','inventory','package'],['Purchases','purchase','cart'],['Sales','sales','receipt'],['Expense','expense','wallet'],['Due Recover','due_recover','coins'],['Staff Manager','staff','user-check'],['Report','report','chart'],['Settings','settings','settings'],['ConnectX','connectx','mail'],['Zudo','zudo','sparkles'],['Vaultium','vaultium','file']];const canAccess=(section,action='view')=>{if(state?.role==='admin'||state?.adminAccess)return true;if(state?.readOnly&&action!=='view'&&!((section==='connectx'&&action==='add')||(section==='zudo'&&action==='add')))return false;if(section==='dashboard'&&action==='view')return true;let p=state?.permissions||{};return (p[section]||[]).includes(action)};function home(){if(state?.role==='staff'&&permissionSyncedFor!==state.token){Promise.all([api('me'),api('connectx/availability').catch(()=>({enabled:false})),api('zudo/availability').catch(()=>({enabled:false})),api('business-health/availability').catch(()=>({enabled:false,ever:false})),api('vaultium/availability').catch(()=>({enabled:false,ever:false}))]).then(([m,cx,zudo,bh,vault])=>{state.permissions=m.permissions||{};state.readOnly=!!m.readOnly;state.licenseExpired=!!m.licenseExpired;state.connectxEnabled=!!cx.enabled;state.connectxHistory=!!cx.history;state.zudoEnabled=!!zudo.enabled;state.zudoHistory=!!zudo.history;state.businessHealthEnabled=!!bh.enabled;state.businessHealthEver=!!bh.ever;state.vaultiumEnabled=!!vault.enabled;state.vaultiumEver=!!vault.ever;permissionSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state?.role==='admin'&&entitlementSyncedFor!==state.token){api('admin/entitlement').then(x=>{state.licenseExpired=!!x.hasActivatedLicense&&!x.active;state.entitlement=x;entitlementSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state.role==='owner')return ownerHome();if(state.role==='admin')return adminHome();return shopHome()}
+const menus=[['Dashboard','dashboard','dashboard'],['Suppliers','supplier','truck'],['Customers','customer','users'],['Inventory','inventory','package'],['Purchases','purchase','cart'],['Sales','sales','receipt'],['Expense','expense','wallet'],['Due Recover','due_recover','coins'],['Return & Exchange','returns_refunds','rotate-ccw','returns-refunds'],['Staff Manager','staff','user-check'],['Report','report','chart'],['Settings','settings','settings'],['Audit Log','settings','activity','audit-log'],['ConnectX','connectx','mail'],['Zudo','zudo','sparkles'],['Vaultium','vaultium','file']];const canAccess=(section,action='view')=>{if(state?.role==='admin'||state?.adminAccess)return true;if(state?.readOnly&&action!=='view'&&!((section==='connectx'&&action==='add')||(section==='zudo'&&action==='add')))return false;if(section==='dashboard'&&action==='view')return true;let p=state?.permissions||{};if(section==='returns_refunds'&&!p.returns_refunds&&p.sales)return p.sales.includes(action);return (p[section]||[]).includes(action)};function home(){if(state?.role==='staff'&&permissionSyncedFor!==state.token){Promise.all([api('me'),api('connectx/availability').catch(()=>({enabled:false})),api('zudo/availability').catch(()=>({enabled:false})),api('business-health/availability').catch(()=>({enabled:false,ever:false})),api('vaultium/availability').catch(()=>({enabled:false,ever:false}))]).then(([m,cx,zudo,bh,vault])=>{state.permissions=m.permissions||{};state.readOnly=!!m.readOnly;state.licenseExpired=!!m.licenseExpired;state.connectxEnabled=!!cx.enabled;state.connectxHistory=!!cx.history;state.zudoEnabled=!!zudo.enabled;state.zudoHistory=!!zudo.history;state.businessHealthEnabled=!!bh.enabled;state.businessHealthEver=!!bh.ever;state.vaultiumEnabled=!!vault.enabled;state.vaultiumEver=!!vault.ever;permissionSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state?.role==='admin'&&entitlementSyncedFor!==state.token){api('admin/entitlement').then(x=>{state.licenseExpired=!!x.hasActivatedLicense&&!x.active;state.entitlement=x;entitlementSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state.role==='owner')return ownerHome();if(state.role==='admin')return adminHome();return shopHome()}
 function readOnlyNotice(){if(document.querySelector('.licenseExpiryModal')||document.querySelector('.adm-notice')||document.querySelector('.shp-notice'))return;let isAdmin=state?.role==='admin',exp=!!state.licenseExpired;if(isAdmin){let e=document.createElement('div');e.className='adm-modal adm-notice';e.innerHTML=`<div class="adm-modalbox"><div class="adm-modalhead"><h2>${exp?'License expired':'Read-Only mode'}</h2><button type="button" class="adm-x" aria-label="Close">×</button></div><div class="adm-modalbody"><p>${exp?'Your administrator license has expired. To continue operating shops, creating invoices, changing data, or using ConnectX, purchase and activate a new license.':'This shop is currently in Read-Only mode. You can view records but cannot add, edit, or delete data.'}</p><p class="adm-desc">${exp?'Your shop data and license history are safely preserved. Shops are currently operating in Read-Only mode.':'Contact your administrator to restore full access.'}</p><div class="adm-form-actions"><button id="goLicenses" class="adm-btn adm-btn-primary">View license plans</button></div></div></div>`;document.body.append(e);e.querySelector('.adm-x').onclick=()=>e.remove();$('#goLicenses').onclick=()=>{e.remove();adminPage('licenses')};return}let e=shpModal(exp?'License expired':'Read-Only mode',`<p>${exp?'Your administrator license has expired. To continue operating shops, creating invoices, changing data, or using ConnectX, purchase and activate a new license.':'This shop is currently in Read-Only mode. You can view records but cannot add, edit, or delete data.'}</p><p class="shp-desc">${exp?'Your shop data and license history are safely preserved. Shops are currently operating in Read-Only mode.':'Contact your administrator to restore full access.'}</p><div class="shp-form-actions"><button class="shp-btn shp-btn-primary" id="closeExpiry">Continue</button></div>`);e.classList.add('shp-notice');$('#closeExpiry').onclick=()=>e.remove()}
 /* title(): replaced by shpHead() in the Shop Panel theme */async function page(p){
   document.querySelectorAll('[data-page]').forEach(x=>x.classList.toggle('on',x.dataset.page===p));
@@ -175,17 +212,36 @@ function readOnlyNotice(){if(document.querySelector('.licenseExpiryModal')||docu
   let el=$('#page');el.innerHTML=skelFor(SHP_SKEL,p);
   try{
     if(p==='dashboard')return await dashboard();
+    if(p==='suppliers'&&!canAccess('supplier','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='customers'&&!canAccess('customer','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='inventory'&&!canAccess('inventory','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='expense'&&!canAccess('expense','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='staff-manager'&&!canAccess('staff','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='purchases'&&!canAccess('purchase','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='sales'&&!canAccess('sales','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='returns-refunds'&&!canAccess('returns_refunds','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='due-recover'&&!canAccess('due_recover','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='report'&&!canAccess('report','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='connectx'&&(!state.connectxEnabled&&!state.connectxHistory||!canAccess('connectx','view'))){toast('Permission denied.');return page('dashboard')}
+    if(p==='zudo'&&(!state.zudoEnabled&&!state.zudoHistory||!canAccess('zudo','view'))){toast('Permission denied.');return page('dashboard')}
+    if(p==='vaultium'&&(!state.vaultiumEnabled&&!state.vaultiumEver||!canAccess('vaultium','view'))){toast('Permission denied.');return page('dashboard')}
+    if(p==='attendance'&&!canAccess('attendance','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='salary'&&!canAccess('salary','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='settings'&&!canAccess('settings','view')){toast('Permission denied.');return page('dashboard')}
+    if(p==='audit-log'&&!canAccess('settings','view')){toast('Permission denied.');return page('dashboard')}
     if(['suppliers','customers','inventory','expense','staff-manager'].includes(p))return await entity(p);
     if(p==='attendance')return await attendancePage();
     if(p==='salary')return await salaryPage();
     if(p==='vaultium')return await vaultiumPage();
     if(['purchases','sales'].includes(p))return await invoices(p);
     if(p==='sale-invoice')return await invoicePage('sale');
+    if(p==='returns-refunds')return await returnsRefundsPage();
     if(p==='due-recover')return await dueRecover();
     if(p==='report')return await report();
     if(p==='connectx')return await connectX();
     if(p==='zudo')return await zudo();
     if(p==='settings')return await settings();
+    if(p==='audit-log')return await auditLogPage();
     el.innerHTML=shpHead('EMS · Shop',p.replaceAll('-',' '))+`<section class="shp-panel"><p>This module is reserved for the next EMS update. It is intentionally not represented with fabricated records.</p></section>`
   }catch(e){el.innerHTML=`<section class="shp-panel"><h2>Could not load this page</h2><p>${esc(e.message)}</p></section>`}
 }
@@ -239,15 +295,16 @@ const sk=(w='',h='')=>`<span class="sk" style="${w?`width:${w};`:''}${h?`height:
 const skC=(s=26)=>`<span class="sk sk-c" style="width:${s}px;height:${s}px"></span>`;
 const skLines=(n=2)=>`<span class="sk-lines">${Array.from({length:n},(_,i)=>sk(i===n-1?'58%':'92%')).join('')}</span>`;
 const SKEL={
-  kpi(){return `<div class="sk-card sk-kpi"><div class="sk-row">${skC(26)}${sk('46%')}</div>${sk('72%',22)}${sk('42%')}</div>`},
+  pagehead:(hasBtn=false)=>`<div class="sk-pagehead"><div class="sk-lines">${sk('72px',10)}${sk('200px',22)}${sk('min(360px,75%)',12)}</div>${hasBtn?sk('116px',34):''}</div>`,
+  kpi(){return `<div class="sk-card sk-kpi"><div class="sk-row">${skC(26)}${sk('46%',10)}</div>${sk('72%',22)}${sk('42%',9)}</div>`},
   kpis:(n=4)=>`<div class="sk-kpis">${Array.from({length:n},()=>SKEL.kpi()).join('')}</div>`,
   head:()=>`<div class="sk-row sk-between">${skLines(2)}${sk('64px',20)}</div>`,
   panel:(inner='')=>`<div class="sk-panel">${SKEL.head()}${inner}</div>`,
-  table:(rows=6,cols=6)=>`<div class="sk-tw"><div class="sk-thead">${Array.from({length:cols},()=>sk('64px',8)).join('')}</div>${Array.from({length:rows},(_,r)=>`<div class="sk-tr">${Array.from({length:cols},(_,c)=>sk(c===0?'72px':(82+((r*31+c*47)%70))+'px',11)).join('')}</div>`).join('')}</div>`,
-  toolbar:()=>`<div class="sk-toolbar">${sk('118px',34)}${sk('min(420px,58%)',34)}</div>`,
+  table:(rows=6,cols=6)=>`<div class="sk-tw"><div class="sk-thead">${Array.from({length:cols},(_,c)=>`<div class="sk-cell ${c===0?'sk-c-first':c===cols-1?'sk-c-last':''}">${sk(c===0?'45px':c===cols-1?'65px':'72%',9)}</div>`).join('')}</div>${Array.from({length:rows},(_,r)=>`<div class="sk-tr">${Array.from({length:cols},(_,c)=>`<div class="sk-cell ${c===0?'sk-c-first':c===cols-1?'sk-c-last':''}">${sk(c===0?'45px':c===cols-1?'65px':(60+((r*19+c*31)%30))+'%',12)}</div>`).join('')}</div>`).join('')}</div>`,
+  toolbar:(hasBtn=true)=>`<div class="sk-toolbar">${hasBtn?sk('108px',36):''}${sk('min(400px,58%)',36)}</div>`,
   chips:(n=4)=>`<div class="sk-chips">${Array.from({length:n},(_,i)=>sk((74+i*26)+'px',24)).join('')}</div>`,
   chart:()=>`<div class="sk-fchart">${[62,42,30,52].map(h=>`<div class="sk-fcol"><div class="sk-ftrack">${sk('100%',h)}</div>${sk('56%')}${sk('40%',9)}</div>`).join('')}</div>`,
-  trend:()=>`<div class="sk-panel">${SKEL.head()}<div class="sk-trend"></div></div>`,
+  trend:()=>`<div class="sk-panel">${SKEL.head()}<div class="sk sk-trend"></div></div>`,
   kv:(n=8)=>`<div class="sk-kv">${Array.from({length:n},()=>`<div class="sk-kvrow">${sk('34%')}${sk('26%')}</div>`).join('')}</div>`,
   form:(n=4)=>`<div class="sk-formgrid">${Array.from({length:n},()=>`<div class="sk-field">${sk('38%',9)}${sk('100%',34)}</div>`).join('')}</div>`,
   cards:(n=3)=>`<div class="sk-cards">${Array.from({length:n},()=>`<div class="sk-card"><div class="sk-row">${skC(26)}${sk('50%')}</div>${sk('62%',15)}${skLines(3)}${sk('100%',32)}</div>`).join('')}</div>`,
@@ -258,18 +315,18 @@ const SKEL={
 };
 /* per-page skeletons (kept beside each panel's router) */
 const SHP_SKEL={
-  _:()=>SKEL.panel(SKEL.table()),
-  dashboard:()=>SKEL.kpis(4)+SKEL.grid('minmax(0,1fr) minmax(0,1fr)',SKEL.panel(SKEL.chart()),SKEL.panel(SKEL.table(4,7)))+SKEL.trend(),
-  suppliers:()=>SKEL.toolbar()+SKEL.table(6,7),customers:()=>SKEL.toolbar()+SKEL.table(6,7),expense:()=>SKEL.toolbar()+SKEL.table(6,7),
-  inventory:()=>SKEL.toolbar()+SKEL.table(6,7),purchases:()=>SKEL.toolbar()+SKEL.table(5,8),sales:()=>SKEL.toolbar()+SKEL.table(5,8),'sale-invoice':()=>SKEL.toolbar()+SKEL.panel(SKEL.form(8)),
-  'due-recover':()=>SKEL.toolbar()+SKEL.table(5,8),'staff-manager':()=>SKEL.toolbar()+SKEL.table(5,8),
-  attendance:()=>SKEL.grid('minmax(0,1.2fr) minmax(0,1fr)',SKEL.panel(SKEL.list(4)),SKEL.panel(SKEL.table(3,6))),
-  salary:()=>SKEL.grid('240px minmax(0,1fr)',SKEL.list(4),SKEL.kpis(4)+SKEL.panel(SKEL.form(6))+SKEL.panel(SKEL.table(3,5))),
-  report:()=>SKEL.chips(5)+SKEL.kpis(4)+`<div class="sk-grid2">${SKEL.panel(SKEL.bars())}${SKEL.panel(SKEL.kv(4))}</div>`,
-  settings:()=>SKEL.chips(2)+SKEL.panel(SKEL.kv(8)),
-  connectx:()=>SKEL.grid('230px minmax(0,1fr)',SKEL.list(3),SKEL.panel(SKEL.form(4))),
-  zudo:()=>SKEL.grid('212px minmax(0,1fr)',SKEL.list(3,false),`<div class="sk-zmain">${SKEL.msgs(3)}${sk('100%',42)}</div>`),
-  vaultium:()=>SKEL.kpis(3)+SKEL.panel(SKEL.table(5,4)),
+  _:()=>SKEL.pagehead()+SKEL.panel(SKEL.table()),
+  dashboard:()=>SKEL.pagehead()+SKEL.kpis(4)+SKEL.grid('minmax(0,1fr) minmax(0,1fr)',SKEL.panel(SKEL.chart()),SKEL.panel(SKEL.table(4,7)))+SKEL.trend(),
+  suppliers:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(6,7),customers:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(6,7),expense:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(6,7),
+  inventory:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(6,7),purchases:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(5,8),sales:()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(5,8),'sale-invoice':()=>SKEL.pagehead(true)+SKEL.panel(SKEL.form(8)),
+  'due-recover':()=>SKEL.pagehead(true)+SKEL.toolbar(false)+SKEL.table(5,8),'returns-refunds':()=>SKEL.pagehead(true)+SKEL.toolbar(false)+SKEL.table(5,8),'staff-manager':()=>SKEL.pagehead(true)+SKEL.toolbar()+SKEL.table(5,8),
+  attendance:()=>SKEL.pagehead(true)+SKEL.grid('minmax(0,1.2fr) minmax(0,1fr)',SKEL.panel(SKEL.list(4)),SKEL.panel(SKEL.table(3,6))),
+  salary:()=>SKEL.pagehead(true)+SKEL.grid('240px minmax(0,1fr)',SKEL.list(4),SKEL.kpis(4)+SKEL.panel(SKEL.form(6))+SKEL.panel(SKEL.table(3,5))),
+  report:()=>SKEL.pagehead()+SKEL.chips(5)+SKEL.kpis(4)+`<div class="sk-grid2">${SKEL.panel(SKEL.bars())}${SKEL.panel(SKEL.kv(4))}</div>`,
+  settings:()=>SKEL.pagehead()+SKEL.chips(2)+SKEL.panel(SKEL.kv(8)),
+  connectx:()=>SKEL.pagehead()+SKEL.grid('230px minmax(0,1fr)',SKEL.list(3),SKEL.panel(SKEL.form(4))),
+  zudo:()=>SKEL.pagehead()+SKEL.grid('212px minmax(0,1fr)',SKEL.list(3,false),`<div class="sk-zmain">${SKEL.msgs(3)}${sk('100%',42)}</div>`),
+  vaultium:()=>SKEL.pagehead()+SKEL.kpis(3)+SKEL.panel(SKEL.table(5,4)),
 };
 const ADM_SKEL={
   _:()=>SKEL.panel(SKEL.table()),
@@ -330,9 +387,12 @@ function adminHome(){document.body.classList.remove('shp-on');
 }
 
 async function adminPage(p){
+  document.body.classList.toggle('adm-fixed-page', p==='helpdesk');
   document.querySelectorAll('[data-admin-page]').forEach(x=>x.classList.toggle('on',x.dataset.adminPage===p));
   const t=$('#admTopTitle');if(t)t.textContent=ADM_LABEL[p]||p;
-  let el=$('#page');el.innerHTML=skelFor(ADM_SKEL,p);
+  let el=$('#page');
+  if(el)el.classList.toggle('adm-page-fixed', p==='helpdesk');
+  el.innerHTML=skelFor(ADM_SKEL,p);
   try{
     if(p==='stores')return await stores();
     if(p==='licenses')return await licenses();
@@ -342,7 +402,7 @@ async function adminPage(p){
     if(p==='helpdesk')return await helpdeskAdmin();
   }catch(e){el.innerHTML=`<section class="adm-panel"><div class="adm-panel-head"><div><h3>Could not load this page</h3><p class="adm-desc">${esc(e.message)}</p></div></div></section>`}
 }
-function ownerHome(){document.body.classList.remove('shp-on');
+function ownerHome(){document.body.classList.remove('shp-on','adm-fixed-page');
   document.body.classList.add('ob-on');
   if(!document.body.dataset.obTheme)document.body.dataset.obTheme=localStorage.getItem('ems.obTheme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
   const dark=document.body.dataset.obTheme==='dark';
@@ -685,9 +745,11 @@ async function ownerConnectX(){
 }
 /* ═══════════ SHOP · Business reports + Business AI Health ═══════════ */
 async function report(){
-  const [salesRows,purchaseRows,expenseRows,salePartyRows,purPartyRows]=await Promise.all([
+  if(!canAccess('report','view')){toast('Permission denied.');return page('dashboard')}
+  const [salesRows,purchaseRows,expenseRows,salePartyRows,purPartyRows,returnRows,exchangeRows]=await Promise.all([
     api('invoices?kind=sale'), api('invoices?kind=purchase'), api('expense'),
-    api('invoice-parties?kind=sale').catch(()=>[]), api('invoice-parties?kind=purchase').catch(()=>[])
+    api('invoice-parties?kind=sale').catch(()=>[]), api('invoice-parties?kind=purchase').catch(()=>[]),
+    api('returns').catch(()=>[]), api('exchanges').catch(()=>[])
   ]);
   const partyLabel=k=>k==='sales'?'Customer':k==='purchase'?'Supplier':'Category';
   const payMethods=[['cash','Cash'],['bank','Bank'],['bkash','bKash'],['nagad','Nagad'],['card','Card'],['other','Other']];
@@ -724,10 +786,68 @@ async function report(){
     const parties=isSale?salePartyRows:purPartyRows;
     const pmap=Object.fromEntries(parties.map(x=>[x.id,x]));
     const raw=isSale?salesRows:purchaseRows;
-    const rows=raw.filter(r=>inRange(r.invoice_date)).map(r=>({...r,_party:pmap[r.party_id]?.name||r.custom_party_name||(isSale?'Walk-in / custom customer':'Custom / one-off supplier'),_total:amount(r),_paid:Math.max(0,Number(r.paid_amount||0)),_due:Math.max(0,Number(r.total_due||0)),_tax:Math.max(0,Number(r.tax_amount||0)+Number(r.line_tax_amount||0)),_disc:Math.max(0,Number(r.discount||0)+Number(r.line_discount_amount||0)),_items:(r.invoice_lines||[]).reduce((n,l)=>n+Number(l.quantity||0),0)}));
+    const retByInv = {};
+    const excByInv = {};
+    if (isSale) {
+      const activeReturns = returnRows.filter(r=>inRange(r.return_date));
+      const activeExchanges = exchangeRows.filter(r=>inRange(r.exchange_date));
+      activeReturns.forEach(ret => {
+        let invId = ret.invoice_id;
+        if (!invId) return;
+        retByInv[invId] = retByInv[invId] || { qty: 0, amount: 0 };
+        retByInv[invId].amount += Number(ret.total_return_amount || 0);
+        (ret.return_items || []).forEach(it => { retByInv[invId].qty += Number(it.quantity || 0); });
+      });
+      activeExchanges.forEach(exc => {
+        let invId = exc.invoice_id;
+        if (!invId) return;
+        excByInv[invId] = excByInv[invId] || { returnedQty: 0, returnedAmount: 0, newQty: 0, newAmount: 0 };
+        excByInv[invId].returnedAmount += Number(exc.returned_total || 0);
+        excByInv[invId].newAmount += Number(exc.new_items_total || 0);
+        (exc.exchange_items || []).forEach(it => {
+          if (it.item_type === 'returned') excByInv[invId].returnedQty += Number(it.quantity || 0);
+          else excByInv[invId].newQty += Number(it.quantity || 0);
+        });
+      });
+    }
+
+    const rows=raw.filter(r=>inRange(r.invoice_date)).map(r=>{
+      let retInfo = isSale ? (retByInv[r.id] || { qty: 0, amount: 0 }) : { qty: 0, amount: 0 };
+      let excInfo = isSale ? (excByInv[r.id] || { returnedQty: 0, returnedAmount: 0, newQty: 0, newAmount: 0 }) : { returnedQty: 0, returnedAmount: 0, newQty: 0, newAmount: 0 };
+      let tot = amount(r);
+      let netTot = isSale ? Math.max(0, tot - retInfo.amount) : tot;
+      return {
+        ...r,
+        _party:pmap[r.party_id]?.name||r.custom_party_name||(isSale?'Walk-in / custom customer':'Custom / one-off supplier'),
+        _total:tot,
+        _paid:Math.max(0,Number(r.paid_amount||0)),
+        _due:Math.max(0,Number(r.total_due||0)),
+        _tax:Math.max(0,Number(r.tax_amount||0)+Number(r.line_tax_amount||0)),
+        _disc:Math.max(0,Number(r.discount||0)+Number(r.line_discount_amount||0)),
+        _items:(r.invoice_lines||[]).reduce((n,l)=>n+Number(l.quantity||0),0),
+        _retQty: retInfo.qty,
+        _retAmt: retInfo.amount,
+        _excQty: excInfo.returnedQty,
+        _excAmt: excInfo.returnedAmount,
+        _netTotal: netTot
+      };
+    });
     const n=rows.length, days=Math.max(1,Math.round((new Date(end+'T23:59:59')-new Date(start+'T00:00:00'))/86400000)+1);
     const sum=(f)=>rows.reduce((a,r)=>a+f(r),0);
-    const totals={count:n,total:sum(r=>r._total),paid:sum(r=>r._paid),due:sum(r=>r._due),tax:sum(r=>r._tax),disc:sum(r=>r._disc),avg:n?sum(r=>r._total)/n:0};
+    const totals={
+      count:n,
+      total:sum(r=>r._total),
+      paid:sum(r=>r._paid),
+      due:sum(r=>r._due),
+      tax:sum(r=>r._tax),
+      disc:sum(r=>r._disc),
+      avg:n?sum(r=>r._total)/n:0,
+      retQty:sum(r=>r._retQty),
+      retAmt:sum(r=>r._retAmt),
+      excQty:sum(r=>r._excQty),
+      excAmt:sum(r=>r._excAmt),
+      netTotal:sum(r=>r._netTotal)
+    };
     const methodMap={};
     rows.forEach(r=>{const m=String(r.payment_method||'cash').toLowerCase();(methodMap[m]??={m,count:0,total:0,paid:0});methodMap[m].count++;methodMap[m].total+=r._total;methodMap[m].paid+=r._paid});
     const methods=Object.values(methodMap).sort((a,b)=>b.total-a.total);
@@ -739,15 +859,71 @@ async function report(){
     const topItems=Object.values(itemMap).sort((a,b)=>b.total-a.total).slice(0,6);
     const trend=trendBuckets(rows.map(r=>({date:r.invoice_date,value:r._total})));
     const tone=isSale?'emerald':'amber';
-    return reportShell(kind,isSale?'Sales detailed report':'Purchase detailed report',isSale?'Every sales invoice in the selected period — customers, payment methods, items sold and outstanding dues.':'Every purchase bill in the selected period — suppliers, payment methods, items bought and outstanding dues.',
-      [['Invoices',n,null,null,'receipt'],['Total '+(isSale?'sales':'purchases'),reportMoney(totals.total),null,null,'coins'],['Collected',reportMoney(totals.paid),null,'emerald','banknote'],['Outstanding',reportMoney(totals.due),null,totals.due>0?'rose':null,'clock'],['Tax included',reportMoney(totals.tax),null,null,'receipt'],['Discounts',reportMoney(totals.disc),null,null,'percent'],['Average '+(isSale?'sale':'bill'),reportMoney(totals.avg),null,null,'chart']],
+
+    const kpis = isSale ? [
+      ['Invoices', n, null, null, 'receipt'],
+      ['Gross sales', reportMoney(totals.total), null, null, 'coins'],
+      ['Returned value', reportMoney(totals.retAmt), `${totals.retQty} item(s) returned`, totals.retAmt > 0 ? 'rose' : null, 'rotate-ccw'],
+      ['Exchanged value', reportMoney(totals.excAmt), `${totals.excQty} item(s) exchanged`, totals.excAmt > 0 ? 'cyan' : null, 'refresh'],
+      ['Net sales', reportMoney(totals.netTotal), 'Gross sales − Returns', 'emerald', 'receipt'],
+      ['Collected', reportMoney(totals.paid), null, 'emerald', 'banknote'],
+      ['Outstanding', reportMoney(totals.due), null, totals.due > 0 ? 'rose' : null, 'clock'],
+      ['Average sale', reportMoney(totals.avg), null, null, 'chart']
+    ] : [
+      ['Invoices', n, null, null, 'receipt'],
+      ['Total purchases', reportMoney(totals.total), null, null, 'coins'],
+      ['Paid out', reportMoney(totals.paid), null, 'emerald', 'banknote'],
+      ['Outstanding', reportMoney(totals.due), null, totals.due > 0 ? 'rose' : null, 'clock'],
+      ['Tax included', reportMoney(totals.tax), null, null, 'receipt'],
+      ['Discounts', reportMoney(totals.disc), null, null, 'percent'],
+      ['Average bill', reportMoney(totals.avg), null, null, 'chart']
+    ];
+
+    const tableHtml = `<div class="shp-tw"><table><thead>${isSale ?
+      `<tr><th>Invoice</th><th>Date</th><th>Customer</th><th>Payment</th><th>Items</th><th>Gross Sales</th><th>Returned</th><th>Exchanged</th><th>Net Sales</th><th>Paid</th><th>Due</th><th>Status</th></tr>` :
+      `<tr><th>Invoice</th><th>Date</th><th>Supplier</th><th>Payment</th><th>Items</th><th>Subtotal</th><th>Tax</th><th>Discount</th><th>Paid</th><th>Due</th><th>Status</th></tr>`
+    }</thead><tbody>${rows.sort((a,b)=>String(b.invoice_date).localeCompare(String(a.invoice_date))).map(r=>statusRow(isSale ? [
+      `<code>${esc(r.invoice_number)}</code>`,
+      prettyDate(r.invoice_date),
+      `<span class="shp-rep-party">${esc(r._party)}</span>`,
+      payName(r.payment_method),
+      r._items,
+      reportMoney(Number(r.subtotal||0)),
+      r._retAmt > 0 ? `<span style="color:#b91c1c;font-weight:600">−${reportMoney(r._retAmt)}${r._retQty ? ' ('+r._retQty+')' : ''}</span>` : '—',
+      r._excAmt > 0 ? `<span style="color:#0284c7;font-weight:600">${reportMoney(r._excAmt)}${r._excQty ? ' ('+r._excQty+')' : ''}</span>` : '—',
+      `<b>${reportMoney(r._netTotal)}</b>`,
+      reportMoney(r._paid),
+      reportMoney(r._due)
+    ] : [
+      `<code>${esc(r.invoice_number)}</code>`,
+      prettyDate(r.invoice_date),
+      `<span class="shp-rep-party">${esc(r._party)}</span>`,
+      payName(r.payment_method),
+      r._items,
+      reportMoney(Number(r.subtotal||0)),
+      reportMoney(r._tax),
+      reportMoney(r._disc),
+      reportMoney(r._paid),
+      reportMoney(r._due)
+    ], r)).join('') || `<tr><td colspan="${isSale?12:11}">${shpEmpty('No invoices in this period.')}</td></tr>`}</tbody></table></div>`;
+
+    const csvHeaders = isSale ?
+      ['Invoice','Date','Customer','Payment','Items','Gross Sales','Returned Value','Returned Qty','Exchanged Value','Exchanged Qty','Net Sales','Paid','Due','Status'] :
+      ['Invoice','Date','Supplier','Payment','Items','Subtotal','Tax','Discount','Paid','Due','Status'];
+
+    const csvDataRows = isSale ?
+      rows.map(r=>[r.invoice_number,r.invoice_date,r._party,payName(r.payment_method),r._items,Number(r.subtotal||0),r._retAmt,r._retQty,r._excAmt,r._excQty,r._netTotal,r._paid,r._due,statusText(r)]) :
+      rows.map(r=>[r.invoice_number,r.invoice_date,r._party,payName(r.payment_method),r._items,Number(r.subtotal||0),r._tax,r._disc,r._paid,r._due,statusText(r)]);
+
+    return reportShell(kind,isSale?'Sales detailed report':'Purchase detailed report',isSale?'Every sales invoice in the selected period — customers, payment methods, returns, exchanges, net sales and dues.':'Every purchase bill in the selected period — suppliers, payment methods, items bought and outstanding dues.',
+      kpis,
       `<section class="shp-panel shp-rep-panel"><div class="shp-panel-head"><div><h3>Payment methods</h3><p class="shp-desc">Total value recorded through each payment channel.</p></div><span class="shp-kicker">${methods.length} channel${methods.length===1?'':'s'}</span></div>${methods.length?`<div class="shp-rep-break">${methods.map(x=>`<div class="shp-rep-barrow"><span>${payName(x.m)}</span><div><i class="${tone}" style="width:${Math.max(3,x.total/(methods[0].total||1)*100)}%"></i></div><b>${reportMoney(x.total)}</b><em>${x.count}×</em></div>`).join('')}</div>`:shpEmpty('No invoices in this period.')}</section>
       <section class="shp-panel shp-rep-panel"><div class="shp-panel-head"><div><h3>Top ${partyLabel(kind).toLowerCase()}s</h3><p class="shp-desc">Ranked by total transaction value.</p></div></div><div class="shp-rep-tw"><table><thead><tr><th>${partyLabel(kind)}</th><th>Invoices</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${topParties.map(p=>`<tr><td class="shp-wrap">${esc(p.name)}</td><td>${p.count}</td><td>${reportMoney(p.total)}</td><td>${reportMoney(p.paid)}</td><td class="${p.due>0?'shp-rep-due':''}">${reportMoney(p.due)}</td></tr>`).join('')||`<tr><td colspan="5">${shpEmpty('No data.')}</td></tr>`}</tbody></table></div></section>
       <section class="shp-panel shp-rep-panel"><div class="shp-panel-head"><div><h3>Top ${isSale?'sold':'purchased'} items</h3><p class="shp-desc">From invoice line items.</p></div></div><div class="shp-rep-tw"><table><thead><tr><th>Item</th><th>Qty</th><th>Value</th></tr></thead><tbody>${topItems.map(x=>`<tr><td class="shp-wrap">${esc(x.name)}</td><td>${Number(x.qty).toLocaleString('en-BD')}</td><td>${reportMoney(x.total)}</td></tr>`).join('')||`<tr><td colspan="3">${shpEmpty('No line items in this period.')}</td></tr>`}</tbody></table></div></section>
       <section class="shp-panel shp-rep-panel"><div class="shp-panel-head"><div><h3>Daily trend</h3><p class="shp-desc">${isSale?'Sales':'Purchases'} value across the period.</p></div></div><div class="shp-rep-trend">${trendBarsHtml(trend,tone)}</div></section>`,
-      `<div class="shp-tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>${partyLabel(kind)}</th><th>Payment</th><th>Items</th><th>Subtotal</th><th>Tax</th><th>Discount</th><th>Paid</th><th>Due</th><th>Status</th></tr></thead><tbody>${rows.sort((a,b)=>String(b.invoice_date).localeCompare(String(a.invoice_date))).map(r=>statusRow([`<code>${esc(r.invoice_number)}</code>`,prettyDate(r.invoice_date),`<span class="shp-rep-party">${esc(r._party)}</span>`,payName(r.payment_method),r._items,reportMoney(Number(r.subtotal||0)),reportMoney(r._tax),reportMoney(r._disc),reportMoney(r._paid),reportMoney(r._due)],r)).join('')||`<tr><td colspan="11">${shpEmpty('No invoices in this period.')}</td></tr>`}</tbody></table></div>`,
-      ['Invoice','Date',partyLabel(kind),'Payment','Items','Subtotal','Tax','Discount','Paid','Due','Status'],
-      rows.map(r=>[r.invoice_number,r.invoice_date,r._party,payName(r.payment_method),r._items,Number(r.subtotal||0),r._tax,r._disc,r._paid,r._due,statusText(r)])
+      tableHtml,
+      csvHeaders,
+      csvDataRows
     );
   };
 
@@ -795,19 +971,51 @@ async function report(){
 
   const render=()=>{
     const data={sales:sum(rangeRows(all.sales)),purchase:sum(rangeRows(all.purchase)),expense:sum(rangeRows(all.expense))};
-    const profit=data.sales.total-data.purchase.total-data.expense.total, netCash=data.sales.paid-data.purchase.paid-data.expense.paid;
-    const cards=[['Sales',data.sales,'sales'],['Purchase',data.purchase,'purchase'],['Expense',data.expense,'expense']];
-    const chartMax=Math.max(1,...cards.map(x=>x[1].total));
+    const rangeReturns = returnRows.filter(r=>inRange(r.return_date));
+    const rangeExchanges = exchangeRows.filter(r=>inRange(r.exchange_date));
+    const totalReturnAmt = rangeReturns.reduce((a,r)=>a+Number(r.total_return_amount||0),0);
+    const totalRefundAmt = rangeReturns.reduce((a,r)=>a+Number(r.refunded_amount||r.total_return_amount||0),0);
+    const totalExchangeAmt = rangeExchanges.reduce((a,r)=>a+Number(r.new_items_total||0),0);
+    const excCustPaid = rangeExchanges.filter(r=>r.action_type==='customer_pays').reduce((a,r)=>a+Number(r.difference_amount||0),0);
+    const excStoreRefunded = rangeExchanges.filter(r=>r.action_type==='shop_refunds').reduce((a,r)=>a+Number(r.difference_amount||0),0);
+
+    const grossSales = data.sales.total;
+    const netSales = Math.max(0, grossSales - totalReturnAmt);
+    const profit = netSales - data.purchase.total - data.expense.total;
+    const netSalesCash = Math.max(0, data.sales.paid + excCustPaid - totalRefundAmt - excStoreRefunded);
+    const netCash = netSalesCash - (data.purchase.paid + data.expense.paid);
+
+    const summaryKpis = [
+      ['Gross sales', reportMoney(grossSales), `Paid ${reportMoney(data.sales.paid)} · Due ${reportMoney(data.sales.due)}`, ''],
+      ['Net sales', reportMoney(netSales), 'Gross sales − Returns', 'emerald'],
+      ['Returns & refunds', reportMoney(totalReturnAmt), `${rangeReturns.length} return(s) · Refunded ${reportMoney(totalRefundAmt)}`, totalReturnAmt > 0 ? 'rose' : ''],
+      ['Sales exchanges', reportMoney(totalExchangeAmt), `${rangeExchanges.length} exchange(s) · Settled ${reportMoney(excCustPaid - excStoreRefunded)}`, ''],
+      ['Purchases', reportMoney(data.purchase.total), `Paid ${reportMoney(data.purchase.paid)} · Due ${reportMoney(data.purchase.due)}`, ''],
+      ['Expenses', reportMoney(data.expense.total), `Paid ${reportMoney(data.expense.paid)} · Due ${reportMoney(data.expense.due)}`, ''],
+      ['Net cash flow', `${netCash<0?'−':''}${reportMoney(Math.abs(netCash))}`, 'Net sales cash − Expenses', netCash<0?'negative':''],
+      ['Operating profit', `${profit<0?'−':''}${reportMoney(Math.abs(profit))}`, 'Net sales − Purchase − Expense', profit<0?'negative':'profit']
+    ];
+
+    const chartCards = [['Gross sales',grossSales,'sales'],['Net sales',netSales,'sales'],['Returns',totalReturnAmt,'expense'],['Purchases',data.purchase.total,'purchase'],['Expenses',data.expense.total,'expense']];
+    const chartMax=Math.max(1,...chartCards.map(x=>x[1]));
+
     $('#page').innerHTML=shpHead('Insights','Business reports','Summary, sales, purchase and expense reports with clear totals and profit figures for any date range.')+`<section class="shp-pagegap">
       <div class="shp-chips shp-rtabs"><button class="shp-chip ${active==='summary'?'on':''}" data-report-tab="summary">Summary report</button><button class="shp-chip ${active==='sales'?'on':''}" data-report-tab="sales">Sales report</button><button class="shp-chip ${active==='purchase'?'on':''}" data-report-tab="purchase">Purchase report</button><button class="shp-chip ${active==='expense'?'on':''}" data-report-tab="expense">Expense report</button>${state.businessHealthEver?`<button class="shp-chip ${active==='health'?'on':''}" data-report-tab="health">Business AI Health</button>`:''}</div>
       <section class="shp-panel shp-rfilter"><div><span class="lbl">Report period</span><b id="reportPeriodText">${prettyDate(start)} — ${prettyDate(end)}</b></div><div class="shp-rdates"><label>From<input id="reportStart" type="date" value="${start}" max="${today}"></label><label>To<input id="reportEnd" type="date" value="${end}" max="${today}"></label><button class="shp-btn shp-btn-primary" id="reportSearch" type="button">Search report</button></div></section>
       ${active==='summary'?`<div class="shp-pagegap">
-        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Management report · date range summary</h3><p class="shp-desc">Sales, purchases and expenses based on transactions recorded from ${prettyDate(start)} to ${prettyDate(end)}.</p></div><span class="shp-kicker">${esc(state.store?.name||'Shop')}</span></div><div class="shp-form-actions" style="justify-content:flex-start"><button class="shp-btn shp-btn-soft" id="reportPrint" type="button">Print summary</button></div></section>
-        <div class="shp-rkpis">${cards.map(([name,x])=>`<article class="shp-rkpi"><small>Total ${name}</small><strong>${reportMoney(x.total)}</strong><p><span>Paid <b>${reportMoney(x.paid)}</b></span><span>Due <b>${reportMoney(x.due)}</b></span></p></article>`).join('')}<article class="shp-rkpi profit ${profit<0?'negative':''}"><small>Estimated operating profit</small><strong>${profit<0?'−':''}${reportMoney(Math.abs(profit))}</strong><p>Sales − Purchase − Expense</p></article></div>
-        <div class="shp-rgrid"><section class="shp-panel"><div class="shp-panel-head"><div><h3>Financial summary</h3><p class="shp-desc">Total value, received or paid amount, and outstanding due.</p></div></div><div class="shp-tw"><table><thead><tr><th>Category</th><th>Total</th><th>Paid</th><th>Due</th></tr></thead><tbody>${cards.map(([n,x,c])=>`<tr><td><span class="shp-rdot ${c}"></span>${n}</td><td>${reportMoney(x.total)}</td><td>${reportMoney(x.paid)}</td><td>${reportMoney(x.due)}</td></tr>`).join('')}</tbody></table></div></section>
-        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Operating result</h3><p class="shp-desc">Period estimate; it is not a cash-flow figure.</p></div></div><div class="shp-rprofit ${profit<0?'negative':''}">${profit<0?'−':''}${reportMoney(Math.abs(profit))}</div><div class="shp-rformula"><span>Sales <b>${reportMoney(data.sales.total)}</b></span><i>−</i><span>Purchase <b>${reportMoney(data.purchase.total)}</b></span><i>−</i><span>Expense <b>${reportMoney(data.expense.total)}</b></span></div></section></div>
-        <div class="shp-rgrid"><section class="shp-panel"><div class="shp-panel-head"><div><h3>Activity comparison</h3><p class="shp-desc">Total transaction value during selected period.</p></div></div><div class="shp-pagegap" style="gap:9px">${cards.map(([n,x,c])=>`<div class="shp-rbar"><span>${n}</span><div><i class="${c}" style="width:${x.total/chartMax*100}%"></i></div><b>${reportMoney(x.total)}</b></div>`).join('')}</div></section>
-        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Cash & due position</h3><p class="shp-desc">Based on recorded paid amounts.</p></div></div><div class="shp-rcash"><p><span>Sales received</span><b>${reportMoney(data.sales.paid)}</b></p><p><span>Purchase & expense paid</span><b>${reportMoney(data.purchase.paid+data.expense.paid)}</b></p><p class="total"><span>Net cash movement</span><b>${netCash<0?'−':''}${reportMoney(Math.abs(netCash))}</b></p><p><span>Total outstanding due</span><b>${reportMoney(data.sales.due+data.purchase.due+data.expense.due)}</b></p></div></section></div>
+        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Management report · date range summary</h3><p class="shp-desc">Sales, returns, exchanges, purchases and expenses recorded from ${prettyDate(start)} to ${prettyDate(end)}.</p></div><span class="shp-kicker">${esc(state.store?.name||'Shop')}</span></div><div class="shp-form-actions" style="justify-content:flex-start"><button class="shp-btn shp-btn-soft" id="reportPrint" type="button">Print summary</button></div></section>
+        <div class="shp-rkpis">${summaryKpis.map(([name,val,sub,cls])=>`<article class="shp-rkpi ${cls}"><small>${name}</small><strong>${val}</strong><p>${sub}</p></article>`).join('')}</div>
+        <div class="shp-rgrid"><section class="shp-panel"><div class="shp-panel-head"><div><h3>Financial summary</h3><p class="shp-desc">Total value, received or paid amount, and outstanding due or refund.</p></div></div><div class="shp-tw"><table><thead><tr><th>Category</th><th>Total</th><th>Paid / Settled</th><th>Due / Refund</th></tr></thead><tbody>
+          <tr><td><span class="shp-rdot sales"></span>Gross Sales</td><td>${reportMoney(grossSales)}</td><td>${reportMoney(data.sales.paid)}</td><td>${reportMoney(data.sales.due)}</td></tr>
+          <tr><td><span class="shp-rdot" style="background:#e11d48"></span>Returns &amp; Refunds</td><td>${reportMoney(totalReturnAmt)}</td><td>${reportMoney(totalRefundAmt)}</td><td>—</td></tr>
+          <tr><td><span class="shp-rdot" style="background:#059669"></span>Net Sales</td><td>${reportMoney(netSales)}</td><td>${reportMoney(netSalesCash)}</td><td>${reportMoney(data.sales.due)}</td></tr>
+          <tr><td><span class="shp-rdot" style="background:#0891b2"></span>Sales Exchanges</td><td>${reportMoney(totalExchangeAmt)}</td><td>+${reportMoney(excCustPaid)}</td><td>${excStoreRefunded>0?'−'+reportMoney(excStoreRefunded):'—'}</td></tr>
+          <tr><td><span class="shp-rdot purchase"></span>Purchases</td><td>${reportMoney(data.purchase.total)}</td><td>${reportMoney(data.purchase.paid)}</td><td>${reportMoney(data.purchase.due)}</td></tr>
+          <tr><td><span class="shp-rdot expense"></span>Expenses</td><td>${reportMoney(data.expense.total)}</td><td>${reportMoney(data.expense.paid)}</td><td>${reportMoney(data.expense.due)}</td></tr>
+        </tbody></table></div></section>
+        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Operating result</h3><p class="shp-desc">Period estimate based on Net Sales.</p></div></div><div class="shp-rprofit ${profit<0?'negative':''}">${profit<0?'−':''}${reportMoney(Math.abs(profit))}</div><div class="shp-rformula"><span>Net sales <b>${reportMoney(netSales)}</b></span><i>−</i><span>Purchase <b>${reportMoney(data.purchase.total)}</b></span><i>−</i><span>Expense <b>${reportMoney(data.expense.total)}</b></span></div></section></div>
+        <div class="shp-rgrid"><section class="shp-panel"><div class="shp-panel-head"><div><h3>Activity comparison</h3><p class="shp-desc">Total transaction value during selected period.</p></div></div><div class="shp-pagegap" style="gap:9px">${chartCards.map(([n,val,c])=>`<div class="shp-rbar"><span>${n}</span><div><i class="${c}" style="width:${val/chartMax*100}%"></i></div><b>${reportMoney(val)}</b></div>`).join('')}</div></section>
+        <section class="shp-panel"><div class="shp-panel-head"><div><h3>Cash &amp; due position</h3><p class="shp-desc">Based on recorded paid amounts, customer settlements and refunds.</p></div></div><div class="shp-rcash"><p><span>Sales cash received</span><b>${reportMoney(data.sales.paid)}</b></p>${excCustPaid>0?`<p><span>Exchange customer payments</span><b>+${reportMoney(excCustPaid)}</b></p>`:''}${(totalRefundAmt+excStoreRefunded)>0?`<p><span>Return &amp; exchange refunds</span><b>−${reportMoney(totalRefundAmt+excStoreRefunded)}</b></p>`:''}<p><span>Purchase &amp; expense paid</span><b>${reportMoney(data.purchase.paid+data.expense.paid)}</b></p><p class="total"><span>Net cash movement</span><b>${netCash<0?'−':''}${reportMoney(Math.abs(netCash))}</b></p><p><span>Total outstanding due</span><b>${reportMoney(data.sales.due+data.purchase.due+data.expense.due)}</b></p></div></section></div>
       </div>`:active==='health'?healthView():detailReport(active)}
     </section>`;
     document.querySelectorAll('[data-report-tab]').forEach(b=>b.onclick=()=>{active=b.dataset.reportTab;render()});
@@ -834,13 +1042,16 @@ const renderHealth=x=>{
  $('#healthResult').innerHTML=`
 <section class="shp-panel"><div class="shp-health-score"><div class="shp-score" style="--pct:${x.score}"><i></i><div style="display:grid;place-items:center"><b>${x.score}</b><small>/ 100</small></div></div>
  <div><span class="shp-kicker">Business health score</span><h3 style="margin-top:4px">${x.score>=80?'Healthy business position':x.score>=60?'Needs attention':'Priority action needed'}</h3>
- <p class="shp-desc">Period ${esc(per.start||'')} to ${esc(per.end||'')} (${per.days||'?'} day(s)), compared with ${esc(per.previousStart||'')} to ${esc(per.previousEnd||'')}. Score blends due collection, discounts, margin, stock, profile completeness and recorded errors.</p>
+ <p class="shp-desc">Period ${esc(per.start||'')} to ${esc(per.end||'')} (${per.days||'?'} day(s)), compared with ${esc(per.previousStart||'')} to ${esc(per.previousEnd||'')}. Score blends due collection, returns, discounts, margin, stock, profile completeness and recorded errors.</p>
  <div class="shp-htrends">
-  <span>Sales ${trend(tr.sales,true)}</span><span>Est. profit ${trend(tr.profit,true)}</span><span>Expenses ${trend(tr.expense,false)}</span><span>Purchases ${trend(tr.purchase,true)}</span>
+  <span>Gross Sales ${trend(tr.sales,true)}</span><span>Net Sales ${trend(tr.netSales,true)}</span><span>Returns ${trend(tr.returns,false)}</span><span>Est. profit ${trend(tr.profit,true)}</span><span>Expenses ${trend(tr.expense,false)}</span><span>Purchases ${trend(tr.purchase,true)}</span>
  </div></div></div></section>
 
 <div class="shp-hm shp-hm2">
- ${card('Sales',m(d.sales?.total||0),`${d.sales?.count||0} invoice(s) · ${d.sales?.uniqueCustomers||0} buyer(s)`)}
+ ${card('Gross Sales',m(d.sales?.total||0),`${d.sales?.count||0} invoice(s) · ${d.sales?.uniqueCustomers||0} buyer(s)`)}
+ ${card('Net Sales',m(d.netSales||(d.sales?.total||0)),'Gross sales − Returns')}
+ ${card('Customer Returns',m(d.returns?.total||0),`${d.returns?.count||0} return(s) · Rate ${d.returns?.returnRate||0}%`,(d.returns?.returnRate>10)?'shp-warn':'')}
+ ${card('Sales Exchanges',m(d.exchanges?.total||0),`${d.exchanges?.count||0} exchange(s) processed`)}
  ${card('Cash collected',m(d.sales?.collected||0),r.collectionRate==null?'—':'Collection '+r.collectionRate+'%',(r.collectionRate!=null&&r.collectionRate<60)?'shp-warn':'')}
  ${card('Est. profit',m(prof.value||0),prof.marginPct==null?'—':'Margin '+prof.marginPct+'%',(prof.value!=null&&prof.value<0)?'shp-bad':prof.marginPct!=null&&prof.marginPct<10?'shp-warn':'')}
  ${card('Total due',m(du.total||0),(r.dueRate==null?'':'Due '+r.dueRate+'% of sales · ')+'Recovered '+m(du.recovered||0),(du.total>0&&(r.dueRate||0)>50)?'shp-bad':'')}
@@ -860,7 +1071,7 @@ const renderHealth=x=>{
  </section>
  <section class="shp-panel"><div class="shp-panel-head"><div><h3>This period vs previous</h3><p class="shp-desc">Same number of days, immediately before the chosen range.</p></div></div>
  <table class="shp-htable"><thead><tr><th></th><th>This period</th><th>Previous</th><th>Change</th></tr></thead><tbody>
- ${[['Sales',tr.sales,true],['Purchases',tr.purchase,true],['Expenses',tr.expense,false],['Est. profit',tr.profit,true]].map(([label,rec,goodUp])=>{rec=rec||{};const p=rec.pct;const good=p==null||p===0?'':p>0?(goodUp?'shp-up':'shp-dn'):(goodUp?'shp-dn':'shp-up');return `<tr><td>${label}</td><td>${m(rec.now||0)}</td><td>${m(rec.prev||0)}</td><td class="${good}">${p==null?'—':(p>0?'+':'')+p+'%'}</td></tr>`}).join('')}
+ ${[['Gross Sales',tr.sales,true],['Net Sales',tr.netSales,true],['Returns',tr.returns,false],['Exchanges',tr.exchanges,true],['Purchases',tr.purchase,true],['Expenses',tr.expense,false],['Est. profit',tr.profit,true]].map(([label,rec,goodUp])=>{rec=rec||{};const p=rec.pct;const good=p==null||p===0?'':p>0?(goodUp?'shp-up':'shp-dn'):(goodUp?'shp-dn':'shp-up');return `<tr><td>${label}</td><td>${m(rec.now||0)}</td><td>${m(rec.prev||0)}</td><td class="${good}">${p==null?'—':(p>0?'+':'')+p+'%'}</td></tr>`}).join('')}
  </tbody></table>
  ${du.total>0?`<p class="shp-desc" style="margin-top:10px"><b>Due recovery:</b> ${du.recoveryRate==null?'—':du.recoveryRate+'%'} of dues came back during the period (${m(du.recovered||0)} recovered vs ${m(du.total||0)} still open).</p>`:''}
  </section>
@@ -1288,15 +1499,16 @@ async function ownerVaultium(){
 const SHP_NAV=[
   {h:'Overview',items:[['dashboard','Dashboard','dashboard']]},
   {h:'Operations',items:[['suppliers','Suppliers','truck'],['customers','Customers','users'],['inventory','Inventory','package'],['purchases','Purchases','cart'],['sales','Sales','receipt'],['expense','Expense','wallet'],['due-recover','Due Recover','coins']]},
+  {h:'After Sales',items:[['returns-refunds','Return & Exchange','rotate-ccw']]},
   {h:'Staff',items:[['staff-manager','Staff Manager','user']]},
   {h:'Insights',items:[['report','Report','chart']]},
   {h:'Tools',items:[['connectx','ConnectX','mail'],['zudo','Zudo','sparkles'],['vaultium','Vaultium','file']]},
-  {h:'Preferences',items:[['settings','Settings','settings']]}
+  {h:'Preferences',items:[['settings','Settings','settings'],['audit-log','Audit Log','activity']]}
 ];
-const SHP_LABEL=Object.fromEntries(SHP_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));SHP_LABEL['sale-invoice']='New sales invoice';
+const SHP_LABEL=Object.fromEntries(SHP_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));SHP_LABEL['sale-invoice']='New sales invoice';SHP_LABEL['returns-refunds']='Return & Exchange';SHP_LABEL['audit-log']='Audit Log';
 const SHP_SUN='<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
 const SHP_MOON='<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
-const shpTone=x=>x==='sale'||x==='sales'?'emerald':x==='purchase'?'amber':x==='expense'?'rose':x==='inventory'?'sky':'zinc';
+const shpTone=x=>x==='sale'||x==='sales'?'emerald':x==='purchase'?'amber':x==='expense'?'rose':x==='inventory'?'sky':x==='exchange'?'cyan':x==='return'?'violet':x==='salary'?'blue':'zinc';
 const shpChip=(icon,tone='emerald')=>`<span class="shp-chipic shp-t-${tone}">${lucide(icon)}</span>`;
 const shpBadge=(txt,tone='zinc')=>`<span class="shp-badge shp-t-${tone}">${txt}</span>`;
 /* Shop page titles/subtitles removed per request; action buttons passed as the 4th arg are preserved in a compact toolbar. */
@@ -1307,15 +1519,15 @@ function shpModal(titleText,inner,cls=''){const e=document.createElement('div');
 const shpKpi=(icon,tone,label,value,foot)=>`<section class="shp-card shp-kpi"><div class="shp-kpi-top">${shpChip(icon,tone)}<span class="shp-kicker">${label}</span></div><b class="shp-kpi-val">${value}</b>${foot?`<span class="shp-kpi-foot">${foot}</span>`:''}</section>`;
 
 function shopHome(){
-  document.body.classList.remove('adm-on','ob-on');
+  document.body.classList.remove('adm-on','ob-on','adm-fixed-page');
   document.body.classList.add('shp-on');
   const savedTheme=localStorage.getItem('ems.shpTheme');
   if(savedTheme)document.body.dataset.shpTheme=savedTheme;
   const visible=menus.filter(([,section])=>canAccess(section,'view')&&(section!=='connectx'||state.connectxEnabled||state.connectxHistory)&&(section!=='zudo'||state.zudoEnabled||state.zudoHistory)&&(section!=='vaultium'||state.vaultiumEnabled||state.vaultiumEver));
-  const visibleSlugs=new Set(visible.map(([x])=>x.toLowerCase().replaceAll(' ','-')));
+  const visibleSlugs=new Set(visible.map(m=>m[3]||m[0].toLowerCase().replaceAll(' ','-')));
   app.innerHTML=`<div class="shp"><aside class="shp-side">
     <div class="shp-brand"><span class="shp-mark shp-t-emerald">${lucide('store')}</span><div class="shp-brandtext"><b data-brand-name>${sk('62px',12)}</b><small>powered by <span data-powered-by>${sk('42px',8)}</span></small></div></div>
-    <div class="shp-store"><span class="shp-kicker">Current shop</span><b>${esc(state.store?.name||'—')}</b><span class="shp-store-user"><i>${esc(state.user.name).slice(0,1).toUpperCase()}</i><b>${esc(state.user.name)}</b></span></div>
+    <div class="shp-store"><span class="shp-kicker">${esc(state.store?.category||'Current shop')}</span><b>${esc(state.store?.name||'—')}</b><span class="shp-store-user"><i>${esc(state.user.name).slice(0,1).toUpperCase()}</i><b>${esc(state.user.name)}</b></span></div>
     <nav class="shp-nav">${SHP_NAV.map(g=>{const items=g.items.filter(([slug])=>visibleSlugs.has(slug));return items.length?`<div class="shp-navgroup"><p>${g.h}</p>${items.map(([slug,label,icon])=>`<button data-page="${slug}" title="${label}"><span class="shp-navicon">${lucide(icon)}</span><span class="shp-navlabel">${label}</span></button>`).join('')}</div>`:''}).join('')}</nav>
     <div class="shp-sidefoot">${state.adminAccess?'<button class="shp-btn shp-btn-ghost" id="returnAdmin">Return to admin</button>':''}<button class="shp-btn shp-btn-soft" id="out">Sign out</button></div>
   </aside><main class="shp-main">
@@ -1331,28 +1543,29 @@ function shopHome(){
   if($('#vaultTopButton'))$('#vaultTopButton').onclick=()=>page('vaultium');
   if($('#returnAdmin'))$('#returnAdmin').onclick=()=>{let r=JSON.parse(localStorage.getItem('ems.admin.return')||'null');if(r){save(r);localStorage.removeItem('ems.admin.return');home()}};
   document.querySelectorAll('[data-page]').forEach(x=>x.onclick=()=>page(x.dataset.page));
-  page((visible[0]?.[0]||'dashboard').toLowerCase().replaceAll(' ','-'));
+  page(visible[0]?.[3]||(visible[0]?.[0]||'dashboard').toLowerCase().replaceAll(' ','-'));
   if(state.readOnly||state.licenseExpired)readOnlyNotice()
 }
 
 /* ═══════════ SHOP · Entities (suppliers / customers / expense) + inventory ═══════════ */
-const SHP_KICKER={suppliers:'Operations',customers:'Operations',inventory:'Operations',purchases:'Operations',sales:'Operations',expense:'Operations','due-recover':'Operations','staff-manager':'Staff',attendance:'Staff',salary:'Staff',report:'Insights',settings:'Preferences',connectx:'Tools',zudo:'Tools',vaultium:'Tools',dashboard:'Overview'};
+const SHP_KICKER={suppliers:'Operations',customers:'Operations',inventory:'Operations',purchases:'Operations',sales:'Operations',expense:'Operations','due-recover':'Operations','returns-refunds':'After Sales','staff-manager':'Staff',attendance:'Staff',salary:'Staff',report:'Insights',settings:'Preferences','audit-log':'Preferences',connectx:'Tools',zudo:'Tools',vaultium:'Tools',dashboard:'Overview'};
 
 async function dashboard(){let [d,snapshots,trend]=await Promise.all([api('dashboard'),api('dashboard/activity-snapshot'),api('dashboard/sales-trend').catch(e=>{console.error('sales-trend failed:',e);return null})]),values=[['Sales',d.sales.today,'emerald'],['Purchase',d.purchase.today,'amber'],['Expense',d.expense.today,'rose'],['Sales due',d.sales.dueToday,'sky']],max=Math.max(1,...values.map(x=>Number(x[1])));
 $('#page').innerHTML=shpHead('Overview','Dashboard','Today’s money movement across sales, purchases, expenses and dues.')
-+`<div class="shp-grid shp-kpis shp-anim-kpis">${shpKpi('receipt','emerald','Sales',money(d.sales.lifetime),'Today: '+money(d.sales.today))}${shpKpi('cart','amber','Purchase',money(d.purchase.lifetime),'Today: '+money(d.purchase.today))}${shpKpi('wallet','rose','Expense',money(d.expense.lifetime),'Today: '+money(d.expense.today))}${shpKpi('coins','sky','Sales due',money(d.sales.dueLifetime),'Today: '+money(d.sales.dueToday))}</div>
++`<div class="shp-grid shp-kpis shp-anim-kpis">${shpKpi('receipt','emerald','Sales',money(d.sales.lifetime),'Today: '+money(d.sales.today))}${shpKpi('cart','amber','Purchase',money(d.purchase.lifetime),'Today: '+money(d.purchase.today))}${shpKpi('wallet','rose','Expense',money(d.expense.lifetime),'Today: '+money(d.expense.today))}${shpKpi('coins','sky','Sales due',money(d.sales.dueLifetime),'Today: '+money(d.sales.dueToday))}${shpKpi('refresh','cyan','Exchange',money(d.exchanges?.lifetime||0),'Today: '+money(d.exchanges?.today||0))}${shpKpi('rotate-ccw','violet','Return',money(d.returns?.lifetime||0),'Today: '+money(d.returns?.today||0))}${shpKpi('banknote','blue','Salary',money(d.salary?.lifetime||0),'Today: '+money(d.salary?.today||0))}${shpKpi('coins','rose','Refund',money(d.refunds?.lifetime||0),'Today: '+money(d.refunds?.today||0))}</div>
 <div class="shp-grid shp-anim-panels shp-dash2">
-  <section class="shp-panel">
+  <section class="shp-panel shp-panel-fchart">
     <div class="shp-panel-head"><div><h3>Today’s financial chart</h3></div><span class="shp-badge shp-t-emerald shp-live"><i></i>Live</span></div>
     <div class="shp-ftotal"><span>Total transaction</span><b>${money(values.slice(0,3).reduce((n,x)=>n+Number(x[1]),0))}</b></div>
     <div class="shp-fchart">${values.map(([name,value,tone])=>`<div class="shp-fbar shp-t-${tone}"><div class="shp-fbar-track"><i style="height:${Math.max(4,Number(value)/max*100)}%"></i></div><b>${money(value)}</b><small>${name}</small></div>`).join('')}</div>
   </section>
-  <section class="shp-panel">
-    <div class="shp-panel-head"><div><h3>Recent activity</h3></div><span class="shp-kicker">Last 24 hours</span></div>
+  <section class="shp-panel shp-panel-activity">
+    <div class="shp-panel-head"><div><h3>Recent activity</h3></div><div style="display:flex;align-items:center;gap:8px;"><span class="shp-kicker">Last 24 hours</span><button type="button" class="shp-btn shp-btn-ghost shp-btn-sm" id="dashAuditBtn" style="font-size:11px;padding:3px 8px;">Full Audit Log →</button></div></div>
     ${snapshots.length?`<div class="shp-tw shp-anim-rows"><table><thead><tr><th>Label</th><th>ID</th><th>Total</th><th>Paid</th><th>Due</th><th>By</th><th>Time</th></tr></thead><tbody>${snapshots.map(x=>`<tr><td><span class="shp-tag shp-t-${shpTone(x.label.toLowerCase())}">${esc(x.label)}</span></td><td>${esc(x.id)}</td><td>${x.total==='—'?'—':money(x.total)}</td><td>${x.paid==='—'?'—':money(x.paid)}</td><td>${x.due==='—'?'—':money(x.due)}</td><td>${esc(x.submittedBy)}</td><td>${ago(x.createdAt)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="shp-desc">No sales, purchases, expenses, or inventory activity during the last 24 hours.</p>'}
   </section>
 </div>
 ${trend?salesTrendChart(trend):''}`;
+if($('#dashAuditBtn'))$('#dashAuditBtn').onclick=()=>page('audit-log');
 if(!matchMedia('(prefers-reduced-motion: reduce)').matches){document.querySelectorAll('#page .shp-kpi-val').forEach((el,i)=>{const target=Number(String(el.textContent).replace(/[^0-9.]/g,''))||0;if(!target)return;const t0=performance.now()+90*i,dur=620,tick=now=>{if(!el.isConnected)return;const k=Math.min(1,Math.max(0,(now-t0)/dur));el.textContent=money(target*(1-Math.pow(1-k,3)));if(k<1)requestAnimationFrame(tick)};requestAnimationFrame(tick)})}
 }
  
@@ -1372,6 +1585,22 @@ async function profile(){let p=await api('admin/profile');$('#page').innerHTML=a
   </section>`;
   $('#profileForm').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));if(!b.password)delete b.password;try{let x=await api('admin/profile',{method:'PATCH',body:JSON.stringify(b)});state.user.name=x.name;save(state);toast('Administrator profile updated.')}catch(x){toast(x.message)}}}
 
+const STORE_CATEGORIES=[
+  'Electronics',
+  'Confectionery',
+  'Grocery & Supermarket',
+  'Pharmacy & Healthcare',
+  'Clothing & Fashion',
+  'Cosmetics & Beauty',
+  'Hardware & Tools',
+  'Restaurant & Cafe',
+  'Mobile & Gadgets',
+  'Bookshop & Stationery',
+  'Wholesale & Distribution',
+  'General Store',
+  'Other'
+];
+
 function storeCards(rows,usageMap,zudoMap,healthMap,ent){
   if(!rows.length)return admEmpty('No stores yet. Create your first store to begin.');
   return rows.map(r=>{
@@ -1379,7 +1608,13 @@ function storeCards(rows,usageMap,zudoMap,healthMap,ent){
     const usage=(on,used,limit)=>on?`<div class="adm-feat on"><span>Used</span>${admMeter(used,limit)}<b>${used}/${limit}</b></div>`:'';
     return `<article class="adm-storecard">
       <div class="adm-store-top">
-        <div class="adm-store-title"><h3>${esc(r.name)}</h3><code>${esc(r.shop_code)}</code></div>
+        <div class="adm-store-title">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+            <h3>${esc(r.name)}</h3>
+            <span class="adm-badge adm-t-sky">${esc(r.category||'General Store')}</span>
+          </div>
+          <code>${esc(r.shop_code)}</code>
+        </div>
         ${admBadge(esc(r.status),r.status==='active'?'emerald':r.status==='read_only'?'amber':'zinc')}
       </div>
       ${r.address||r.phone||r.email||r.website?`<div class="adm-store-meta">${r.address?`<span>${esc(r.address)}</span>`:''}${r.phone?`<span>${esc(r.phone)}${r.phone2?' · '+esc(r.phone2):''}</span>`:''}${r.email?`<span>${esc(r.email)}</span>`:''}${r.website?`<span>${esc(r.website)}</span>`:''}</div>`:''}
@@ -1415,7 +1650,85 @@ async function stores(){let [rows,usage,zudoUsage,healthUsage,ent]=await Promise
   bindStores();$('#manageCapacity').onclick=()=>shopCapacityModal(rows,stores);}
 
 function shopCapacityModal(rows,refresh){let e=document.createElement('div');e.className='adm-modal';e.innerHTML=`<form class="adm-modalbox adm-modal-wide"><div class="adm-modalhead"><h2>Manage shop capacity</h2><button type="button" class="adm-x" aria-label="Close">×</button></div><div class="adm-modalbody"><p class="adm-desc">Choose which shops operate as Active, Read-Only, Inactive, or Delete. Active shops must not exceed your current license limit.</p><div class="adm-tw"><table><thead><tr><th>Shop</th><th>Shop ID</th><th>Current status</th><th>New status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(r.name)}</td><td><code>${esc(r.shop_code)}</code></td><td>${esc(r.status)}</td><td><select data-capacity-store="${r.id}"><option value="active" ${r.status==='active'?'selected':''}>Active</option><option value="read_only" ${r.status==='read_only'?'selected':''}>Read-Only</option><option value="inactive" ${r.status==='inactive'?'selected':''}>Inactive</option><option value="delete">Delete permanently</option></select></td></tr>`).join('')}</tbody></table></div><div class="adm-note" id="capacityNote"></div><div class="adm-form-actions"><button class="adm-btn adm-btn-primary">Save shop capacity</button></div></div></form>`;document.body.append(e);e.querySelector('.adm-x').onclick=()=>e.remove();let update=()=>{let n=[...e.querySelectorAll('[data-capacity-store]')].filter(x=>x.value==='active').length;$('#capacityNote').textContent=`Selected active shops: ${n}. Your license will validate the allowed capacity when saved.`};e.querySelectorAll('[data-capacity-store]').forEach(x=>x.onchange=update);update();e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();let choices=[...e.querySelectorAll('[data-capacity-store]')].map(x=>({id:x.dataset.capacityStore,status:x.value}));if(choices.some(x=>x.status==='delete')&&!confirm('Deleting a shop permanently removes its business data. Continue?'))return;try{await api('admin/store-capacity',{method:'POST',body:JSON.stringify({choices})});e.remove();toast('Shop capacity updated.');refresh()}catch(err){toast(err.message)}}}
-function storeModal(record,fields){let add=!record,e=admModal(add?'Create store':'Edit store',`<form class="adm-form">${fields.map(([n,l,r])=>`<label>${l}<input name="${n}" value="${esc(record?.[n]||'')}" ${r?'required':''}></label>`).join('')}<label>Low-stock alert value<input name="low_stock_threshold" type="number" min="0" step="0.001" value="${esc(record?.low_stock_threshold??5)}" required></label><div class="adm-form-actions"><button class="adm-btn adm-btn-primary">${add?'Create store':'Save changes'}</button></div></form>`);e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.low_stock_threshold=Number(b.low_stock_threshold);await api(add?'admin/stores':'admin/store/'+record.id,{method:add?'POST':'PATCH',body:JSON.stringify(b)});e.remove();toast(add?'Store created.':'Store updated.');stores()}catch(x){toast(x.message)}}}
+function storeModal(record,fields){
+  let add=!record;
+  let chosenCategory=record?.category||'Electronics';
+  if(!add){
+    let e=admModal('Edit store',`<form class="adm-form" id="storeEditForm"><label>Shop category<select name="category" required>${STORE_CATEGORIES.map(c=>`<option value="${esc(c)}" ${chosenCategory===c?'selected':''}>${esc(c)}</option>`).join('')}</select></label>${fields.map(([n,l,r])=>`<label>${l}<input name="${n}" value="${esc(record?.[n]||'')}" ${r?'required':''}></label>`).join('')}<label>Low-stock alert value<input name="low_stock_threshold" type="number" min="0" step="0.001" value="${esc(record?.low_stock_threshold??5)}" required></label><div class="adm-form-actions"><button class="adm-btn adm-btn-primary">Save changes</button></div></form>`);
+    e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.low_stock_threshold=Number(b.low_stock_threshold);await api('admin/store/'+record.id,{method:'PATCH',body:JSON.stringify(b)});e.remove();toast('Store updated.');stores()}catch(x){toast(x.message)}};
+    return;
+  }
+  let e=admModal('Create store',`
+    <div id="createStoreWizard">
+      <div id="stepCategory" class="adm-step-wrap">
+        <div class="adm-step-indicator">
+          <span class="adm-step-badge on">Step 1: Category</span>
+          <span class="adm-step-line"></span>
+          <span class="adm-step-badge">Step 2: Store Details</span>
+        </div>
+        <div style="margin-bottom:16px;">
+          <h3 style="font-size:15px;font-weight:700;margin:0 0 4px 0;">Select shop category</h3>
+          <p class="adm-desc" style="margin:0;">Choose what type of shop you are creating (e.g. Electronics, Confectionery, etc.).</p>
+        </div>
+        <div class="adm-form">
+          <label>Category
+            <select id="wizardCategorySelect" style="width:100%;">
+              ${STORE_CATEGORIES.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+            </select>
+          </label>
+          <div class="adm-cat-grid" id="catCardGrid">
+            ${STORE_CATEGORIES.map(c=>`<div class="adm-cat-card ${c==='Electronics'?'active':''}" data-cat="${esc(c)}"><span class="adm-cat-card-title">${esc(c)}</span><span class="adm-cat-card-sub">Shop type</span></div>`).join('')}
+          </div>
+          <div class="adm-form-actions" style="margin-top:16px;">
+            <button type="button" class="adm-btn adm-btn-primary" id="btnCategoryNext">Next →</button>
+          </div>
+        </div>
+      </div>
+      <div id="stepDetails" class="adm-step-wrap" style="display:none;">
+        <div class="adm-step-indicator">
+          <span class="adm-step-badge done">✓ Step 1: Category</span>
+          <span class="adm-step-line on"></span>
+          <span class="adm-step-badge on">Step 2: Store Details</span>
+        </div>
+        <div class="adm-cat-summary">
+          <div>
+            <small style="display:block;font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:var(--adm-muted);">Selected category</small>
+            <b id="summaryCategoryText" style="font-size:13.5px;color:var(--adm-sky,#38bdf8);">Electronics</b>
+          </div>
+          <button type="button" class="adm-btn adm-btn-ghost adm-btn-sm" id="btnCategoryBack">← Change category</button>
+        </div>
+        <form class="adm-form" id="createStoreForm">
+          <label>Shop category
+            <select name="category" id="detailsCategorySelect" required>
+              ${STORE_CATEGORIES.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+            </select>
+          </label>
+          ${fields.map(([n,l,r])=>`<label>${l}<input name="${n}" value="" ${r?'required':''}></label>`).join('')}
+          <label>Low-stock alert value<input name="low_stock_threshold" type="number" min="0" step="0.001" value="5" required></label>
+          <div class="adm-form-actions" style="display:flex;justify-content:space-between;align-items:center;margin-top:18px;">
+            <button type="button" class="adm-btn adm-btn-ghost" id="btnFooterBack">← Back</button>
+            <button type="submit" class="adm-btn adm-btn-primary">Create store</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `);
+  const step1=e.querySelector('#stepCategory'),step2=e.querySelector('#stepDetails'),catSelect=e.querySelector('#wizardCategorySelect'),detailsCatSelect=e.querySelector('#detailsCategorySelect'),summaryCat=e.querySelector('#summaryCategoryText'),btnNext=e.querySelector('#btnCategoryNext'),btnBack=e.querySelector('#btnCategoryBack'),btnFooterBack=e.querySelector('#btnFooterBack');
+  const catCards=e.querySelectorAll('#catCardGrid .adm-cat-card');
+  const updateCatSelection=(val)=>{
+    catSelect.value=val;
+    detailsCatSelect.value=val;
+    summaryCat.textContent=val;
+    catCards.forEach(c=>c.classList.toggle('active',c.dataset.cat===val));
+  };
+  catSelect.onchange=()=>updateCatSelection(catSelect.value);
+  catCards.forEach(c=>c.onclick=()=>updateCatSelection(c.dataset.cat));
+  btnNext.onclick=()=>{let val=catSelect.value||'General Store';detailsCatSelect.value=val;summaryCat.textContent=val;step1.style.display='none';step2.style.display='block';};
+  detailsCatSelect.onchange=()=>{summaryCat.textContent=detailsCatSelect.value;catSelect.value=detailsCatSelect.value;catCards.forEach(c=>c.classList.toggle('active',c.dataset.cat===detailsCatSelect.value));};
+  const goBack=()=>{catSelect.value=detailsCatSelect.value;catCards.forEach(c=>c.classList.toggle('active',c.dataset.cat===detailsCatSelect.value));step2.style.display='none';step1.style.display='block';};
+  btnBack.onclick=goBack;btnFooterBack.onclick=goBack;
+  e.querySelector('#createStoreForm').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.low_stock_threshold=Number(b.low_stock_threshold);await api('admin/stores',{method:'POST',body:JSON.stringify(b)});e.remove();toast('Store created.');stores()}catch(x){toast(x.message)}};
+}
 async function devices(){let rows=await api('admin/devices');const storesN=new Set(rows.map(x=>x.stores?.name).filter(Boolean)).size,staffN=new Set(rows.map(x=>x.staff?.user_id).filter(Boolean)).size,times=rows.map(x=>new Date(x.last_seen_at)).filter(d=>!isNaN(d)),last=times.sort((a,b)=>b-a)[0];
 $('#page').innerHTML=admHead('devices','This list records the most recent sign-in activity for each store and device fingerprint.')+`
   <div class="adm-grid adm-kpis">
@@ -1463,20 +1776,847 @@ function customerInvoices(customer){
 }
 function bindCrud(rows,kind,label,fields,refresh){if(kind==='customer')document.querySelectorAll('[data-cx-invoices]').forEach(x=>x.onclick=()=>customerInvoices(rows.find(r=>r.id===x.dataset.cxInvoices)));document.querySelectorAll(`[data-edit-${kind}]`).forEach(x=>x.onclick=()=>entityModal(kind,label,fields,rows.find(r=>r.id===x.dataset['edit'+kind[0].toUpperCase()+kind.slice(1)]),refresh));document.querySelectorAll(`[data-delete-${kind}]`).forEach(x=>x.onclick=async()=>{let id=x.dataset['delete'+kind[0].toUpperCase()+kind.slice(1)];if(!confirm('Delete this record?'))return;try{await api(kind+'/'+id,{method:'DELETE'});toast('Record deleted.');refresh()}catch(e){toast(e.message)}})}
 function entityModal(kind,label,fields,record,refresh){let expense=kind==='expense';let fieldHtml=fields.map(([n,l,req])=>{let type=n==='expense_date'?'date':(n==='total'||n==='paid'?'number':'text'),v=record?.[n]??(n==='expense_date'?new Date().toISOString().slice(0,10):(n==='paid'?0:''));return `<label>${l}<input name="${n}" type="${type}" ${type==='number'?'min="0" step="0.01"':''} value="${esc(v)}" ${req?'required':''}></label>`}).join('');let files=[],vault=null;if(expense){api('vaultium/availability').then(v=>{vault=v}).catch(()=>{})}let e=shpModal(`${record?'Edit':'Add'} ${label.slice(0,-1)}`,`<form class="shp-form"><div class="shp-grid2">${fieldHtml}</div>${expense?'<label>Due <input id="expenseDue" readonly></label>':''}${expense?`<div class="shp-attach"><h3 class="shp-kicker">File attachments · Vaultium</h3><label class="shp-attachpick"><input type="file" id="expFileInput" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.txt,.csv">Attach files — max 5, 5 MB each</label><div id="expSelected" class="shp-attachchips"></div></div>`:''}<div class="shp-form-actions"><button class="shp-btn shp-btn-primary">${record?'Save changes':'Save'}</button></div></form>`);if(expense){let calc=()=>$('#expenseDue').value=money(Math.max(0,Number(e.querySelector('[name=total]').value||0)-Number(e.querySelector('[name=paid]').value||0)));e.querySelector('[name=total]').oninput=calc;e.querySelector('[name=paid]').oninput=calc;calc();const renderExpFiles=()=>{const box=$('#expSelected');if(!box)return;box.innerHTML=files.length?files.map((f,i)=>`<span class="shp-attachchip"><span>${esc(f.name)} <small>${(f.size/MB2).toFixed(2)} MB</small></span><button type="button" data-exp-rm="${i}">×</button></span>`).join(''):'';box.querySelectorAll('[data-exp-rm]').forEach(b=>b.onclick=()=>{files.splice(+b.dataset.expRm,1);renderExpFiles()})};const fi=$('#expFileInput');if(fi)fi.onchange=ev=>{for(const f of [...ev.target.files]){if(files.length>=5){toast('Maximum 5 files.');break}if(f.size>5*MB2){toast(f.name+' exceeds 5 MB.');continue}files.push(f)}ev.target.value='';renderExpFiles()}}e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));if(expense){b.total=Number(b.total);b.paid=Number(b.paid)}try{let saved=await api(record?kind+'/'+record.id:kind,{method:record?'PATCH':'POST',body:JSON.stringify(b)});if(expense&&files.length&&vault&&vault.enabled){for(const file of files){const fd=new FormData();fd.append('files',file);fd.append('expense_id',saved.id);fd.append('expense_code',saved.expense_code||('EXP-'+saved.id.slice(0,8).toUpperCase()));await apiUpload('vaultium/upload',fd)}attCache=null}e.remove();toast('Saved.');refresh()}catch(x){toast(x.message)}}}
-async function inventoryManager(){let [rows,cfg]=await Promise.all([api('inventory'),api('shop/settings').catch(()=>({low_stock_threshold:5}))]),lowThreshold=Number(cfg.low_stock_threshold||5),filter='all',lowOnly=false,catFilter='all',cats=itemCategories(rows);const render=()=>{let data=rows.filter(r=>{if(catFilter==='__none__'&&String(r.category||'').trim())return false;if(catFilter!=='all'&&catFilter!=='__none__'&&String(r.category||'').trim()!==catFilter)return false;if(filter==='active'&&!r.active)return false;if(filter==='inactive'&&r.active)return false;if(lowOnly&&!(Number(r.total_stock)>0&&Number(r.total_stock)<=lowThreshold))return false;return true});const q=($('#search')?.value||'').toLowerCase();if(q)data=data.filter(r=>JSON.stringify(r).toLowerCase().includes(q));$('#data').innerHTML=invTable(data)};const invTable=list=>{if(!list.length)return shpEmpty('No items found.');return `<div class="shp-tw"><table><thead><tr><th>Item code</th><th>Description</th><th>Category</th><th>Unit</th><th>Sale price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>${list.map(r=>`<tr><td><code>${esc(r.item_code)}</code></td><td class="shp-wrap">${esc(r.description)}</td><td>${esc(String(r.category||'').trim()||'Uncategorized')}</td><td>${esc(r.unit)}</td><td>${money(r.sale_price)}</td><td>${esc(r.total_stock)}${Number(r.total_stock)>0&&Number(r.total_stock)<=lowThreshold?' <span class="shp-low">LOW</span>':''}</td><td>${shpBadge(r.active?'Active':'Inactive',r.active?'emerald':'zinc')}</td><td><span style="display:inline-flex;gap:6px"><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-inventory="${r.id}">Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-inventory="${r.id}">Delete</button></span></td></tr>`).join('')}</tbody></table></div>`};$('#page').innerHTML=shpHead('Operations','Inventory','Live stock that updates the moment purchases or sales are posted.')+`<div class="shp-toolbar">${canAccess('inventory','add')?`<button class="shp-btn shp-btn-primary" id="addInventory">+ Add new item</button>`:''}<div class="shp-chips"><button class="shp-chip ${filter==='all'?'on':''}" data-f="all">All</button><button class="shp-chip ${filter==='active'?'on':''}" data-f="active">Active</button><button class="shp-chip ${filter==='inactive'?'on':''}" data-f="inactive">Inactive</button><button class="shp-chip ${lowOnly?'on':''}" id="lowOnlyBtn">Low stock</button></div><input id="search" class="shp-search" placeholder="Search inventory"></div><div class="shp-chips shp-cat-chips" id="catChips"><button class="shp-chip on" data-cat="all">All categories</button>${cats.map(c=>`<button class="shp-chip" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}<button class="shp-chip" data-cat="__none__">Uncategorized</button></div><div class="shp-pagegap" id="data"></div>`;render();document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{filter=b.dataset.f;document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b));render()});document.querySelectorAll('#catChips [data-cat]').forEach(b=>b.onclick=()=>{catFilter=b.dataset.cat;document.querySelectorAll('#catChips [data-cat]').forEach(x=>x.classList.toggle('on',x===b));render()});$('#lowOnlyBtn').onclick=()=>{lowOnly=!lowOnly;$('#lowOnlyBtn').classList.toggle('on',lowOnly);render()};$('#search').oninput=render;if($('#addInventory'))$('#addInventory').onclick=()=>inventoryModal(null,inventoryManager,cats);document.querySelectorAll('[data-edit-inventory]').forEach(x=>x.onclick=()=>inventoryModal(rows.find(r=>r.id===x.dataset.editInventory),inventoryManager,cats));document.querySelectorAll('[data-delete-inventory]').forEach(x=>x.onclick=async()=>{if(!confirm('Delete this inventory item?'))return;try{await api('inventory/'+x.dataset.deleteInventory,{method:'DELETE'});toast('Inventory item deleted.');inventoryManager()}catch(e){toast(e.message)}})}
+async function inventoryManager(){
+  let [rows,cfg,damagedItems]=await Promise.all([
+    api('inventory'),
+    api('shop/settings').catch(()=>({low_stock_threshold:5})),
+    api('inventory/damaged-defective').catch(()=>[])
+  ]),
+  lowThreshold=Number(cfg.low_stock_threshold||5),
+  filter='all',
+  lowOnly=false,
+  catFilter='all',
+  cats=itemCategories(rows);
+
+  const render=()=>{
+    if(catFilter==='__damaged_defective__'){
+      let data=damagedItems;
+      const q=($('#search')?.value||'').toLowerCase();
+      if(q)data=data.filter(r=>JSON.stringify(r).toLowerCase().includes(q));
+      $('#data').innerHTML=damagedTable(data);
+      bindDamagedActions();
+      return;
+    }
+    let data=rows.filter(r=>{
+      if(catFilter==='__none__'&&String(r.category||'').trim())return false;
+      if(catFilter!=='all'&&catFilter!=='__none__'&&String(r.category||'').trim()!==catFilter)return false;
+      if(filter==='active'&&!r.active)return false;
+      if(filter==='inactive'&&r.active)return false;
+      if(lowOnly&&!(Number(r.total_stock)>0&&Number(r.total_stock)<=lowThreshold))return false;
+      return true;
+    });
+    const q=($('#search')?.value||'').toLowerCase();
+    if(q)data=data.filter(r=>JSON.stringify(r).toLowerCase().includes(q));
+    $('#data').innerHTML=invTable(data);
+    bindInventoryActions(rows);
+  };
+
+  const invTable=list=>{
+    if(!list.length)return shpEmpty('No items found.');
+    return `<div class="shp-tw"><table><thead><tr><th>Item code</th><th>Description</th><th>Category</th><th>Unit</th><th>Sale price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody>${list.map(r=>`<tr><td><code>${esc(r.item_code)}</code></td><td class="shp-wrap">${esc(r.description)}</td><td>${esc(String(r.category||'').trim()||'Uncategorized')}</td><td>${esc(r.unit)}</td><td>${money(r.sale_price)}</td><td>${esc(r.total_stock)}${Number(r.total_stock)>0&&Number(r.total_stock)<=lowThreshold?' <span class="shp-low">LOW</span>':''}</td><td>${shpBadge(r.active?'Active':'Inactive',r.active?'emerald':'zinc')}</td><td><span style="display:inline-flex;gap:6px"><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-inventory="${r.id}" ${canAccess('inventory','edit')?'':'disabled'}>Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-inventory="${r.id}" ${canAccess('inventory','delete')?'':'disabled'}>Delete</button></span></td></tr>`).join('')}</tbody></table></div>`;
+  };
+
+  const damagedTable=list=>{
+    let banner=`<div style="background:color-mix(in srgb,#f43f5e 10%,transparent);border:1px solid #f43f5e;border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div>
+        <b style="color:#e11d48">Quarantined Damage / Defective Products</b>
+        <div style="font-size:12px;color:var(--shp-text2);margin-top:2px">
+          These items were returned as damaged or defective. They are securely held in quarantine and <b>NOT included in actual sellable inventory stock</b>.
+        </div>
+      </div>
+      <div>
+        <span class="shp-badge shp-t-rose" style="font-size:11px">Total Quarantined: ${list.reduce((n,x)=>n+Number(x.quantity||0),0)} units</span>
+      </div>
+    </div>`;
+    if(!list.length)return banner+shpEmpty('No damaged or defective returned products found.');
+    return banner+`<div class="shp-tw"><table><thead><tr>
+      <th>Item Code</th><th>Description</th><th>Category</th><th>Condition</th><th>Quarantined Qty</th><th>Return ID</th><th>Original Invoice</th><th>Customer</th><th>Reason</th><th>Return Date</th><th>Action</th>
+    </tr></thead><tbody>
+    ${list.map(r=>`<tr>
+      <td><code>${esc(r.item_code)}</code></td>
+      <td class="shp-wrap"><b>${esc(r.description)}</b></td>
+      <td><span class="shp-badge shp-t-rose">Damage/Defective</span></td>
+      <td>${r.condition==='Defective'?shpBadge('Defective','rose'):shpBadge('Damaged','amber')}</td>
+      <td><b style="color:#e11d48;font-size:13px">${esc(r.quantity)}</b> ${esc(r.unit)}<br><small class="shp-desc" style="color:#888">Excluded from stock</small></td>
+      <td><code>${esc(r.return_number)}</code></td>
+      <td><code>${esc(r.invoice_number)}</code></td>
+      <td class="shp-wrap">${esc(r.customer_name)}</td>
+      <td class="shp-wrap">${esc(r.reason)}${r.reason_note ? `<br><small class="shp-desc">${esc(r.reason_note)}</small>` : ''}</td>
+      <td>${esc(r.return_date)}</td>
+      <td>${r.exchange_id ?
+        `<button class="shp-btn shp-btn-soft shp-btn-sm" data-view-exchange="${r.exchange_id}">View Exchange</button>` :
+        `<button class="shp-btn shp-btn-soft shp-btn-sm" data-view-return="${r.return_id}">View Return</button>`}</td>
+    </tr>`).join('')}
+    </tbody></table></div>`;
+  };
+
+  const bindInventoryActions=allRows=>{
+    document.querySelectorAll('[data-edit-inventory]').forEach(x=>x.onclick=()=>inventoryModal(allRows.find(r=>r.id===x.dataset.editInventory),inventoryManager,cats));
+    document.querySelectorAll('[data-delete-inventory]').forEach(x=>x.onclick=async()=>{
+      if(!confirm('Delete this inventory item?'))return;
+      try{await api('inventory/'+x.dataset.deleteInventory,{method:'DELETE'});toast('Inventory item deleted.');inventoryManager()}catch(e){toast(e.message)}
+    });
+  };
+
+  const bindDamagedActions=()=>{
+    document.querySelectorAll('[data-view-return]').forEach(b=>{
+      b.onclick=()=>returnDetailModal(b.dataset.viewReturn,inventoryManager);
+    });
+    document.querySelectorAll('[data-view-exchange]').forEach(b=>{
+      b.onclick=()=>exchangeDetailModal(b.dataset.viewExchange,inventoryManager);
+    });
+  };
+
+  $('#page').innerHTML=shpHead('Operations','Inventory','Live stock that updates the moment purchases or sales are posted.')+`
+  <div class="shp-toolbar">
+    ${canAccess('inventory','add')?`<button class="shp-btn shp-btn-primary" id="addInventory">+ Add new item</button>`:''}
+    <div class="shp-chips">
+      <button class="shp-chip ${filter==='all'?'on':''}" data-f="all">All</button>
+      <button class="shp-chip ${filter==='active'?'on':''}" data-f="active">Active</button>
+      <button class="shp-chip ${filter==='inactive'?'on':''}" data-f="inactive">Inactive</button>
+      <button class="shp-chip ${lowOnly?'on':''}" id="lowOnlyBtn">Low stock</button>
+    </div>
+    <input id="search" class="shp-search" placeholder="Search inventory or damaged returns">
+  </div>
+  <div class="shp-chips shp-cat-chips" id="catChips">
+    <button class="shp-chip ${catFilter==='all'?'on':''}" data-cat="all">All categories</button>
+    ${cats.map(c=>`<button class="shp-chip ${catFilter===c?'on':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+    <button class="shp-chip ${catFilter==='__none__'?'on':''}" data-cat="__none__">Uncategorized</button>
+    <button class="shp-chip ${catFilter==='__damaged_defective__'?'on':''}" data-cat="__damaged_defective__" style="border-color:#f43f5e"><span class="shp-badge shp-t-rose" style="margin-right:4px;font-size:10px">Quarantine</span>Damage/Defective (${damagedItems.length})</button>
+  </div>
+  <div class="shp-pagegap" id="data"></div>`;
+
+  render();
+
+  document.querySelectorAll('[data-f]').forEach(b=>b.onclick=()=>{
+    if(catFilter==='__damaged_defective__')catFilter='all';
+    filter=b.dataset.f;
+    document.querySelectorAll('[data-f]').forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('#catChips [data-cat]').forEach(x=>x.classList.toggle('on',x.dataset.cat===catFilter));
+    render();
+  });
+
+  document.querySelectorAll('#catChips [data-cat]').forEach(b=>b.onclick=()=>{
+    catFilter=b.dataset.cat;
+    document.querySelectorAll('#catChips [data-cat]').forEach(x=>x.classList.toggle('on',x===b));
+    render();
+  });
+
+  $('#lowOnlyBtn').onclick=()=>{
+    if(catFilter==='__damaged_defective__')catFilter='all';
+    lowOnly=!lowOnly;
+    $('#lowOnlyBtn').classList.toggle('on',lowOnly);
+    document.querySelectorAll('#catChips [data-cat]').forEach(x=>x.classList.toggle('on',x.dataset.cat===catFilter));
+    render();
+  };
+
+  $('#search').oninput=render;
+  if($('#addInventory'))$('#addInventory').onclick=()=>inventoryModal(null,inventoryManager,cats);
+}
 
 
 function inventoryModal(record=null,refresh=inventoryManager,categories=[]){let units=['pcs','box','carton','pack','pair','set','kg','gram','liter','ml','meter','feet','dozen','bag','roll','bottle','can'];const current=String(record?.category||'').trim();const opts=[...categories];if(current&&!opts.includes(current))opts.push(current);opts.sort((a,b)=>a.localeCompare(b));let e=shpModal(`${record?'Edit':'Add'} inventory item`,`<form class="shp-form"><label>Item code <span class="shp-desc">Leave blank to auto-generate.</span><input name="item_code" value="${esc(record?.item_code||'')}"></label><label>Description<input name="description" required value="${esc(record?.description||'')}"></label><label>Category <span class="shp-desc">Items without a category appear in the Uncategorized list.</span><span class="shp-cat-row"><select name="category" id="catSelect"><option value="">Uncategorized</option>${opts.map(c=>`<option value="${esc(c)}" ${current===c?'selected':''}>${esc(c)}</option>`).join('')}<option value="__new__">+ New category…</option></select><button class="shp-btn shp-btn-soft shp-cat-plus" type="button" id="catNewBtn" title="Create a new category" aria-label="Create a new category">+</button></span><input name="category_new" id="catNewInput" placeholder="New category name" hidden></label><div class="shp-grid2"><label>Unit<select name="unit" required>${units.map(x=>`<option value="${x}" ${record?.unit===x?'selected':''}>${x}</option>`).join('')}</select></label><label>Sale price<input name="sale_price" type="number" min="0" step="0.01" required value="${esc(record?.sale_price??'')}"></label></div><label>Active status<select name="active"><option value="true" ${record?.active!==false?'selected':''}>Yes — available for sale</option><option value="false" ${record?.active===false?'selected':''}>No — inactive</option></select></label><div class="shp-form-actions"><button class="shp-btn shp-btn-primary">Save item</button></div></form>`);const sel=e.querySelector('#catSelect'),catInput=e.querySelector('#catNewInput');const showCustom=focus=>{catInput.hidden=false;if(focus)catInput.focus()};sel.onchange=()=>{if(sel.value==='__new__')showCustom(true);else catInput.hidden=true};e.querySelector('#catNewBtn').onclick=()=>{sel.value='__new__';showCustom(true)};e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();let b=Object.fromEntries(new FormData(ev.target));b.active=b.active==='true';b.category=(sel.value==='__new__'?String(b.category_new||'').trim():String(b.category||'').trim())||null;delete b.category_new;try{await api(record?'inventory/'+record.id:'inventory',{method:record?'PATCH':'POST',body:JSON.stringify(b)});e.remove();toast('Inventory item saved.');refresh()}catch(x){toast(x.message)}};return e}
-const permissionLabels={dashboard:'Dashboard',supplier:'Supplier',customer:'Customer',inventory:'Inventory',purchase:'Purchase',sales:'Sales',expense:'Expense',due_recover:'Due Recover',staff:'Staff Manager',report:'Report',settings:'Settings',connectx:'ConnectX',zudo:'Zudo',attendance:'Attendance',salary:'Salary',vaultium:'Vaultium'};const permissionActions=['view','add','edit','delete'];
+const permissionLabels={dashboard:'Dashboard',supplier:'Supplier',customer:'Customer',inventory:'Inventory',purchase:'Purchase',sales:'Sales',returns_refunds:'Return & Exchange',expense:'Expense',due_recover:'Due Recover',staff:'Staff Manager',report:'Report',settings:'Settings',connectx:'ConnectX',zudo:'Zudo',attendance:'Attendance',salary:'Salary',vaultium:'Vaultium'};const permissionActions=['view','add','edit','delete'];
 function permissionEditor(existing={}){return `<section class="shp-perm"><div class="shp-perm-head"><div><h3>Module permissions</h3><p>Select exactly what this staff member may do. Permissions are checked by the server, not only hidden in the interface.</p></div><button type="button" class="shp-btn shp-btn-ghost shp-btn-sm" id="clearPermissions">Clear all</button></div>${Object.entries(permissionLabels).map(([key,label])=>`<div class="shp-perm-row"><strong>${label}</strong><button type="button" class="shp-chip toggleall" data-section="${key}">Toggle all</button><div class="shp-perm-acts">${(key==='zudo'?['view','send','delete']:permissionActions).map(action=>`<label class="shp-perm-pill"><input type="checkbox" data-permission="${key}" value="${action}" ${existing[key]?.includes(action)?'checked':''}><span>${action}</span></label>`).join('')}</div></div>`).join('')}</section>`}
 function collectPermissions(root){let out={};root.querySelectorAll('[data-permission]').forEach(x=>{if(x.checked)(out[x.dataset.permission]??=[]).push(x.value)});return out}
 async function staffManager(){let rows=await api('staff');$('#page').innerHTML=shpHead('Staff','Staff manager','Individual staff accounts with per-module permissions checked by the server.',(canAccess('attendance','view')?'<button class="shp-btn shp-btn-soft" id="attendanceBtn">Attendance</button> ':'')+(canAccess('salary','view')?'<button class="shp-btn shp-btn-soft" id="salaryBtn">Salary</button>':'')+(canAccess('staff','add')?'<button class="shp-btn shp-btn-primary" id="addStaff">+ Add staff member</button>':''))+`<div class="shp-toolbar"><input id="search" class="shp-search" placeholder="Search staff"></div><div class="shp-pagegap"><div class="shp-tw"><table><thead><tr><th>Name</th><th>Position</th><th>Phone</th><th>User ID</th><th>Status</th><th>Permissions</th><th>Actions</th></tr></thead><tbody id="staffRows">${staffRows(rows)}</tbody></table></div></div>`;let filter=q=>$('#staffRows').innerHTML=staffRows(rows.filter(x=>JSON.stringify(x).toLowerCase().includes(q.toLowerCase())));$('#search').oninput=e=>filter(e.target.value);$('#addStaff').onclick=()=>staffModal();$('#attendanceBtn').onclick=()=>page('attendance');if($('#salaryBtn'))$('#salaryBtn').onclick=()=>page('salary');document.querySelectorAll('[data-edit-staff]').forEach(b=>b.onclick=()=>staffModal(rows.find(x=>x.id===b.dataset.editStaff)));document.querySelectorAll('[data-delete-staff]').forEach(b=>b.onclick=async()=>{let person=rows.find(x=>x.id===b.dataset.deleteStaff);if(!confirm(`Remove ${person.full_name}? This cannot be undone.`))return;try{await api('staff/'+person.id,{method:'DELETE'});toast('Staff member removed.');staffManager()}catch(e){toast(e.message)}})}
-function staffRows(rows){if(!rows.length)return '<tr><td colspan="7" class="shp-desc">No staff members found.</td></tr>';return rows.map(x=>{let n=Object.values(x.permissions||{}).reduce((a,v)=>a+v.length,0);return `<tr><td>${esc(x.full_name)}</td><td>${esc(x.position)}</td><td>${esc(x.phone)}</td><td><code>${esc(x.user_id)}</code></td><td>${shpBadge(x.active?'Active':'Inactive',x.active?'emerald':'zinc')}</td><td>${n} granted</td><td><span style="display:inline-flex;gap:6px"><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-staff="${x.id}">Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-staff="${x.id}">Delete</button></span></td></tr>`}).join('')}
+function staffRows(rows){if(!rows.length)return '<tr><td colspan="7" class="shp-desc">No staff members found.</td></tr>';return rows.map(x=>{let n=Object.values(x.permissions||{}).reduce((a,v)=>a+v.length,0);return `<tr><td>${esc(x.full_name)}</td><td>${esc(x.position)}</td><td>${esc(x.phone)}</td><td><code>${esc(x.user_id)}</code></td><td>${shpBadge(x.active?'Active':'Inactive',x.active?'emerald':'zinc')}</td><td>${n} granted</td><td><span style="display:inline-flex;gap:6px"><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-staff="${x.id}" ${canAccess('staff','edit')?'':'disabled'}>Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-staff="${x.id}" ${canAccess('staff','delete')?'':'disabled'}>Delete</button></span></td></tr>`}).join('')}
 function staffModal(person=null){let add=!person;let e=shpModal(add?'Add staff member':'Edit staff member',`<form class="shp-form"><p class="shp-desc">A password is required for a new staff member. For an existing staff member, leave it blank to retain the current password.</p><div class="shp-grid2"><label>Full name<input name="full_name" required value="${esc(person?.full_name||'')}"></label><label>Position<input name="position" value="${esc(person?.position||'')}"></label><label>Phone number<input name="phone" required value="${esc(person?.phone||'')}"></label><label>Email address<input name="email" type="email" value="${esc(person?.email||'')}"></label><label>User ID<input name="user_id" required value="${esc(person?.user_id||'')}"></label><label>Password<input name="password" type="password" ${add?'required minlength="10"':'minlength="10"'} placeholder="${add?'At least 10 characters':'Leave blank to keep current'}"></label><label>Basic salary<input name="basic_salary" type="number" min="0" step="0.01" required value="${esc(person?.basic_salary??0)}"></label><label>Account status<select name="active"><option value="true" ${person?.active!==false?'selected':''}>Active — can sign in</option><option value="false" ${person?.active===false?'selected':''}>Inactive — sign-in blocked</option></select></label></div>${permissionEditor(person?.permissions||{})}<div class="shp-form-actions"><button class="shp-btn shp-btn-primary">${add?'Create active staff account':'Save staff changes'}</button></div></form>`,'shp-modal-xl');e.querySelector('#clearPermissions').onclick=()=>e.querySelectorAll('[data-permission]').forEach(x=>x.checked=false);e.querySelectorAll('.toggleall').forEach(b=>b.onclick=()=>{let boxes=e.querySelectorAll(`[data-permission="${b.dataset.section}"]`),all=[...boxes].every(x=>x.checked);boxes.forEach(x=>x.checked=!all)});e.querySelector('form').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.active=b.active==='true';b.permissions=collectPermissions(e);if(!b.password)delete b.password;await api(add?'staff':'staff/'+person.id,{method:add?'POST':'PATCH',body:JSON.stringify(b)});toast(add?'Staff account created.':'Staff account updated.');e.remove();staffManager()}catch(err){toast(err.message)}}}
 async function zudo(){let current=null,conversations=[],usage=null,sending=false;$('#page').innerHTML=shpHead('Tools','Zudo','Friendly answers about your shop data — plus plans, add-ons and this website.')+`<div class="shp-zd"><aside class="shp-zd-side"><div class="brand"><span class="shp-zd-ava shp-t-violet">${lucide('sparkles')}</span><div><b>Zudo</b><small>powered by DoxTox</small></div></div><button class="shp-btn shp-btn-soft" id="zudoNew">+ New chat</button><div id="zudoConversations" class="shp-zd-convs"></div></aside><section class="shp-zd-main"><header class="shp-zd-head"><div><h2>Zudo</h2><span class="sub">Read-only business intelligence</span></div><div class="shp-zd-actions"><span id="zudoUsage" class="shp-zd-usage" aria-live="polite">${sk('150px',10)}</span>${shpBadge('AI Assistant','violet')}</div></header><div class="shp-zd-msgs" id="zudoMessages"><div class="shp-zd-welcome">${ZUDO_LOADER}<b>Hi, I’m Zudo 👋</b><p>Ask me anything about sales, purchases, inventory, customers, expenses and dues, or EMS plans and this website. I reply in the language you write in — English, বাংলা or Banglish (Roman Bangla). I only read data, I never change anything.</p><div class="shp-chips"><button class="shp-chip zudoPrompt">What are my low stock items?</button><button class="shp-chip zudoPrompt">Give me today’s sales summary</button><button class="shp-chip zudoPrompt">Which plan or add-on fits my shop best?</button><button class="shp-chip zudoPrompt">Which customers may have due?</button></div></div></div><form class="shp-zd-composer" id="zudoForm"><textarea id="zudoInput" rows="2" placeholder="Ask Zudo in English, Banglish or বাংলা…"></textarea><button class="shp-btn shp-btn-primary" id="zudoSend" type="submit">Send ✦</button></form></section></div>`;async function loadUsage(){try{usage=await api('zudo/availability');let label=$('#zudoUsage'),send=$('#zudoSend');if(label){label.textContent=usage.enabled?`Daily limit: ${usage.dailyLimit} · Used: ${usage.usedToday} · Remaining: ${usage.remaining}`:'Zudo is not available for this shop';label.classList.toggle('limitReached',!!usage.enabled&&usage.remaining<=0)}if(send)send.disabled=!usage||!usage.enabled||usage.remaining<=0}catch(err){let label=$('#zudoUsage');if(label)label.textContent='Request usage unavailable'}}async function loadConversations(){$('#zudoConversations').innerHTML=SKEL.list(3,false);conversations=await api('zudo/conversations');$('#zudoConversations').innerHTML=conversations.map(x=>`<div class="shp-zd-conv ${x.id===current?'on':''}"><button class="t" data-zudo-conv="${x.id}" title="${esc(x.title)}">${esc(x.title)}</button><button class="m" data-zudo-delete="${x.id}" aria-label="Delete chat" title="Delete chat">${lucide('trash')}</button></div>`).join('')||'<p class="shp-desc">No conversations yet.</p>';document.querySelectorAll('[data-zudo-conv]').forEach(b=>b.onclick=()=>openConversation(b.dataset.zudoConv));document.querySelectorAll('[data-zudo-delete]').forEach(b=>b.onclick=async e=>{e.stopPropagation();if(!confirm('Delete this Zudo chat and its messages?'))return;try{await api('zudo/conversations/'+b.dataset.zudoDelete,{method:'DELETE'});if(current===b.dataset.zudoDelete){current=null;$('#zudoMessages').innerHTML=`<div class="shp-zd-welcome">${ZUDO_LOADER}<b>New Zudo chat</b><p>Ask a question about your shop data.</p></div>`}loadConversations()}catch(err){toast(err.message)}})}function renderMessages(messages){$('#zudoMessages').innerHTML=messages.map(x=>`<div class="shp-zd-msg ${x.role==='user'?'me':''}"><span>${x.role==='assistant'?'Zudo':'You'}</span><div>${x.role==='assistant'?fmtAI(x.content):esc(x.content).replace(/\n/g,'<br>')}</div></div>`).join('');$('#zudoMessages').scrollTop=$('#zudoMessages').scrollHeight}async function openConversation(id){current=id;$('#zudoMessages').innerHTML=SKEL.msgs(3);renderMessages(await api('zudo/conversations/'+id));loadConversations()}$('#zudoNew').onclick=()=>{current=null;$('#zudoMessages').innerHTML=`<div class="shp-zd-welcome">${ZUDO_LOADER}<b>New Zudo chat</b><p>Ask a question about your shop data.</p></div>`;loadConversations()};document.querySelectorAll('.zudoPrompt').forEach(b=>b.onclick=()=>{$('#zudoInput').value=b.textContent;$('#zudoInput').focus()});$('#zudoForm').onsubmit=async e=>{e.preventDefault();let input=$('#zudoInput'),send=$('#zudoSend'),message=input.value.trim();if(!message||sending)return;if(!usage)await loadUsage();if(!usage?.enabled)return toast('Zudo is not available for this shop.');if(Number(usage.remaining)<=0)return toast('Your daily Zudo request limit has been reached.');sending=true;input.value='';if(send)send.disabled=true;let box=$('#zudoMessages');box.insertAdjacentHTML('beforeend',`<div class="shp-zd-msg me"><span>You</span><div>${esc(message)}</div></div><div class="shp-zd-msg assistant thinking"><span>Zudo</span><div class="shp-zd-thinking">${ZUDO_THINKING_HTML}</div></div>`);startZudoOrbs(box);box.scrollTop=box.scrollHeight;try{let r=await api('zudo/chat',{method:'POST',body:JSON.stringify({conversationId:current,message})});current=r.conversationId;box.querySelector('.thinking')?.remove();box.insertAdjacentHTML('beforeend',`<div class="shp-zd-msg assistant"><span>Zudo</span><div>${fmtAI(r.answer)}</div></div>`);box.scrollTop=box.scrollHeight;loadConversations()}catch(err){box.querySelector('.thinking')?.remove();toast(err.message)}finally{sending=false;await loadUsage();if(usage?.remaining>0)input.focus()}};loadConversations();loadUsage()}
-async function connectX(){let tab=state.connectxEnabled?'compose':'inbox',recipientType='customer',selected=null;$('#page').innerHTML=shpHead('Tools','ConnectX','Professional business email to customers, suppliers and staff — with invoice attachments.')+`<div class="shp-cx"><aside class="shp-cx-side shp-t-sky"><div class="brand"><span class="shp-chip-ic">${lucide('mail')}</span><div><b>ConnectX</b><small>Central communication</small></div></div>${state.connectxEnabled?'<button class="tab on" data-cx-tab="compose">Compose<small>New message</small></button>':''}<button class="tab ${state.connectxEnabled?'':'on'}" data-cx-tab="inbox">Inbox<small>Send history</small></button></aside><section id="connectxContent"></section></div>`;async function compose(){let c=$('#connectxContent');c.innerHTML=`<section class="shp-pagegap"><div class="shp-panel"><div class="shp-panel-head"><div><h3>New message</h3><p class="shp-desc">Secure shop email sent through ConnectX.</p></div></div><div class="shp-grid2"><label>Recipient type<select id="cxType"><option value="customer">Customer</option><option value="supplier">Supplier</option><option value="staff">Staff</option></select></label><label>Search and select recipient<input list="cxContacts" id="cxContact" placeholder="Name, email, phone, or ID"><datalist id="cxContacts"></datalist></label></div><div class="shp-cx-contact" id="cxContactInfo">Select a recipient to auto-fill contact details.</div></div><section class="shp-panel"><div class="shp-pagegap" style="gap:10px"><div class="shp-cx-torow"><label>To<input id="cxTo" type="email" placeholder="recipient@email.com"></label><div class="shp-cx-ccrow"><button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="cxAddCc">+ CC</button><button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="cxAddBcc">+ BCC</button></div></div><label id="cxCcWrap" hidden>CC<input id="cxCc" placeholder="Separate emails with commas"></label><label id="cxBccWrap" hidden>BCC<input id="cxBcc" placeholder="Separate emails with commas"></label><div class="shp-grid2"><label>Document<select id="cxDoc"><option value="">No attached document</option><option value="sale">Sales invoice</option><option value="purchase">Purchase invoice</option></select></label><label id="cxInvoiceWrap" hidden>Invoice<select id="cxInvoice"></select></label></div><label>Subject<input id="cxSubject" placeholder="Subject"></label><label>Message<textarea id="cxBody" rows="9" placeholder="Write your message here…"></textarea></label><div class="shp-form-actions"><button class="shp-btn shp-btn-primary" id="cxSend" ${canAccess('connectx','add')?'':'disabled'}>Send via ConnectX</button></div></div></section></section>`;let contacts=[];async function contactsLoad(){recipientType=$('#cxType').value;contacts=await api('connectx/contacts?type='+recipientType);$('#cxContacts').innerHTML=contacts.map(x=>`<option value="${esc(x.full_name||x.name)} — ${esc(x.email||'no email')}" data-id="${x.id}">`).join('');selected=null;$('#cxContact').value='';$('#cxTo').value='';$('#cxContactInfo').textContent='Select a recipient to auto-fill contact details.'}async function docs(){let kind=$('#cxDoc').value,wrap=$('#cxInvoiceWrap');wrap.hidden=!kind;if(!kind)return;let rows=await api('connectx/invoices?kind='+kind);$('#cxInvoice').innerHTML='<option value="">Select invoice</option>'+rows.map(x=>`<option value="${x.id}">${esc(x.invoice_number)} · ${money(x.subtotal)}</option>`).join('')}await contactsLoad();$('#cxAddCc').onclick=()=>{$('#cxCcWrap').hidden=false;$('#cxAddCc').style.display='none';$('#cxCc').focus()};$('#cxAddBcc').onclick=()=>{$('#cxBccWrap').hidden=false;$('#cxAddBcc').style.display='none';$('#cxBcc').focus()};$('#cxType').onchange=contactsLoad;$('#cxContact').onchange=e=>{let o=[...$('#cxContacts').options].find(x=>x.value===e.target.value);selected=contacts.find(x=>x.id===o?.dataset.id);if(!selected)return;let name=selected.full_name||selected.name,code=selected.user_id||selected.customer_code||selected.supplier_code||shortId(selected.id);$('#cxTo').value=selected.email||'';$('#cxContactInfo').innerHTML=`<b>${esc(name)}</b><span>ID: ${esc(code)}</span><span>${esc(selected.address||'—')}</span><span>${esc(selected.phone||'—')}</span><span>${esc(selected.email||'No saved email')}</span>`;$('#cxSubject').value=$('#cxDoc').value?`${$('#cxDoc').value==='sale'?'Sales':'Purchase'} Invoice`:'Message from '+(state.store?.name||'your shop')};$('#cxDoc').onchange=docs;$('#cxSend').onclick=async()=>{let b={recipientType,recipientId:selected?.id||null,to:$('#cxTo').value,cc:$('#cxCc').value,bcc:$('#cxBcc').value,subject:$('#cxSubject').value,body:$('#cxBody').value,documentType:$('#cxDoc').value||null,invoiceId:$('#cxInvoice').value||null};let btn=$('#cxSend');btn.disabled=true;btn.textContent='Sending…';try{await api('connectx/send',{method:'POST',body:JSON.stringify(b)});toast('Email sent through ConnectX.');$('#cxBody').value=''}catch(e){toast(e.message)}finally{btn.disabled=false;btn.textContent='Send via ConnectX'}}}async function sent(){$('#connectxContent').innerHTML=`<section class="shp-pagegap">${SKEL.toolbar()+SKEL.table(5,6)}</section>`;let rows=await api('connectx/messages');$('#connectxContent').innerHTML=`<section class="shp-pagegap"><div class="shp-toolbar"><input id="cxSearch" class="shp-search" placeholder="Search recipient, subject, or status"></div><div id="cxMessages">${cxTable(rows)}</div></section>`;$('#cxSearch').oninput=e=>{$('#cxMessages').innerHTML=cxTable(rows.filter(x=>JSON.stringify(x).toLowerCase().includes(e.target.value.toLowerCase())));bindMessageActions(rows)};bindMessageActions(rows)}function bindMessageActions(rows){document.querySelectorAll('[data-cx-view]').forEach(b=>b.onclick=()=>connectXView(rows.find(x=>x.id===b.dataset.cxView)));document.querySelectorAll('[data-cx-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Remove this message from this shop’s Inbox history? EMS Owner logs will remain permanently available.'))return;try{await api('connectx/messages/'+b.dataset.cxDelete,{method:'DELETE'});toast('Message removed from shop history.');connectX()}catch(e){toast(e.message)}})}function cxTable(rows){return rows.length?`<div class="shp-tw"><table><thead><tr><th>Date</th><th>Recipient</th><th>Subject</th><th>Document</th><th>Status</th><th>Actions</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${new Date(x.created_at).toLocaleString()}</td><td class="shp-wrap">${esc(x.to_emails.join(', '))}</td><td class="shp-wrap">${esc(x.subject)}</td><td>${esc(x.invoice_id?'Invoice':'Message')}</td><td>${shpBadge(x.status,x.status==='sent'?'emerald':x.status==='failed'?'rose':'amber')}${x.error_message?`<br><small class="shp-desc" title="${esc(x.error_message)}">${esc(x.error_message)}</small>`:''}</td><td><span class="shp-rowacts"><button class="shp-btn shp-btn-soft shp-btn-sm" data-cx-view="${x.id}">View</button><button class="shp-icobtn shp-danger" data-cx-delete="${x.id}" title="Delete message" aria-label="Delete message" ${canAccess('connectx','delete')?'':'disabled'}>${lucide('trash')}</button></span></td></tr>`).join('')}</tbody></table></div>`:shpEmpty('No sent ConnectX messages yet.')}async function render(){if(tab==='compose')return compose();return sent()}document.querySelectorAll('[data-cx-tab]').forEach(b=>b.onclick=()=>{if(b.disabled)return;tab=b.dataset.cxTab;document.querySelectorAll('[data-cx-tab]').forEach(x=>x.classList.toggle('on',x===b));render()});await render()}
+async function connectX(){
+  let portalMode='email'; // 'email' | 'sms'
+  let emailTab=state.connectxEnabled?'compose':'inbox';
+  let smsTab='compose'; // 'compose' | 'history'
+
+  function getSmsStats(text){
+    let str=String(text||'');
+    let isUnicode=/[^\u0020-\u007E\r\n]/.test(str);
+    let len=str.length;
+    if(!len)return {length:0,parts:0,maxPerPart:isUnicode?70:160,isUnicode,remaining:isUnicode?70:160};
+    let maxPerPart=isUnicode?(len<=70?70:67):(len<=160?160:153);
+    let parts=Math.ceil(len/maxPerPart)||1;
+    let remaining=(parts*maxPerPart)-len;
+    return {length:len,parts,maxPerPart,isUnicode,remaining};
+  }
+
+  function generateSmsTemplate(type,data,shopName){
+    let cName=data.customerName||data.partyName||data.name||'Customer';
+    let sName=data.supplierName||data.partyName||data.name||'Supplier';
+    let invId=data.invoiceNumber||data.code||'INV';
+    let count=data.itemCount||1;
+    let amt=data.amount!==undefined?data.amount:(data.subtotal!==undefined?data.subtotal:0);
+    let paid=data.paid!==undefined?data.paid:0;
+    let due=data.due!==undefined?data.due:0;
+    let refAmt=data.refundAmount||data.paid||0;
+    let refMethod=data.refundMethod||'Cash';
+    let diffAmt=data.differenceAmount||0;
+    let actionType=data.actionType==='customer_pays'?'Customer Paid':(data.actionType==='shop_refunds'?'Store Refunded':'Even Exchange');
+    let origInv=data.originalInvoiceNumber||'original order';
+
+    if(type==='Sales Invoice Confirmation'){
+      return `Hi ${cName}, thanks for your purchase! Your invoice ${invId} for ${count} item${count>1?'s':''} has been generated. Total amount: BDT ${amt}.`;
+    }
+    if(type==='Due Invoice Reminder'){
+      return `Dear ${cName}, this is a reminder from ${shopName} regarding invoice ${invId}. An outstanding due of BDT ${due} is pending. Please settle at your earliest convenience. Thank you.`;
+    }
+    if(type==='Exchange Invoice Confirmation'){
+      return `Hi ${cName}, your exchange ${invId} for invoice ${origInv} has been processed at ${shopName}. Settlement: BDT ${diffAmt} (${actionType}). Thank you!`;
+    }
+    if(type==='Return Invoice Confirmation'){
+      return `Hi ${cName}, your return ${invId} for invoice ${origInv} has been processed at ${shopName}. Refunded amount: BDT ${refAmt} via ${refMethod}. Thank you!`;
+    }
+    if(type==='Purchase Invoice Confirmation'){
+      return `Dear ${sName}, purchase bill ${invId} for ${count} item${count>1?'s':''} has been recorded at ${shopName}. Total amount: BDT ${amt}, Paid: BDT ${paid}. Thank you.`;
+    }
+    if(type==='Custom Message'){
+      let n=data.name||cName||sName||'';
+      return n?`Hello ${n},\n`:'Hello,\n';
+    }
+    return '';
+  }
+
+  function renderPortal(){
+    $('#page').innerHTML=shpHead('Tools','ConnectX','Professional business communication to customers, suppliers and staff — Email and SMS Gateway.')+`
+      <div class="shp-cx-portal-bar">
+        <div class="shp-cx-portal-tabs">
+          <button type="button" class="shp-cx-portal-tab ${portalMode==='email'?'on':''}" data-cx-main="email">
+            ${lucide('mail')} Email
+          </button>
+          <button type="button" class="shp-cx-portal-tab ${portalMode==='sms'?'on':''}" data-cx-main="sms">
+            ${lucide('message-square')} SMS Gateway
+          </button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span class="shp-tag shp-t-sky">ConnectX Central Communication</span>
+        </div>
+      </div>
+      <div id="connectxPortalContainer"></div>
+    `;
+
+    document.querySelectorAll('[data-cx-main]').forEach(b=>b.onclick=()=>{
+      portalMode=b.dataset.cxMain;
+      document.querySelectorAll('[data-cx-main]').forEach(x=>x.classList.toggle('on',x===b));
+      if(portalMode==='email')renderEmailPortal();
+      else renderSmsPortal();
+    });
+
+    if(portalMode==='email')renderEmailPortal();
+    else renderSmsPortal();
+  }
+
+  /* ═════════════════ ConnectX EMAIL Portal ═════════════════ */
+  async function renderEmailPortal(){
+    let container=$('#connectxPortalContainer');
+    container.innerHTML=`
+      <div class="shp-cx">
+        <aside class="shp-cx-side shp-t-sky">
+          <div class="brand">
+            <span class="shp-chip-ic">${lucide('mail')}</span>
+            <div><b>Email Portal</b><small>Central email</small></div>
+          </div>
+          ${state.connectxEnabled?'<button class="tab '+(emailTab==='compose'?'on':'')+'" data-cx-tab="compose">Compose<small>New message</small></button>':''}
+          <button class="tab '+(emailTab==='inbox'?'on':'')+'" data-cx-tab="inbox">Inbox<small>Send history</small></button>
+        </aside>
+        <section id="connectxEmailContent"></section>
+      </div>
+    `;
+
+    let recipientType='customer',selected=null;
+
+    async function emailCompose(){
+      let c=$('#connectxEmailContent');
+      c.innerHTML=`<section class="shp-pagegap"><div class="shp-panel"><div class="shp-panel-head"><div><h3>New message</h3><p class="shp-desc">Secure shop email sent through ConnectX.</p></div></div><div class="shp-grid2"><label>Recipient type<select id="cxType"><option value="customer">Customer</option><option value="supplier">Supplier</option><option value="staff">Staff</option></select></label><label>Search and select recipient<input list="cxContacts" id="cxContact" placeholder="Name, email, phone, or ID"><datalist id="cxContacts"></datalist></label></div><div class="shp-cx-contact" id="cxContactInfo">Select a recipient to auto-fill contact details.</div></div><section class="shp-panel"><div class="shp-pagegap" style="gap:10px"><div class="shp-cx-torow"><label>To<input id="cxTo" type="email" placeholder="recipient@email.com"></label><div class="shp-cx-ccrow"><button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="cxAddCc">+ CC</button><button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="cxAddBcc">+ BCC</button></div></div><label id="cxCcWrap" hidden>CC<input id="cxCc" placeholder="Separate emails with commas"></label><label id="cxBccWrap" hidden>BCC<input id="cxBcc" placeholder="Separate emails with commas"></label><div class="shp-grid2"><label>Document<select id="cxDoc"><option value="">No attached document</option><option value="sale">Sales invoice</option><option value="purchase">Purchase invoice</option><option value="return">Return slip / invoice</option><option value="exchange">Exchange slip / invoice</option></select></label><label id="cxInvoiceWrap" hidden><span id="cxDocLabel">Invoice</span><select id="cxInvoice"></select></label></div><label>Subject<input id="cxSubject" placeholder="Subject"></label><label>Message<textarea id="cxBody" rows="9" placeholder="Write your message here…"></textarea></label><div class="shp-form-actions"><button class="shp-btn shp-btn-primary" id="cxSend" ${canAccess('connectx','add')?'':'disabled'}>Send via ConnectX</button></div></div></section></section>`;
+      let contacts=[];
+      async function contactsLoad(){
+        recipientType=$('#cxType').value;
+        contacts=await api('connectx/contacts?type='+recipientType);
+        $('#cxContacts').innerHTML=contacts.map(x=>`<option value="${esc(x.full_name||x.name)} — ${esc(x.email||'no email')}" data-id="${x.id}">`).join('');
+        selected=null;$('#cxContact').value='';$('#cxTo').value='';$('#cxContactInfo').textContent='Select a recipient to auto-fill contact details.';
+      }
+      async function docs(){
+        let kind=$('#cxDoc').value,wrap=$('#cxInvoiceWrap'),docLbl=$('#cxDocLabel');
+        wrap.hidden=!kind;
+        if(!kind){$('#cxInvoice').innerHTML='';return}
+        let title=kind==='sale'?'Sales invoice':kind==='purchase'?'Purchase invoice':kind==='return'?'Return slip':'Exchange slip';
+        if(docLbl)docLbl.textContent=kind==='return'?'Return slip':kind==='exchange'?'Exchange slip':'Invoice';
+        let rows=await api('connectx/invoices?kind='+kind);
+        $('#cxInvoice').innerHTML=`<option value="">Select ${title.toLowerCase()}</option>`+rows.map(x=>`<option value="${x.id}">${esc(x.invoice_number)} · ${money(x.subtotal)}</option>`).join('');
+        if(!$('#cxSubject').value||['Sales invoice','Purchase invoice','Return slip','Exchange slip','Sales Invoice','Purchase Invoice','Return Slip','Exchange Slip'].includes($('#cxSubject').value)){
+          $('#cxSubject').value=kind==='sale'?'Sales Invoice':kind==='purchase'?'Purchase Invoice':kind==='return'?'Return Slip':'Exchange Slip';
+        }
+      }
+      await contactsLoad();
+      $('#cxAddCc').onclick=()=>{$('#cxCcWrap').hidden=false;$('#cxAddCc').style.display='none';$('#cxCc').focus()};
+      $('#cxAddBcc').onclick=()=>{$('#cxBccWrap').hidden=false;$('#cxAddBcc').style.display='none';$('#cxBcc').focus()};
+      $('#cxType').onchange=contactsLoad;
+      $('#cxContact').onchange=e=>{
+        let o=[...$('#cxContacts').options].find(x=>x.value===e.target.value);
+        selected=contacts.find(x=>x.id===o?.dataset.id);
+        if(!selected)return;
+        let name=selected.full_name||selected.name,code=selected.user_id||selected.customer_code||selected.supplier_code||shortId(selected.id);
+        $('#cxTo').value=selected.email||'';
+        $('#cxContactInfo').innerHTML=`<b>${esc(name)}</b><span>ID: ${esc(code)}</span><span>${esc(selected.address||'—')}</span><span>${esc(selected.phone||'—')}</span><span>${esc(selected.email||'No saved email')}</span>`;
+        let kind=$('#cxDoc').value,title=kind==='sale'?'Sales Invoice':kind==='purchase'?'Purchase Invoice':kind==='return'?'Return Slip':kind==='exchange'?'Exchange Slip':'';
+        $('#cxSubject').value=title||('Message from '+(state.store?.name||'your shop'));
+      };
+      $('#cxDoc').onchange=docs;
+      $('#cxSend').onclick=async()=>{
+        let b={recipientType,recipientId:selected?.id||null,to:$('#cxTo').value,cc:$('#cxCc').value,bcc:$('#cxBcc').value,subject:$('#cxSubject').value,body:$('#cxBody').value,documentType:$('#cxDoc').value||null,invoiceId:$('#cxInvoice').value||null};
+        let btn=$('#cxSend');btn.disabled=true;btn.textContent='Sending…';
+        try{await api('connectx/send',{method:'POST',body:JSON.stringify(b)});toast('Email sent through ConnectX.');$('#cxBody').value='';}
+        catch(e){toast(e.message)}
+        finally{btn.disabled=false;btn.textContent='Send via ConnectX'}
+      };
+    }
+
+    async function emailSent(){
+      $('#connectxEmailContent').innerHTML=`<section class="shp-pagegap">${SKEL.toolbar()+SKEL.table(5,6)}</section>`;
+      let rows=await api('connectx/messages');
+      $('#connectxEmailContent').innerHTML=`<section class="shp-pagegap"><div class="shp-toolbar"><input id="cxSearch" class="shp-search" placeholder="Search recipient, subject, or status"></div><div id="cxMessages">${cxTable(rows)}</div></section>`;
+      $('#cxSearch').oninput=e=>{$('#cxMessages').innerHTML=cxTable(rows.filter(x=>JSON.stringify(x).toLowerCase().includes(e.target.value.toLowerCase())));bindMessageActions(rows)};
+      bindMessageActions(rows);
+    }
+
+    function bindMessageActions(rows){
+      document.querySelectorAll('[data-cx-view]').forEach(b=>b.onclick=()=>connectXView(rows.find(x=>x.id===b.dataset.cxView)));
+      document.querySelectorAll('[data-cx-delete]').forEach(b=>b.onclick=async()=>{
+        if(!confirm('Remove this message from this shop’s Inbox history? EMS Owner logs will remain permanently available.'))return;
+        try{await api('connectx/messages/'+b.dataset.cxDelete,{method:'DELETE'});toast('Message removed from shop history.');renderEmailPortal()}
+        catch(e){toast(e.message)}
+      });
+    }
+
+    document.querySelectorAll('[data-cx-tab]').forEach(b=>b.onclick=()=>{
+      if(b.disabled)return;
+      emailTab=b.dataset.cxTab;
+      document.querySelectorAll('[data-cx-tab]').forEach(x=>x.classList.toggle('on',x===b));
+      if(emailTab==='compose')emailCompose();
+      else emailSent();
+    });
+
+    if(emailTab==='compose')await emailCompose();
+    else await emailSent();
+  }
+
+  /* ═════════════════ ConnectX SMS Portal ═════════════════ */
+  const SMS_MESSAGE_TYPES={
+    customer:[
+      'Sales Invoice Confirmation',
+      'Due Invoice Reminder',
+      'Exchange Invoice Confirmation',
+      'Return Invoice Confirmation',
+      'Custom Message'
+    ],
+    supplier:[
+      'Purchase Invoice Confirmation',
+      'Custom Message'
+    ],
+    staff:[
+      'Custom Message'
+    ]
+  };
+
+  async function renderSmsPortal(){
+    let container=$('#connectxPortalContainer');
+    container.innerHTML=`
+      <div class="shp-cx">
+        <aside class="shp-cx-side shp-t-sky">
+          <div class="brand">
+            <span class="shp-chip-ic">${lucide('message-square')}</span>
+            <div><b>SMS Gateway</b><small>SIM-based dispatch</small></div>
+          </div>
+          <button class="tab ${smsTab==='compose'?'on':''}" data-sms-tab="compose">Compose<small>New SMS</small></button>
+          <button class="tab ${smsTab==='history'?'on':''}" data-sms-tab="history">History<small>Send queue</small></button>
+        </aside>
+        <section id="connectxSmsContent"></section>
+      </div>
+    `;
+
+    document.querySelectorAll('[data-sms-tab]').forEach(b=>b.onclick=()=>{
+      smsTab=b.dataset.smsTab;
+      document.querySelectorAll('[data-sms-tab]').forEach(x=>x.classList.toggle('on',x===b));
+      if(smsTab==='compose')smsCompose();
+      else smsHistory();
+    });
+
+    if(smsTab==='compose')await smsCompose();
+    else await smsHistory();
+  }
+
+  async function smsCompose(){
+    let c=$('#connectxSmsContent');
+    c.innerHTML=`
+      <section class="shp-pagegap">
+        <div id="smsFeedbackBanner" style="display:none;"></div>
+
+        <div class="shp-panel">
+          <div class="shp-panel-head">
+            <div>
+              <h3>Compose SMS</h3>
+              <p class="shp-desc">Queues message in ConnectX Gateway. Dispatched via physical SIM using ConnectX Android SMS Gateway.</p>
+            </div>
+            <div>
+              <span class="shp-tag shp-t-amber">Android Gateway Mode</span>
+            </div>
+          </div>
+
+          <div class="shp-grid2">
+            <label>Recipient Type
+              <select id="smsRecType">
+                <option value="customer">Customer</option>
+                <option value="supplier">Supplier</option>
+                <option value="staff">Staff</option>
+              </select>
+            </label>
+
+            <label>Search Recipient
+              <input list="smsContactsList" id="smsContactSearch" placeholder="Type name, phone, or ID…">
+              <datalist id="smsContactsList"></datalist>
+            </label>
+          </div>
+
+          <div class="shp-cx-contact" id="smsContactInfo">Select a recipient to auto-fill phone number.</div>
+        </div>
+
+        <section class="shp-panel">
+          <div class="shp-pagegap" style="gap:12px">
+            <div class="shp-grid2">
+              <label>To (Phone number)
+                <input id="smsTo" type="tel" placeholder="e.g. 01700000000" required>
+              </label>
+
+              <label>Message Type
+                <select id="smsMsgType"></select>
+              </label>
+            </div>
+
+            <div id="smsInvoiceWrap" style="display:none;">
+              <label><span id="smsInvoiceLabel">Invoice / Document</span>
+                <select id="smsInvoiceSelect"></select>
+              </label>
+            </div>
+
+            <div>
+              <label>Message
+                <textarea id="smsBody" rows="5" placeholder="Select an invoice to generate message template, or write a custom SMS…"></textarea>
+              </label>
+
+              <div class="shp-sms-counter" id="smsCounter">
+                <span><b id="smsCharCount">0</b> characters</span>
+                <span class="parts" id="smsPartCount">0 SMS</span>
+                <span id="smsTypeNote">Standard GSM</span>
+              </div>
+            </div>
+
+            <div class="shp-form-actions" style="margin-top:4px;">
+              <button class="shp-btn shp-btn-primary" id="smsSendBtn" ${canAccess('connectx','add')?'':'disabled'}>
+                ${lucide('send')} Send via ConnectX
+              </button>
+            </div>
+          </div>
+        </section>
+      </section>
+    `;
+
+    let contacts=[],selectedRec=null,invoicesList=[],selectedInv=null;
+    let recTypeSelect=$('#smsRecType'),contactInput=$('#smsContactSearch'),contactsList=$('#smsContactsList'),toInput=$('#smsTo'),msgTypeSelect=$('#smsMsgType'),invWrap=$('#smsInvoiceWrap'),invSelect=$('#smsInvoiceSelect'),invLabel=$('#smsInvoiceLabel'),bodyArea=$('#smsBody'),sendBtn=$('#smsSendBtn'),infoBox=$('#smsContactInfo');
+
+    function updateCounter(){
+      let stats=getSmsStats(bodyArea.value);
+      $('#smsCharCount').textContent=stats.length;
+      $('#smsPartCount').textContent=stats.parts+(stats.parts===1?' SMS':' SMS ('+stats.maxPerPart+'/part)');
+      $('#smsTypeNote').textContent=stats.isUnicode?'Unicode / Bangla ('+stats.remaining+' left in part)':'Standard GSM ('+stats.remaining+' left in part)';
+    }
+
+    bodyArea.oninput=updateCounter;
+
+    function populateMsgTypes(){
+      let curRec=recTypeSelect.value;
+      let types=SMS_MESSAGE_TYPES[curRec]||['Custom Message'];
+      msgTypeSelect.innerHTML=types.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+      updateInvoiceVisibility();
+    }
+
+    async function loadContacts(){
+      let curRec=recTypeSelect.value;
+      contacts=await api('connectx/contacts?type='+curRec);
+      contactsList.innerHTML=contacts.map(x=>`<option value="${esc(x.full_name||x.name)} — ${esc(x.phone||'no phone')}" data-id="${x.id}">`).join('');
+      selectedRec=null;
+      contactInput.value='';
+      toInput.value='';
+      infoBox.textContent='Select a recipient to auto-fill phone number.';
+      populateMsgTypes();
+    }
+
+    function getDocKindForType(type){
+      if(type==='Sales Invoice Confirmation'||type==='Due Invoice Reminder')return 'sale';
+      if(type==='Purchase Invoice Confirmation')return 'purchase';
+      if(type==='Exchange Invoice Confirmation')return 'exchange';
+      if(type==='Return Invoice Confirmation')return 'return';
+      return null;
+    }
+
+    async function updateInvoiceVisibility(){
+      let type=msgTypeSelect.value;
+      let docKind=getDocKindForType(type);
+
+      if(!docKind){
+        invWrap.style.display='none';
+        invSelect.innerHTML='';
+        selectedInv=null;
+        if(!bodyArea.value.trim()||bodyArea.value.startsWith('Hi ')||bodyArea.value.startsWith('Dear ')){
+          bodyArea.value=generateSmsTemplate('Custom Message',selectedRec||{},state.store?.name||'EMS Store');
+          updateCounter();
+        }
+        return;
+      }
+
+      invWrap.style.display='block';
+      let docTitle=docKind==='sale'?'Sales Invoice':docKind==='purchase'?'Purchase Bill':docKind==='return'?'Return Slip':'Exchange Slip';
+      invLabel.textContent='Select '+docTitle;
+      invSelect.innerHTML=`<option value="">Loading ${docTitle.toLowerCase()}s…</option>`;
+
+      let partyParam=selectedRec?.id?`&party_id=${encodeURIComponent(selectedRec.id)}`:'';
+      invoicesList=await api(`connectx/invoices?kind=${docKind}${partyParam}`).catch(()=>[]);
+
+      if(!invoicesList.length && partyParam){
+        // fallback to recent if none for this party
+        invoicesList=await api(`connectx/invoices?kind=${docKind}`).catch(()=>[]);
+      }
+
+      if(!invoicesList.length){
+        invSelect.innerHTML=`<option value="">No ${docTitle.toLowerCase()}s available</option>`;
+        selectedInv=null;
+        return;
+      }
+
+      invSelect.innerHTML=`<option value="">Choose a ${docTitle.toLowerCase()}…</option>`+invoicesList.map(x=>{
+        let extra=x.total_due>0?` (Due: ৳ ${x.total_due})`:x.refund_amount?` (Refund: ৳ ${x.refund_amount})`:x.difference_amount?` (Diff: ৳ ${x.difference_amount})`:` (৳ ${x.subtotal})`;
+        return `<option value="${x.id}">${esc(x.invoice_number)} · ${esc(x.invoice_date)}${extra}</option>`;
+      }).join('');
+
+      // Auto-select first if available
+      if(invoicesList.length){
+        invSelect.selectedIndex=1;
+        applySelectedInvoice();
+      }
+    }
+
+    function applySelectedInvoice(){
+      let invId=invSelect.value;
+      selectedInv=invoicesList.find(x=>x.id===invId)||null;
+      if(!selectedInv)return;
+
+      let type=msgTypeSelect.value;
+      let templateData={
+        customerName:selectedRec?.name||selectedInv.customer_name||selectedInv.party_name||'Customer',
+        supplierName:selectedRec?.name||selectedInv.party_name||'Supplier',
+        name:selectedRec?.full_name||selectedRec?.name||'Customer',
+        invoiceNumber:selectedInv.invoice_number,
+        originalInvoiceNumber:selectedInv.original_invoice_number,
+        itemCount:selectedInv.item_count||1,
+        amount:selectedInv.subtotal,
+        paid:selectedInv.paid_amount||0,
+        due:selectedInv.total_due||0,
+        refundAmount:selectedInv.refund_amount||selectedInv.paid_amount||0,
+        refundMethod:selectedInv.refund_method||'Cash',
+        differenceAmount:selectedInv.difference_amount||0,
+        actionType:selectedInv.action_type||'customer_pays'
+      };
+
+      bodyArea.value=generateSmsTemplate(type,templateData,state.store?.name||'EMS Store');
+      updateCounter();
+    }
+
+    recTypeSelect.onchange=loadContacts;
+    msgTypeSelect.onchange=updateInvoiceVisibility;
+    invSelect.onchange=applySelectedInvoice;
+
+    contactInput.onchange=e=>{
+      let o=[...contactsList.options].find(x=>x.value===e.target.value);
+      selectedRec=contacts.find(x=>x.id===o?.dataset.id);
+      if(!selectedRec)return;
+
+      let name=selectedRec.full_name||selectedRec.name;
+      let code=selectedRec.user_id||selectedRec.customer_code||selectedRec.supplier_code||shortId(selectedRec.id);
+      toInput.value=selectedRec.phone||'';
+
+      infoBox.innerHTML=`<b>${esc(name)}</b><span>ID: ${esc(code)}</span><span>Phone: ${esc(selectedRec.phone||'No phone saved')}</span><span>Address: ${esc(selectedRec.address||'—')}</span>`;
+
+      // re-trigger invoices for this recipient
+      updateInvoiceVisibility();
+    };
+
+    sendBtn.onclick=async()=>{
+      let to=toInput.value.trim();
+      let body=bodyArea.value.trim();
+      let msgType=msgTypeSelect.value;
+      let recType=recTypeSelect.value;
+
+      if(!to){
+        toast('Please enter a recipient phone number.');
+        toInput.focus();
+        return;
+      }
+
+      if(!body){
+        toast('Please write or generate an SMS message.');
+        bodyArea.focus();
+        return;
+      }
+
+      sendBtn.disabled=true;
+      sendBtn.innerHTML=`${lucide('loader-2')} Queueing SMS…`;
+
+      try{
+        let res=await api('connectx/sms/send',{
+          method:'POST',
+          body:JSON.stringify({
+            recipientType:recType,
+            recipientId:selectedRec?.id||null,
+            recipientName:selectedRec?.full_name||selectedRec?.name||null,
+            toPhone:to,
+            messageType:msgType,
+            invoiceId:selectedInv?.id||null,
+            messageBody:body
+          })
+        });
+
+        // Prompt requirement:
+        // Do NOT show "Sent".
+        // Show:
+        // ✓ SMS queued for ConnectX
+        // Status: Queued
+        let banner=$('#smsFeedbackBanner');
+        banner.style.display='block';
+        banner.innerHTML=`
+          <div class="shp-sms-queued-banner">
+            <span class="badge">Queued</span>
+            <div style="flex:1;">
+              <b>✓ SMS queued for ConnectX</b>
+              <p>Status: Queued · The message has been stored in the dispatch queue and will be transmitted through the ConnectX Android SMS Gateway.</p>
+            </div>
+            <button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="viewInHistoryBtn">View History</button>
+          </div>
+        `;
+
+        $('#viewInHistoryBtn').onclick=()=>{
+          smsTab='history';
+          renderSmsPortal();
+        };
+
+        toast('✓ SMS queued for ConnectX (Status: Queued)');
+
+        // Clear message
+        bodyArea.value='';
+        updateCounter();
+      }catch(err){
+        toast(err.message);
+      }finally{
+        sendBtn.disabled=false;
+        sendBtn.innerHTML=`${lucide('send')} Send via ConnectX`;
+      }
+    };
+
+    await loadContacts();
+    updateCounter();
+  }
+
+  async function smsHistory(){
+    let c=$('#connectxSmsContent');
+    c.innerHTML=`<section class="shp-pagegap">${SKEL.toolbar()+SKEL.table(6,6)}</section>`;
+
+    let rows=await api('connectx/sms/messages').catch(()=>[]);
+
+    c.innerHTML=`
+      <section class="shp-pagegap">
+        <div class="shp-toolbar" style="gap:8px;flex-wrap:wrap;">
+          <input id="smsSearch" class="shp-search" placeholder="Search recipient, phone, type, invoice, status, or message text…" style="flex:1;min-width:220px;">
+          <select id="smsStatusFilter" style="min-width:130px;">
+            <option value="">All Statuses</option>
+            <option value="queued">Queued</option>
+            <option value="sending">Sending</option>
+            <option value="sent">Sent</option>
+            <option value="failed">Failed</option>
+          </select>
+          <button type="button" class="shp-btn shp-btn-soft" id="smsRefreshBtn">${lucide('refresh-cw')} Refresh</button>
+        </div>
+
+        <div id="smsTableContainer">${renderSmsTable(rows)}</div>
+      </section>
+    `;
+
+    function filterAndRender(){
+      let q=($('#smsSearch').value||'').trim().toLowerCase();
+      let st=$('#smsStatusFilter').value;
+      let filtered=rows.filter(r=>{
+        if(st && r.status!==st)return false;
+        if(q){
+          let hay=`${r.recipient_name||''} ${r.to_phone||''} ${r.recipient_type||''} ${r.message_type||''} ${r.message_body||''} ${r.status||''} ${r.invoice_id||''}`.toLowerCase();
+          if(!hay.includes(q))return false;
+        }
+        return true;
+      });
+      $('#smsTableContainer').innerHTML=renderSmsTable(filtered);
+      bindSmsActions(filtered);
+    }
+
+    $('#smsSearch').oninput=filterAndRender;
+    $('#smsStatusFilter').onchange=filterAndRender;
+    $('#smsRefreshBtn').onclick=smsHistory;
+
+    bindSmsActions(rows);
+  }
+
+  function renderSmsTable(rows){
+    if(!rows.length)return shpEmpty('No SMS queue records found.');
+
+    return `
+      <div class="shp-tw">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:130px;">Date</th>
+              <th style="width:170px;">Recipient</th>
+              <th style="width:125px;">Phone</th>
+              <th style="width:160px;">Type</th>
+              <th style="width:110px;">Invoice</th>
+              <th style="width:100px;">Status</th>
+              <th style="width:90px;text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(r=>{
+              let statusTone=r.status==='sent'?'emerald':(r.status==='failed'?'rose':(r.status==='sending'?'sky':'amber'));
+              let recTone=r.recipient_type==='customer'?'violet':(r.recipient_type==='supplier'?'amber':'blue');
+              return `
+                <tr>
+                  <td>
+                    <div style="font-family:var(--shp-mono);font-size:11.5px;color:var(--shp-text);">${new Date(r.created_at).toLocaleDateString()}</div>
+                    <small style="font-family:var(--shp-mono);font-size:10px;color:var(--shp-muted);">${new Date(r.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · ${ago(r.created_at)}</small>
+                  </td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                      <span class="shp-tag shp-t-${recTone}">${esc(r.recipient_type||'User')}</span>
+                      <b>${esc(r.recipient_name||'—')}</b>
+                    </div>
+                  </td>
+                  <td>
+                    <code style="font-family:var(--shp-mono);font-size:11px;">${esc(r.to_phone)}</code>
+                  </td>
+                  <td>
+                    <span class="shp-tag shp-t-zinc" style="font-size:11px;">${esc(r.message_type||'SMS')}</span>
+                  </td>
+                  <td>
+                    ${r.invoice_id?`<code>${esc(shortId(r.invoice_id))}</code>`:'<span style="color:var(--shp-muted);">—</span>'}
+                  </td>
+                  <td>
+                    ${shpBadge(r.status==='queued'?'Queued':r.status,statusTone)}
+                    ${r.error_message?`<br><small class="shp-desc" title="${esc(r.error_message)}" style="color:var(--shp-rose);">${esc(r.error_message)}</small>`:''}
+                  </td>
+                  <td style="text-align:right;">
+                    <span style="display:inline-flex;gap:4px;">
+                      <button class="shp-btn shp-btn-soft shp-btn-sm" data-sms-view="${r.id}">View</button>
+                      ${r.status==='queued'?`<button class="shp-icobtn shp-danger" data-sms-cancel="${r.id}" title="Cancel queued SMS" aria-label="Cancel queued SMS">${lucide('x')}</button>`:''}
+                    </span>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function bindSmsActions(rows){
+    document.querySelectorAll('[data-sms-view]').forEach(b=>{
+      b.onclick=()=>{
+        let item=rows.find(x=>x.id===b.dataset.smsView);
+        if(item)smsInspectModal(item);
+      };
+    });
+
+    document.querySelectorAll('[data-sms-cancel]').forEach(b=>{
+      b.onclick=async()=>{
+        if(!confirm('Cancel this queued SMS message?'))return;
+        try{
+          await api('connectx/sms/messages/'+b.dataset.smsCancel,{method:'DELETE'});
+          toast('Queued SMS cancelled.');
+          smsHistory();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+  }
+
+  function smsInspectModal(msg){
+    let statusTone=msg.status==='sent'?'emerald':(msg.status==='failed'?'rose':(msg.status==='sending'?'sky':'amber'));
+    let stats=getSmsStats(msg.message_body);
+
+    let e=shpModal(`SMS Details — ${esc(msg.to_phone)}`,`
+      <div class="shp-pagegap" style="gap:14px;">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;">
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
+            <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Recipient</small>
+            <b style="font-size:13px;display:block;margin-top:2px;">${esc(msg.recipient_name||'—')}</b>
+            <span class="shp-tag shp-t-zinc" style="margin-top:4px;">${esc(msg.recipient_type)}</span>
+          </div>
+
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
+            <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Destination</small>
+            <b style="font-family:var(--shp-mono);font-size:13px;display:block;margin-top:2px;">${esc(msg.to_phone)}</b>
+            <small style="color:var(--shp-muted);font-size:10px;">Physical SIM SMS</small>
+          </div>
+
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
+            <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Queue Status</small>
+            <div style="margin-top:4px;">${shpBadge(msg.status==='queued'?'Queued':msg.status,statusTone)}</div>
+            <small style="color:var(--shp-muted);font-size:10px;display:block;margin-top:3px;">${msg.attempts||0} attempts</small>
+          </div>
+
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
+            <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Created Time</small>
+            <b style="font-family:var(--shp-mono);font-size:12px;display:block;margin-top:2px;">${new Date(msg.created_at).toLocaleDateString()}</b>
+            <small style="font-family:var(--shp-mono);color:var(--shp-muted);font-size:10px;">${new Date(msg.created_at).toLocaleTimeString()} (${ago(msg.created_at)})</small>
+          </div>
+        </div>
+
+        <div style="background:var(--shp-card);border:1px solid var(--shp-line);border-radius:12px;padding:12px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <small style="font-family:var(--shp-mono);font-size:10px;text-transform:uppercase;color:var(--shp-muted);font-weight:700;">Message Body</small>
+            <span class="shp-tag shp-t-zinc">${stats.length} chars · ${stats.parts} SMS ${stats.isUnicode?'(Unicode)':'(GSM)'}</span>
+          </div>
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px;font-family:var(--shp-font);font-size:13px;line-height:1.6;white-space:pre-wrap;color:var(--shp-text);">${esc(msg.message_body)}</div>
+        </div>
+
+        ${msg.error_message?`
+          <div style="background:color-mix(in srgb,var(--shp-rose) 10%,var(--shp-card));border:1px solid color-mix(in srgb,var(--shp-rose) 30%,transparent);border-radius:10px;padding:10px 12px;">
+            <b style="font-size:11px;color:var(--shp-rose);text-transform:uppercase;font-family:var(--shp-mono);">Error Message</b>
+            <p style="margin:4px 0 0;font-size:12px;color:var(--shp-text);">${esc(msg.error_message)}</p>
+          </div>
+        `:''}
+
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <button type="button" class="shp-btn shp-btn-soft" id="copySmsTextBtn">${lucide('copy')} Copy text</button>
+          <button type="button" class="shp-btn shp-btn-soft" id="closeSmsInspect">Close</button>
+        </div>
+      </div>
+    `,'shp-modal-lg');
+
+    e.querySelector('#closeSmsInspect').onclick=()=>e.remove();
+    e.querySelector('#copySmsTextBtn').onclick=()=>{
+      navigator.clipboard?.writeText(msg.message_body);
+      toast('SMS text copied to clipboard.');
+    };
+  }
+
+  renderPortal();
+}
 function connectXView(message){let e=shpModal(esc(message.subject),`<div class="shp-cx-email"><div class="shp-cx-email-head"><div><h2>${esc(message.subject)}</h2><p class="shp-desc">To: ${esc(message.to_emails.join(', '))} · ${new Date(message.created_at).toLocaleString()}</p></div></div><div class="shp-cx-email-meta"><span>From: <b>${esc(message.from_email)}</b></span><span>Status: <b>${esc(message.status)}</b></span>${message.cc_emails?.length?`<span>CC: <b>${esc(message.cc_emails.join(', '))}</b></span>`:''}</div><iframe class="shp-cx-frame" sandbox="" srcdoc="${esc(message.body_html)}"></iframe></div>`,'shp-modal-xl')}
 async function dueRecover(){
+  if(!canAccess('due_recover','view')){toast('Permission denied.');return page('dashboard')}
   let history=[],modalState=null;
   const money=v=>Number(v||0).toLocaleString('en-BD',{minimumFractionDigits:2,maximumFractionDigits:2});
   const sourceLabel=t=>t==='sale'?'Sale':t==='purchase'?'Purchase':'Expense';
@@ -1537,8 +2677,111 @@ async function dueRecover(){
   await loadHistory();
 }
 
-async function invoices(pg){let kind=pg==='purchases'?'purchase':'sale',label=kind==='purchase'?'Purchase':'Sales',[rows,parties]=await Promise.all([api('invoices?kind='+kind),api('invoice-parties?kind='+kind),attachmentsIndex(true).catch(()=>null)]);let partyMap=Object.fromEntries(parties.map(x=>[x.id,x]));rows=rows.map(x=>({...x,partyName:partyMap[x.party_id]?.name||x.custom_party_name||'Custom / walk-in customer'}));$('#page').innerHTML=shpHead('Operations',label+' invoices',kind==='purchase'?'Purchase invoices move stock in and update supplier dues.':'Sales invoices move stock out and update customer dues.')+`<div class="shp-toolbar">${canAccess(kind==='sale'?'sales':'purchase','add')?`<button class="shp-btn shp-btn-primary" id="addInvoice">+ Add new ${label.toLowerCase()}</button>`:''}<input id="invoiceSearch" class="shp-search" placeholder="Search invoice number, date, customer, or transaction ID"></div><div class="shp-pagegap" id="invoiceData">${invoiceTable(rows,label)}</div>`;$('#invoiceSearch').oninput=e=>$('#invoiceData').innerHTML=invoiceTable(rows.filter(r=>JSON.stringify(r).toLowerCase().includes(e.target.value.toLowerCase())),label);if($('#addInvoice'))$('#addInvoice').onclick=()=>kind==='sale'?page('sale-invoice'):invoiceModal(kind);document.querySelectorAll('[data-view-invoice]').forEach(b=>b.onclick=()=>invoiceView(rows.find(x=>x.id===b.dataset.viewInvoice),label));document.querySelectorAll('[data-edit-invoice]').forEach(b=>b.onclick=()=>toast('Posted invoice editing will be enabled with the next safe stock-reversal update.'));document.querySelectorAll('[data-delete-invoice]').forEach(b=>b.onclick=async()=>{let r=rows.find(x=>x.id===b.dataset.deleteInvoice);if(!confirm(`Delete ${r.invoice_number}? Inventory movement will be safely reversed.`))return;try{await api('invoices/'+r.id,{method:'DELETE'});toast('Invoice deleted and inventory reversed.');invoices(pg)}catch(e){toast(e.message)}})}
-function invoiceTable(rows,label){if(!rows.length)return shpEmpty('No '+label.toLowerCase()+' invoices found.');let partyLabel=label==='Sales'?'Customer name':'Supplier name',section=label==='Sales'?'sales':'purchase';return `<div class="shp-tw"><table><thead><tr><th>Invoice</th><th>Date</th><th>${partyLabel}</th><th>Subtotal</th><th>Discount</th><th>Paid</th><th>Due</th><th>Action</th></tr></thead><tbody>${rows.map(r=>`<tr class="${Number(r.total_due)>0?'shp-rowdue':''}"><td>${esc(r.invoice_number)}</td><td>${esc(r.invoice_date)}</td><td class="shp-wrap">${esc(r.partyName)}</td><td>${money(r.subtotal)}</td><td>${money(r.discount)}</td><td>${money(r.paid_amount)}</td><td>${money(r.total_due)}</td><td><span class="shp-rowacts shp-rowacts-table">${folderBtn({t:"inv",id:r.id,num:r.invoice_number})}<button class="shp-btn shp-btn-soft shp-btn-sm" data-view-invoice="${r.id}" ${canAccess(section,'view')?'':'disabled'}>View</button><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-invoice="${r.id}" ${canAccess(section,'edit')?'':'disabled'}>Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-invoice="${r.id}" ${canAccess(section,'delete')?'':'disabled'}>Delete</button></span></td></tr>`).join('')}</tbody></table></div>`}
+async function invoices(pg){
+  let kind=pg==='purchases'?'purchase':'sale',
+      label=kind==='purchase'?'Purchase':'Sales',
+      [rows,parties,returnsList,exchangesList]=await Promise.all([
+        api('invoices?kind='+kind),
+        api('invoice-parties?kind='+kind),
+        kind==='sale'?api('returns').catch(()=>[]):Promise.resolve([]),
+        kind==='sale'?api('exchanges').catch(()=>[]):Promise.resolve([]),
+        attachmentsIndex(true).catch(()=>null)
+      ]);
+  let partyMap=Object.fromEntries(parties.map(x=>[x.id,x]));
+  let returnsByInvoice={};
+  for(let ret of (returnsList||[])){
+    (returnsByInvoice[ret.invoice_id]??=[]).push(ret);
+  }
+  let exchangesByInvoice={};
+  for(let exc of (exchangesList||[])){
+    (exchangesByInvoice[exc.invoice_id]??=[]).push(exc);
+  }
+
+  rows=rows.map(x=>({
+    ...x,
+    partyName:partyMap[x.party_id]?.name||x.custom_party_name||'Custom / walk-in customer',
+    returns:returnsByInvoice[x.id]||[],
+    exchanges:exchangesByInvoice[x.id]||[]
+  }));
+
+  const wireInvoiceActions=()=>{
+    document.querySelectorAll('[data-view-invoice]').forEach(b=>b.onclick=()=>invoiceView(rows.find(x=>x.id===b.dataset.viewInvoice),label));
+    document.querySelectorAll('[data-edit-invoice]').forEach(b=>b.onclick=()=>toast('Posted invoice editing will be enabled with the next safe stock-reversal update.'));
+    document.querySelectorAll('[data-delete-invoice]').forEach(b=>b.onclick=async()=>{
+      let r=rows.find(x=>x.id===b.dataset.deleteInvoice);
+      if(!confirm(`Delete ${r.invoice_number}? Inventory movement will be safely reversed.`))return;
+      try{
+        await api('invoices/'+r.id,{method:'DELETE'});
+        toast('Invoice deleted and inventory reversed.');
+        invoices(pg);
+      }catch(e){toast(e.message)}
+    });
+  };
+
+  $('#page').innerHTML=shpHead('Operations',label+' invoices',kind==='purchase'?'Purchase invoices move stock in and update supplier dues.':'Sales invoices move stock out and update customer dues.')+`<div class="shp-toolbar">${canAccess(kind==='sale'?'sales':'purchase','add')?`<button class="shp-btn shp-btn-primary" id="addInvoice">+ Add new ${label.toLowerCase()}</button>`:''}<input id="invoiceSearch" class="shp-search" placeholder="Search invoice number, date, customer, status, or transaction ID"></div><div class="shp-pagegap" id="invoiceData">${invoiceTable(rows,label)}</div>`;
+
+  $('#invoiceSearch').oninput=e=>{
+    let q=(e.target.value||'').toLowerCase();
+    let filtered = rows.filter(r=>{
+      let text = (r.invoice_number + ' ' + r.invoice_date + ' ' + r.partyName + ' ' + (r.transaction_id||'')).toLowerCase();
+      if(r.returns?.length) text += ' returned return refunded refund';
+      if(r.exchanges?.length) text += ' exchanged exchange';
+      return text.includes(q);
+    });
+    $('#invoiceData').innerHTML=invoiceTable(filtered,label);
+    wireInvoiceActions();
+  };
+
+  if($('#addInvoice'))$('#addInvoice').onclick=()=>kind==='sale'?page('sale-invoice'):invoiceModal(kind);
+  wireInvoiceActions();
+}
+
+function invoiceTable(rows,label){
+  if(!rows.length)return shpEmpty('No '+label.toLowerCase()+' invoices found.');
+  let partyLabel=label==='Sales'?'Customer name':'Supplier name',section=label==='Sales'?'sales':'purchase';
+  let isSales=label==='Sales';
+  return `<div class="shp-tw"><table><thead><tr>
+    <th>Invoice</th>
+    <th>Date</th>
+    <th>${partyLabel}</th>
+    <th>Subtotal</th>
+    <th>Discount</th>
+    <th>Paid</th>
+    <th>Due</th>
+    <th>Action</th>
+    ${isSales?'<th>Status</th>':''}
+  </tr></thead><tbody>
+  ${rows.map(r=>{
+    let statusCol='';
+    if(isSales){
+      let rets=r.returns||[], excs=r.exchanges||[];
+      let badges=[];
+      if(rets.length){
+        badges.push(shpBadge('Returned','sky'));
+        badges.push(shpBadge('Refunded','emerald'));
+      }
+      if(excs.length){
+        badges.push(shpBadge('Exchanged','violet'));
+      }
+      if(!rets.length && !excs.length){
+        badges.push('<span style="color:var(--shp-text2);font-size:12px">—</span>');
+      }
+      statusCol=`<td><div style="display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center">${badges.join(' ')}</div></td>`;
+    }
+    return `<tr class="${Number(r.total_due)>0?'shp-rowdue':''}">
+      <td>${esc(r.invoice_number)}</td>
+      <td>${esc(r.invoice_date)}</td>
+      <td class="shp-wrap">${esc(r.partyName)}</td>
+      <td>${money(r.subtotal)}</td>
+      <td>${money(r.discount)}</td>
+      <td>${money(r.paid_amount)}</td>
+      <td>${money(r.total_due)}</td>
+      <td><span class="shp-rowacts shp-rowacts-table">${folderBtn({t:"inv",id:r.id,num:r.invoice_number})}<button class="shp-btn shp-btn-soft shp-btn-sm" data-view-invoice="${r.id}" ${canAccess(section,'view')?'':'disabled'}>View</button><button class="shp-btn shp-btn-soft shp-btn-sm" data-edit-invoice="${r.id}" ${canAccess(section,'edit')?'':'disabled'}>Edit</button><button class="shp-btn shp-btn-danger shp-btn-sm" data-delete-invoice="${r.id}" ${canAccess(section,'delete')?'':'disabled'}>Delete</button></span></td>
+      ${statusCol}
+    </tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
 /* Item picker modal — shared by the sales page and purchase modal.
    Shows all ACTIVE inventory items (search box on top, single-select table)
    plus a selected-item section: Item · Quantity · Unit · Unit price · Add. */
@@ -1652,8 +2895,2154 @@ async function invoicePage(kind){
 /* Invoice view — the document markup (.invoiceprint family) is shared with the
    public TrueBill verification page and the print window, so it keeps its
    classes; only the modal chrome is the Shop theme. */
-async function invoiceView(r,label){let partyKind=r.kind==='sale'?'customer':'supplier';let [parties,staff,store,branding,tb]=await Promise.all([api('invoice-parties?kind='+r.kind),api('staff').catch(()=>[]),api('shop/settings'),api('public/branding'),api('truebill/availability').catch(()=>({enabled:false,ever:false}))]);let party=parties.find(x=>x.id===r.party_id),partyName=party?.name||r.custom_party_name||'—',partyAddress=party?.address||r.custom_party_address||'—',partyPhone=party?.phone||r.custom_party_phone||'—',partyCode=party?.customer_code||party?.supplier_code||(r.custom_party_name?'Custom customer':'Custom / not registered'),submitter=staff.find(x=>x.id===r.created_by),paid=Number(r.total_due)<=0,showQR=!!(tb.enabled||tb.ever),base=(tb.url||location.origin).replace(/\/$/,''),verifyUrl=base+'/?verify='+r.verification_token,qrUrl='https://api.qrserver.com/v1/create-qr-code/?size=165x165&data='+encodeURIComponent(verifyUrl);let e=document.createElement('div');e.className='shp-modal shp-ivmodal';let billLabel=r.kind==='sale'?'Bill to':'Supplier';e.innerHTML=`<div class="shp-modalbox"><div class="shp-modalbody"><section class="invoiceprint"><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(store.name)}</h2><p>${esc(store.address||'')}</p><p>${esc(store.phone||'')}${store.phone2?' · '+esc(store.phone2):''}</p><p>${esc(store.email||'')}</p>${store.website?`<p>${esc(store.website)}</p>`:''}</div><div class="invoiceTitleRight"><h1>${r.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE'}</h1><span># ${esc(r.invoice_number)}</span><b class="invoiceStatus ${paid?'paid':'due'}">${paid?'Paid':'Due'}</b></div></header><div class="invoicePrintInfo"><div><h3>${billLabel}</h3><p><i>ID:</i> <b>${esc(partyCode)}</b></p><p><i>Name:</i> <b>${esc(partyName)}</b></p><p><i>Address:</i> ${esc(partyAddress)}</p><p><i>Phone:</i> ${esc(partyPhone)}</p></div><div><h3>Invoice details</h3><p><i>Date:</i> <b>${esc(r.invoice_date)}</b></p><p><i>Invoice no.:</i> <b>${esc(r.invoice_number)}</b></p><p><i>Payment method:</i> <b>${esc(r.payment_method)}</b></p><p><i>Transaction ID:</i> <b>${esc(r.transaction_id||'—')}</b></p><p><i>Submit by:</i> <b>${esc(submitter?.user_id||'Administrator')}</b></p></div></div><div class="tablewrap"><table class="printItems"><thead><tr><th>#</th><th>Item</th><th>Quantity</th><th>Unit</th><th>Unit price</th><th>VAT</th><th>Disc.</th><th class="right">Total</th></tr></thead><tbody>${(r.invoice_lines||[]).map((x,i)=>`<tr><td>${i+1}</td><td><b>${esc(x.inventory_items?.description||'Item')}</b><br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td>${esc(x.quantity)}</td><td>${esc(x.inventory_items?.unit||'')}</td><td>${invoiceMoney(x.unit_price)}</td><td>${Number(x.tax_percent||0)?esc(x.tax_percent)+'%':'—'}</td><td>${Number(x.discount||0)?'−'+invoiceMoney(x.discount):'—'}</td><td class="right">${invoiceMoney(x.line_total)}</td></tr>`).join('')}</tbody></table></div><div class="invoiceBottom">${showQR?`<div class="invoiceQR"><div class="qrwrap"><img src="${qrUrl}" alt="TrueBill QR code"></div><div class="qrtext"><b>Scan For Verify</b><small>TrueBill</small></div></div>`:''}<div class="printTotals"><div><p><span>Subtotal</span><b>${invoiceMoney(r.subtotal)}</b></p>${Number(r.line_tax_amount||0)?`<p><span>Item VAT</span><b>+${invoiceMoney(r.line_tax_amount)}</b></p>`:''}<p><span>Tax (${esc(r.tax_percent)}%)</span><b>${invoiceMoney(r.tax_amount)}</b></p><p><span>Discount</span><b>−${invoiceMoney(r.discount)}</b></p>${Number(r.line_discount_amount||0)?`<p><span>Item discount</span><b>−${invoiceMoney(r.line_discount_amount)}</b></p>`:''}<p><span>Paid amount</span><b>−${invoiceMoney(r.paid_amount)}</b></p><p class="dueLine"><span>Total due</span><b>${invoiceMoney(r.total_due)}</b></p><small>${paid?'Balance: Paid in full':'Balance pending'}</small></div></div></div><footer class="invoicePrintFooter"><div><b>Notes:</b><br>${esc(r.notes||'No additional notes.')}</div><div><b>Invoice status:</b> ${paid?'Paid':'Payment due'}<br><small>Generated ${new Date().toLocaleDateString()}</small><br><small>This invoice is a computer generated document · Powered by DoxTox EMS</small></div></footer><div class="printActions"><button id="printInvoice">Print invoice</button><button class="secondary" id="closeInvoice">Close</button></div></section></div></div>`;document.body.append(e);e.addEventListener('click',ev=>{if(ev.target===e)e.remove()});e.querySelector('#closeInvoice').onclick=()=>e.remove();e.querySelector('#printInvoice').onclick=()=>{let w=window.open('','_blank');w.document.write('<html><head><title>'+esc(r.invoice_number)+'</title><style>body{font-family:Arial;padding:12mm 15mm;color:#111;font-size:10px}.printActions{display:none}table{width:100%;border-collapse:collapse;margin:10px 0}th{background:#111;color:#fff;text-align:left;padding:6px;font-size:9px}td{padding:5px 6px;border-bottom:1px solid #ddd;font-size:10px}.invoicePrintHeader{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px}.invoiceShopInfo{font-size:10px;line-height:1.3}.invoiceShopInfo h2{font-size:17px;margin:0 0 3px}.invoiceTitleRight{text-align:right}.invoiceTitleRight h1{font-size:21px;margin:0}.invoicePrintInfo{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:14px 0}.invoicePrintInfo h3{font-size:10px;margin:0 0 5px}.invoicePrintInfo p{margin:2px 0}.printTotals{display:flex;justify-content:end;margin-top:10px}.printTotals>div{width:290px}.printTotals p{display:flex;justify-content:space-between;margin:4px 0}.dueLine{border-top:1px solid #ddd;padding-top:7px;font-size:14px}.invoicePrintFooter{display:flex;justify-content:space-between;border-top:1px solid #ddd;padding-top:10px;margin-top:14px;font-size:10px}.invoiceBottom{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px;margin-top:10px}.invoiceQR{display:flex;align-items:flex-start;gap:10px}.invoiceQR img{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff}.qrwrap{display:inline-block;line-height:0}.qrtext{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:110px}.qrtext b{font-size:11px;color:#111}.qrtext small{font-size:9px;color:#666;letter-spacing:.3px}.invoiceBottom .printTotals{margin:0 0 0 auto}</style></head><body>'+e.querySelector('.invoiceprint').innerHTML+'</body></html>');w.document.close();let printed=false,printWhenReady=()=>{if(printed)return;printed=true;setTimeout(()=>w.print(),250)},qr=w.document.querySelector('.invoiceQR img');if(qr&&!qr.complete){qr.addEventListener('load',printWhenReady,{once:true});qr.addEventListener('error',printWhenReady,{once:true});setTimeout(printWhenReady,5000)}else printWhenReady()}}
-async function settings(){let tab='store';$('#page').innerHTML=shpHead('Preferences','Settings','Store identity, low-stock alert and the shop activity log.')+`<div class="shp-chips"><button class="shp-chip on" data-setting-tab="store">Store</button><button class="shp-chip" data-setting-tab="activity">Activity Log</button></div><div id="settingContent" class="shp-pagegap"></div>`;async function render(){let el=$('#settingContent');el.innerHTML=`<section class="shp-panel">${SKEL.head()}${tab==='store'?SKEL.kv(8):SKEL.toolbar()+SKEL.table(4,6)}</section>`;if(tab==='store'){let x=await api('shop/settings');el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>Store details</h3><p class="shp-desc">Managed by your administrator. Contact them to change store identity.</p></div>${shpBadge(x.status==='active'?'Active':'Inactive',x.status==='active'?'emerald':'zinc')}</div><div class="shp-kv"><div><span>Store name</span><b>${esc(x.name)}</b></div><div><span>Shop ID</span><b><code>${esc(x.shop_code)}</code></b></div><div><span>Address</span><b>${esc(x.address||'—')}</b></div><div><span>Phone</span><b>${esc(x.phone||'—')}${x.phone2?' / '+esc(x.phone2):''}</b></div><div><span>Email</span><b>${esc(x.email||'—')}</b></div><div><span>Website</span><b>${esc(x.website||'—')}</b></div><div><span>Low stock alert</span><b>${esc(x.low_stock_threshold)}</b></div><div><span>Status</span><b>${esc(x.status)}</b></div></div></section>`}else{let logs=await api('shop/activity-logs');el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>Activity Log</h3><p class="shp-desc">Login, create, update, delete, and recovery activity for this shop.</p></div><input id="logSearch" class="shp-search" placeholder="Search activity"></div><div id="logTable">${activityTable(logs)}</div></section>`;$('#logSearch').oninput=e=>$('#logTable').innerHTML=activityTable(logs.filter(x=>JSON.stringify(x).toLowerCase().includes(e.target.value.toLowerCase())))}}function activityTable(rows){return rows.length?`<div class="shp-tw"><table><thead><tr><th>Action</th><th>Entity</th><th>Details</th><th>User ID</th><th>User</th><th>Date & time</th></tr></thead><tbody>${rows.map(x=>`<tr><td><span class="shp-tag shp-t-zinc">${esc(x.action)}</span></td><td>${esc(x.entity_type||'—')}</td><td><code>${esc(x.detail||'—')}</code></td><td>${esc(x.actor?.userId||'—')}</td><td>${esc(x.actor?.name||'—')}</td><td>${new Date(x.created_at).toLocaleString()}</td></tr>`).join('')}</tbody></table></div>`:'<p class="shp-desc">No activity has been recorded for this shop.</p>'}document.querySelectorAll('[data-setting-tab]').forEach(b=>b.onclick=()=>{tab=b.dataset.settingTab;document.querySelectorAll('[data-setting-tab]').forEach(x=>x.classList.toggle('on',x===b));render()});await render()}
+async function invoiceView(r,label){let partyKind=r.kind==='sale'?'customer':'supplier';let [parties,staff,store,branding,tb]=await Promise.all([api('invoice-parties?kind='+r.kind),api('staff').catch(()=>[]),api('shop/settings'),api('public/branding'),api('truebill/availability').catch(()=>({enabled:false,ever:false}))]);let party=parties.find(x=>x.id===r.party_id),partyName=party?.name||r.custom_party_name||'—',partyAddress=party?.address||r.custom_party_address||'—',partyPhone=party?.phone||r.custom_party_phone||'—',partyCode=party?.customer_code||party?.supplier_code||(r.custom_party_name?'Custom customer':'Custom / not registered'),submitter=staff.find(x=>x.id===r.created_by),paid=Number(r.total_due)<=0,showQR=!!tb.enabled,base=(tb.url||location.origin).replace(/\/$/,''),verifyUrl=base+'/?verify='+r.verification_token,qrSvg=showQR?getQrSvg(verifyUrl):'';let e=document.createElement('div');e.className='shp-modal shp-ivmodal';let billLabel=r.kind==='sale'?'Bill to':'Supplier';e.innerHTML=`<div class="shp-modalbox"><div class="shp-modalbody"><section class="invoiceprint"><header class="invoicePrintHeader"><div class="invoiceShopInfo"><h2>${esc(store.name)}</h2><p>${esc(store.address||'')}</p><p>${esc(store.phone||'')}${store.phone2?' · '+esc(store.phone2):''}</p><p>${esc(store.email||'')}</p>${store.website?`<p>${esc(store.website)}</p>`:''}</div><div class="invoiceTitleRight"><h1>${r.kind==='sale'?'SALES INVOICE':'PURCHASE INVOICE'}</h1><span># ${esc(r.invoice_number)}</span><b class="invoiceStatus ${paid?'paid':'due'}">${paid?'Paid':'Due'}</b></div></header><div class="invoicePrintInfo"><div><h3>${billLabel}</h3><p><i>ID:</i> <b>${esc(partyCode)}</b></p><p><i>Name:</i> <b>${esc(partyName)}</b></p><p><i>Address:</i> ${esc(partyAddress)}</p><p><i>Phone:</i> ${esc(partyPhone)}</p></div><div><h3>Invoice details</h3><p><i>Date:</i> <b>${esc(r.invoice_date)}</b></p><p><i>Invoice no.:</i> <b>${esc(r.invoice_number)}</b></p><p><i>Payment method:</i> <b>${esc(r.payment_method)}</b></p><p><i>Transaction ID:</i> <b>${esc(r.transaction_id||'—')}</b></p><p><i>Submit by:</i> <b>${esc(submitter?.user_id||'Administrator')}</b></p></div></div><div class="tablewrap"><table class="printItems"><thead><tr><th>#</th><th>Item</th><th>Quantity</th><th>Unit</th><th>Unit price</th><th>VAT</th><th>Disc.</th><th class="right">Total</th></tr></thead><tbody>${(r.invoice_lines||[]).map((x,i)=>`<tr><td>${i+1}</td><td><b>${esc(x.inventory_items?.description||'Item')}</b><br><small>${esc(x.inventory_items?.item_code||'')}</small></td><td>${esc(x.quantity)}</td><td>${esc(x.inventory_items?.unit||'')}</td><td>${invoiceMoney(x.unit_price)}</td><td>${Number(x.tax_percent||0)?esc(x.tax_percent)+'%':'—'}</td><td>${Number(x.discount||0)?'−'+invoiceMoney(x.discount):'—'}</td><td class="right">${invoiceMoney(x.line_total)}</td></tr>`).join('')}</tbody></table></div><div class="invoiceBottom">${showQR?`<div class="invoiceQR"><div class="qrwrap">${qrSvg}</div><div class="qrtext"><b>Scan For Verify</b><small>TrueBill</small></div></div>`:''}<div class="printTotals"><div><p><span>Subtotal</span><b>${invoiceMoney(r.subtotal)}</b></p>${Number(r.line_tax_amount||0)?`<p><span>Item VAT</span><b>+${invoiceMoney(r.line_tax_amount)}</b></p>`:''}<p><span>Tax (${esc(r.tax_percent)}%)</span><b>${invoiceMoney(r.tax_amount)}</b></p><p><span>Discount</span><b>−${invoiceMoney(r.discount)}</b></p>${Number(r.line_discount_amount||0)?`<p><span>Item discount</span><b>−${invoiceMoney(r.line_discount_amount)}</b></p>`:''}<p><span>Paid amount</span><b>−${invoiceMoney(r.paid_amount)}</b></p><p class="dueLine"><span>Total due</span><b>${invoiceMoney(r.total_due)}</b></p><small>${paid?'Balance: Paid in full':'Balance pending'}</small></div></div></div><footer class="invoicePrintFooter"><div><b>Notes:</b><br>${esc(r.notes||'No additional notes.')}</div><div><b>Invoice status:</b> ${paid?'Paid':'Payment due'}<br><small>Generated ${new Date().toLocaleDateString()}</small><br><small>This invoice is a computer generated document · Powered by DoxTox EMS</small></div></footer><div class="printActions"><button id="printInvoice">Print invoice</button><button class="secondary" id="closeInvoice">Close</button></div></section></div></div>`;document.body.append(e);e.addEventListener('click',ev=>{if(ev.target===e)e.remove()});e.querySelector('#closeInvoice').onclick=()=>e.remove();e.querySelector('#printInvoice').onclick=()=>{let w=window.open('','_blank');w.document.write('<html><head><title>'+esc(r.invoice_number)+'</title><style>body{font-family:Arial;padding:12mm 15mm;color:#111;font-size:10px}.printActions{display:none}table{width:100%;border-collapse:collapse;margin:10px 0}th{background:#111;color:#fff;text-align:left;padding:6px;font-size:9px}td{padding:5px 6px;border-bottom:1px solid #ddd;font-size:10px}.invoicePrintHeader{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px}.invoiceShopInfo{font-size:10px;line-height:1.3}.invoiceShopInfo h2{font-size:17px;margin:0 0 3px}.invoiceTitleRight{text-align:right}.invoiceTitleRight h1{font-size:21px;margin:0}.invoicePrintInfo{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:14px 0}.invoicePrintInfo h3{font-size:10px;margin:0 0 5px}.invoicePrintInfo p{margin:2px 0}.printTotals{display:flex;justify-content:end;margin-top:10px}.printTotals>div{width:290px}.printTotals p{display:flex;justify-content:space-between;margin:4px 0}.dueLine{border-top:1px solid #ddd;padding-top:7px;font-size:14px}.invoicePrintFooter{display:flex;justify-content:space-between;border-top:1px solid #ddd;padding-top:10px;margin-top:14px;font-size:10px}.invoiceBottom{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px;margin-top:10px}.invoiceQR{display:flex;align-items:flex-start;gap:10px}.invoiceQR svg{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}.invoiceQR img{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}.qrwrap{display:inline-block;line-height:0;width:110px;height:110px}.qrtext{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:110px}.qrtext b{font-size:11px;color:#111}.qrtext small{font-size:9px;color:#666;letter-spacing:.3px}.invoiceBottom .printTotals{margin:0 0 0 auto}@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact}.invoiceQR, .invoiceQR svg, .invoiceQR img{display:flex!important;visibility:visible!important}}</style></head><body>'+e.querySelector('.invoiceprint').innerHTML+'</body></html>');w.document.close();setTimeout(()=>w.print(),350)}}
+/* ═══════════ SHOP · Sales Returns & Exchanges ═══════════ */
+async function returnsRefundsPage(){
+  if(!canAccess('returns_refunds','view')){toast('Permission denied.');return page('dashboard')}
+  let activeTab = 'returns', searchQ = '';
+  let [returnsList, exchangesList] = await Promise.all([
+    api('returns').catch(()=>[]),
+    api('exchanges').catch(()=>[])
+  ]);
+
+  const render = () => {
+    let countReturns = returnsList.length;
+    let countExchanges = exchangesList.length;
+    let filteredReturns = returnsList.filter(r => {
+      if(!searchQ) return true;
+      let text = (r.return_number + ' ' + (r.invoices?.invoice_number||'') + ' ' + (r.customer_name||'') + ' ' + (r.refund_method||'') + ' ' + (r.status||'')).toLowerCase();
+      return text.includes(searchQ.toLowerCase());
+    });
+    let filteredExchanges = exchangesList.filter(r => {
+      if(!searchQ) return true;
+      let text = (r.exchange_number + ' ' + (r.invoices?.invoice_number||'') + ' ' + (r.customer_name||'') + ' ' + (r.payment_method||'') + ' ' + (r.action_type||'')).toLowerCase();
+      return text.includes(searchQ.toLowerCase());
+    });
+
+    let headerBtns = '';
+    if(canAccess('returns_refunds', 'add')){
+      headerBtns = `<div style="display:inline-flex;gap:8px" class="shp-ret-head-btns">
+        <button class="shp-btn shp-btn-soft" id="btnNewExchange"><span style="margin-right:4px">⇄</span> New Exchange</button>
+        <button class="shp-btn shp-btn-primary" id="btnNewReturn">+ New Return</button>
+      </div>`;
+    }
+
+    $('#page').innerHTML = shpHead('After Sales', 'Return & Exchange', 'Manage product returns, sales exchanges, inventory restock, and customer settlements.',
+      headerBtns
+    ) + `
+    <div class="shp-toolbar">
+      <div class="shp-chips">
+        <button class="shp-chip ${activeTab==='returns'?'on':''}" data-tab="returns">Returns (${countReturns})</button>
+        <button class="shp-chip ${activeTab==='exchanges'?'on':''}" data-tab="exchanges">Exchanges (${countExchanges})</button>
+      </div>
+      <input id="retSearch" class="shp-search" placeholder="Search ID, invoice, customer, method, or status" value="${esc(searchQ)}">
+    </div>
+    <div class="shp-pagegap" id="retData">
+      ${activeTab === 'returns' ? returnsTableHtml(filteredReturns) : exchangesTableHtml(filteredExchanges)}
+    </div>`;
+
+    wirePageEvents();
+  };
+
+  const wirePageEvents = () => {
+    let sInput = $('#retSearch');
+    if(sInput){
+      sInput.oninput = e => {
+        searchQ = e.target.value;
+        let filteredReturns = returnsList.filter(r => {
+          if(!searchQ) return true;
+          let text = (r.return_number + ' ' + (r.invoices?.invoice_number||'') + ' ' + (r.customer_name||'') + ' ' + (r.refund_method||'') + ' ' + (r.status||'')).toLowerCase();
+          return text.includes(searchQ.toLowerCase());
+        });
+        let filteredExchanges = exchangesList.filter(r => {
+          if(!searchQ) return true;
+          let text = (r.exchange_number + ' ' + (r.invoices?.invoice_number||'') + ' ' + (r.customer_name||'') + ' ' + (r.payment_method||'') + ' ' + (r.action_type||'')).toLowerCase();
+          return text.includes(searchQ.toLowerCase());
+        });
+        $('#retData').innerHTML = activeTab === 'returns' ? returnsTableHtml(filteredReturns) : exchangesTableHtml(filteredExchanges);
+        wireTableActionButtons();
+      };
+    }
+
+    document.querySelectorAll('[data-tab]').forEach(b => {
+      b.onclick = () => {
+        activeTab = b.dataset.tab;
+        render();
+      };
+    });
+
+    if($('#btnNewReturn')){
+      $('#btnNewReturn').onclick = () => newReturnModal(reload);
+    }
+    if($('#btnNewExchange')){
+      $('#btnNewExchange').onclick = () => newExchangeModal(reload);
+    }
+
+    wireTableActionButtons();
+  };
+
+  const wireTableActionButtons = () => {
+    document.querySelectorAll('[data-view-return]').forEach(b => {
+      b.onclick = () => returnDetailModal(b.dataset.viewReturn, reload);
+    });
+    document.querySelectorAll('[data-print-return]').forEach(b => {
+      b.onclick = () => printReturnSlipById(b.dataset.printReturn);
+    });
+    document.querySelectorAll('[data-view-exchange]').forEach(b => {
+      b.onclick = () => exchangeDetailModal(b.dataset.viewExchange, reload);
+    });
+    document.querySelectorAll('[data-print-exchange]').forEach(b => {
+      b.onclick = () => printExchangeSlipById(b.dataset.printExchange);
+    });
+  };
+
+  const reload = async () => {
+    [returnsList, exchangesList] = await Promise.all([
+      api('returns').catch(()=>[]),
+      api('exchanges').catch(()=>[])
+    ]);
+    render();
+  };
+
+  render();
+}
+
+function exchangesTableHtml(rows){
+  if(!rows.length) return shpEmpty('No sales exchanges recorded yet.');
+  return `<div class="shp-tw"><table><thead><tr>
+    <th>Exchange ID</th>
+    <th>Original Invoice</th>
+    <th>Customer</th>
+    <th>Date</th>
+    <th>Returned Items</th>
+    <th>New Items</th>
+    <th>Difference</th>
+    <th>Payment / Refund</th>
+    <th>Status</th>
+    <th>Actions</th>
+  </tr></thead><tbody>
+  ${rows.map(r => {
+    let retItems = (r.exchange_items||[]).filter(x => x.item_type === 'returned');
+    let newItems = (r.exchange_items||[]).filter(x => x.item_type === 'new');
+    let retSummary = retItems.map(it => `${esc(it.inventory_items?.description||'Item')} × ${it.quantity}`).join(', ');
+    let newSummary = newItems.map(it => `${esc(it.inventory_items?.description||'Item')} × ${it.quantity}`).join(', ');
+    let diff = Number(r.difference_amount || 0);
+    let diffDisplay = diff > 0 ? `<b style="color:#0284c7">+${money(diff)}</b>` : (diff < 0 ? `<b style="color:#e11d48">-${money(Math.abs(diff))}</b>` : `<b>${money(0)}</b>`);
+    let payDisplay = '—';
+    if(diff > 0){
+      payDisplay = `<span class="shp-badge shp-t-sky">Paid ${money(diff)}</span><br><small class="shp-desc">${esc(r.payment_method?.toUpperCase()||'CASH')}${r.transaction_id ? ' · Ref: ' + esc(r.transaction_id) : ''}</small>`;
+    } else if(diff < 0){
+      payDisplay = `<span class="shp-badge shp-t-amber">Refunded ${money(Math.abs(diff))}</span><br><small class="shp-desc">${esc(r.payment_method?.toUpperCase()||'CASH')}${r.transaction_id ? ' · Ref: ' + esc(r.transaction_id) : ''}</small>`;
+    } else {
+      payDisplay = `<span class="shp-badge shp-t-emerald">Even (৳0)</span>`;
+    }
+    return `<tr>
+      <td><code>${esc(r.exchange_number)}</code></td>
+      <td><code>${esc(r.invoices?.invoice_number||'—')}</code></td>
+      <td class="shp-wrap">${esc(r.customer_name||r.customers?.name||'Walk-in Customer')}</td>
+      <td>${esc(r.exchange_date)}</td>
+      <td class="shp-wrap" title="${esc(retSummary)}">${retItems.length} item${retItems.length===1?'':'s'}<br><small class="shp-desc">${esc(retSummary.slice(0,30))}${retSummary.length>30?'…':''}</small></td>
+      <td class="shp-wrap" title="${esc(newSummary)}">${newItems.length} item${newItems.length===1?'':'s'}<br><small class="shp-desc">${esc(newSummary.slice(0,30))}${newSummary.length>30?'…':''}</small></td>
+      <td>${diffDisplay}</td>
+      <td>${payDisplay}</td>
+      <td>${shpBadge('Completed', 'emerald')}</td>
+      <td><span style="display:inline-flex;gap:6px">
+        <button class="shp-btn shp-btn-soft shp-btn-sm" data-view-exchange="${r.id}">View</button>
+        <button class="shp-btn shp-btn-soft shp-btn-sm" data-print-exchange="${r.id}">Print</button>
+      </span></td>
+    </tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
+
+function returnsTableHtml(rows){
+  if(!rows.length) return shpEmpty('No sales returns recorded yet.');
+  return `<div class="shp-tw"><table><thead><tr>
+    <th>Return ID</th>
+    <th>Original Invoice</th>
+    <th>Customer</th>
+    <th>Date</th>
+    <th>Items</th>
+    <th>Return & Refund Amount</th>
+    <th>Refund Method</th>
+    <th>Status</th>
+    <th>Actions</th>
+  </tr></thead><tbody>
+  ${rows.map(r => {
+    let itemsCount = (r.return_items||[]).length;
+    let itemsSummary = (r.return_items||[]).map(it => `${esc(it.inventory_items?.description||'Item')} × ${it.quantity}`).join(', ');
+    let methodDisplay = `<span class="shp-badge shp-t-emerald">${esc((r.refund_method||'cash').toUpperCase())}</span>${r.transaction_id ? '<br><small class="shp-desc">Ref: ' + esc(r.transaction_id) + '</small>' : ''}`;
+    return `<tr>
+      <td><code>${esc(r.return_number)}</code></td>
+      <td><code>${esc(r.invoices?.invoice_number||'—')}</code></td>
+      <td class="shp-wrap">${esc(r.customer_name||r.customers?.name||'Walk-in Customer')}</td>
+      <td>${esc(r.return_date)}</td>
+      <td class="shp-wrap" title="${esc(itemsSummary)}">${itemsCount} item${itemsCount===1?'':'s'}<br><small class="shp-desc">${esc(itemsSummary.slice(0,35))}${itemsSummary.length>35?'…':''}</small></td>
+      <td><b>${money(r.total_return_amount)}</b></td>
+      <td>${methodDisplay}</td>
+      <td>${shpBadge('Refunded', 'emerald')}</td>
+      <td><span style="display:inline-flex;gap:6px">
+        <button class="shp-btn shp-btn-soft shp-btn-sm" data-view-return="${r.id}">View</button>
+        <button class="shp-btn shp-btn-soft shp-btn-sm" data-print-return="${r.id}">Print</button>
+      </span></td>
+    </tr>`;
+  }).join('')}
+  </tbody></table></div>`;
+}
+
+function newReturnModal(onDone){
+  let e = shpModal('New sales return', `
+    <div id="retStep1">
+      <p class="shp-desc">Search for the original sales invoice to select items for return.</p>
+      <div style="display:flex;gap:8px;margin:12px 0 16px">
+        <input id="retInvInput" class="shp-search" style="flex:1" placeholder="Enter invoice number (e.g. SAL-000001)" autocomplete="off">
+        <button type="button" class="shp-btn shp-btn-primary" id="btnDoSearchInv">Search</button>
+      </div>
+      <div id="retInvResult"></div>
+    </div>
+    <div id="retStep2" style="display:none"></div>
+  `, 'shp-modal-lg');
+
+  const invInput = e.querySelector('#retInvInput');
+  const searchBtn = e.querySelector('#btnDoSearchInv');
+  const resultBox = e.querySelector('#retInvResult');
+  const step1Box = e.querySelector('#retStep1');
+  const step2Box = e.querySelector('#retStep2');
+
+  const doSearch = async () => {
+    let val = invInput.value.trim();
+    if(!val) return toast('Please enter an invoice number.');
+    resultBox.innerHTML = '<p class="shp-desc">Searching invoice...</p>';
+    searchBtn.disabled = true;
+    try {
+      let data = await api('returns/invoice-lookup?invoice_number=' + encodeURIComponent(val));
+      searchBtn.disabled = false;
+      let inv = data.invoice;
+      let party = data.customer;
+      let partyName = party?.name || inv.custom_party_name || 'Walk-in Customer';
+      let partyPhone = party?.phone || inv.custom_party_phone || '—';
+      let partyAddress = party?.address || inv.custom_party_address || '—';
+      let partyCode = party?.customer_code || 'Custom customer';
+      let allLines = data.lines || [];
+      let totalReturnable = allLines.reduce((sum, l) => sum + Number(l.returnable_quantity || 0), 0);
+
+      resultBox.innerHTML = `
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+            <div>
+              <b style="font-size:16px">${esc(inv.invoice_number)}</b>
+              <span style="margin-left:8px;color:var(--shp-text2)">${esc(inv.invoice_date)}</span>
+            </div>
+            <div>
+              ${shpBadge(Number(inv.total_due) <= 0 ? 'Paid in Full' : 'Due: ' + money(inv.total_due), Number(inv.total_due) <= 0 ? 'emerald' : 'amber')}
+            </div>
+          </div>
+          <div class="shp-grid2" style="font-size:12.5px;color:var(--shp-text2)">
+            <div><b>Customer:</b> ${esc(partyName)} (${esc(partyCode)})<br><b>Phone:</b> ${esc(partyPhone)}<br><b>Address:</b> ${esc(partyAddress)}</div>
+            <div><b>Subtotal:</b> ${money(inv.subtotal)}<br><b>VAT/Tax:</b> ${money(inv.tax_amount)} · <b>Discount:</b> ${money(inv.discount)}<br><b>Paid amount:</b> ${money(inv.paid_amount)}</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <h4 style="font-size:13px;margin:0 0 8px">Original Invoice Items</h4>
+          <div class="shp-tw"><table><thead><tr>
+            <th>Item</th><th>Unit Price</th><th>Sold Qty</th><th>Returned</th><th>Returnable</th><th>Unit</th>
+          </tr></thead><tbody>
+          ${allLines.map(l => `<tr>
+            <td class="shp-wrap"><b>${esc(l.inventory_items?.description||'Item')}</b><br><small class="shp-desc">${esc(l.inventory_items?.item_code||'')}</small></td>
+            <td>${money(l.unit_price)}</td>
+            <td>${l.quantity}</td>
+            <td>${l.already_returned_quantity}</td>
+            <td><b>${l.returnable_quantity}</b>${l.is_fully_returned ? ' <span class="shp-badge shp-t-zinc" style="font-size:10px">Returned</span>' : ''}</td>
+            <td>${esc(l.inventory_items?.unit||'pcs')}</td>
+          </tr>`).join('')}
+          </tbody></table></div>
+        </div>
+
+        ${totalReturnable <= 0 ? `
+          <div style="background:color-mix(in srgb,var(--shp-line) 40%,transparent);border:1px solid var(--shp-line);border-radius:8px;padding:12px;margin-top:14px;text-align:center">
+            <b style="color:var(--shp-text2)">This sales invoice has already been fully returned.</b>
+          </div>
+        ` : `
+          <div style="margin-top:16px;text-align:right">
+            <button type="button" class="shp-btn shp-btn-primary" id="btnStartReturn">Start Return →</button>
+          </div>
+        `}
+      `;
+
+      let startBtn = resultBox.querySelector('#btnStartReturn');
+      if(startBtn){
+        startBtn.onclick = () => renderReturnEditor(data);
+      }
+    } catch(err) {
+      searchBtn.disabled = false;
+      resultBox.innerHTML = `<div style="background:color-mix(in srgb,#ef4444 10%,transparent);border:1px solid #ef4444;border-radius:8px;padding:12px;color:#dc2626">${esc(err.message)}</div>`;
+    }
+  };
+
+  searchBtn.onclick = doSearch;
+  invInput.onkeydown = ev => { if(ev.key === 'Enter'){ ev.preventDefault(); doSearch(); } };
+
+  const renderReturnEditor = (data) => {
+    step1Box.style.display = 'none';
+    step2Box.style.display = 'block';
+    e.querySelector('.shp-modalbox').classList.remove('shp-modal-lg');
+    e.querySelector('.shp-modalbox').classList.add('shp-modal-xl');
+    e.querySelector('.shp-modalhead h2').textContent = 'Process return · ' + data.invoice.invoice_number;
+
+    let inv = data.invoice;
+    let lines = data.lines;
+    let party = data.customer;
+    let partyName = party?.name || inv.custom_party_name || 'Walk-in Customer';
+
+    let selectedItems = {};
+    lines.forEach(l => {
+      if(l.returnable_quantity > 0){
+        selectedItems[l.id] = {
+          selected: false,
+          line: l,
+          quantity: 1,
+          reason: 'Customer Changed Mind',
+          reasonNote: '',
+          condition: 'Sellable',
+          penalty: 0
+        };
+      }
+    });
+
+    const calculateTotals = () => {
+      let originalItemAmount = 0, totalTax = 0, totalDiscount = 0, totalPenalty = 0, grandReturnAmount = 0;
+      Object.values(selectedItems).forEach(si => {
+        if(!si.selected) return;
+        let qty = Number(si.quantity || 0);
+        let uPrice = Number(si.line.unit_price);
+        let lSub = Math.round(qty * uPrice * 100) / 100;
+        let taxPct = Number(si.line.tax_percent || inv.tax_percent || 0);
+        let lTax = Math.round(lSub * taxPct) / 100;
+        let origSold = Number(si.line.quantity);
+        let origDisc = Number(si.line.discount || 0);
+        let lDisc = origSold > 0 ? Math.round((qty / origSold) * origDisc * 100) / 100 : 0;
+        let pen = Math.max(0, Number(si.penalty || 0));
+        let retAmt = Math.max(0, Math.round((lSub + lTax - lDisc - pen) * 100) / 100);
+
+        originalItemAmount += lSub;
+        totalTax += lTax;
+        totalDiscount += lDisc;
+        totalPenalty += pen;
+        grandReturnAmount += retAmt;
+      });
+      return {
+        originalItemAmount: Math.round(originalItemAmount * 100) / 100,
+        totalTax: Math.round(totalTax * 100) / 100,
+        totalDiscount: Math.round(totalDiscount * 100) / 100,
+        totalPenalty: Math.round(totalPenalty * 100) / 100,
+        grandReturnAmount: Math.round(grandReturnAmount * 100) / 100
+      };
+    };
+
+    const updateUI = () => {
+      let totals = calculateTotals();
+      let anySelected = Object.values(selectedItems).some(si => si.selected && Number(si.quantity) > 0);
+
+      Object.entries(selectedItems).forEach(([lid, si]) => {
+        let span = step2Box.querySelector(`[data-ret-amt="${lid}"]`);
+        if(span){
+          if(si.selected && Number(si.quantity) > 0){
+            let qty = Number(si.quantity || 0);
+            let uPrice = Number(si.line.unit_price);
+            let lSub = Math.round(qty * uPrice * 100) / 100;
+            let taxPct = Number(si.line.tax_percent || inv.tax_percent || 0);
+            let lTax = Math.round(lSub * taxPct) / 100;
+            let origSold = Number(si.line.quantity);
+            let origDisc = Number(si.line.discount || 0);
+            let lDisc = origSold > 0 ? Math.round((qty / origSold) * origDisc * 100) / 100 : 0;
+            let pen = Math.max(0, Number(si.penalty || 0));
+            let retAmt = Math.max(0, Math.round((lSub + lTax - lDisc - pen) * 100) / 100);
+            span.textContent = money(retAmt);
+          } else {
+            span.textContent = '৳0.00';
+          }
+        }
+      });
+
+      let sumCard = step2Box.querySelector('#retSummaryBox');
+      if(sumCard){
+        sumCard.innerHTML = `
+          <div class="shp-ret-summary-row"><span>Original Item Amount</span><b>${money(totals.originalItemAmount)}</b></div>
+          <div class="shp-ret-summary-row"><span>Tax / VAT</span><b>+${money(totals.totalTax)}</b></div>
+          <div class="shp-ret-summary-row"><span>Discount</span><b>−${money(totals.totalDiscount)}</b></div>
+          ${totals.totalPenalty > 0 ? `<div class="shp-ret-summary-row"><span>Penalty / Restock Fee</span><b>−${money(totals.totalPenalty)}</b></div>` : ''}
+          <div class="shp-ret-summary-row total"><span>Total Refund to Customer</span><b style="font-size:18px;color:#059669">${money(totals.grandReturnAmount)}</b></div>
+        `;
+      }
+
+      let refundDisplay = step2Box.querySelector('#retRefundAmtDisplay');
+      if(refundDisplay){
+        refundDisplay.textContent = money(totals.grandReturnAmount);
+      }
+
+      let btn = step2Box.querySelector('#btnReviewReturn');
+      if(btn){
+        btn.disabled = !anySelected || totals.grandReturnAmount <= 0;
+      }
+    };
+
+    step2Box.innerHTML = `
+      <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:10px 14px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <b>Original Invoice:</b> <code>${esc(inv.invoice_number)}</code> · <b>Customer:</b> ${esc(partyName)} · <b>Date:</b> ${esc(inv.invoice_date)}
+        </div>
+        <div>
+          <button type="button" class="shp-btn shp-btn-ghost shp-btn-sm" id="btnBackToStep1">← Change Invoice</button>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px">
+        <h4 style="font-size:13px;margin:0 0 4px">Select Items to Return</h4>
+        <p class="shp-desc" style="margin:0 0 10px">Choose the items and quantities being returned. Original invoice remains completely unchanged.</p>
+      </div>
+
+      <div class="shp-ret-items-list">
+        ${lines.map(l => {
+          let disabled = l.returnable_quantity <= 0;
+          return `
+          <div class="shp-ret-item-card ${disabled ? 'disabled' : ''}" id="retCard_${l.id}">
+            <div class="shp-ret-row-head">
+              <div class="shp-ret-check">
+                <input type="checkbox" data-check-line="${l.id}" ${disabled ? 'disabled title="Item fully returned"' : ''}>
+              </div>
+              <div class="shp-wrap">
+                <b style="font-size:13.5px">${esc(l.inventory_items?.description||'Item')}</b>
+                <span style="margin-left:6px;font-size:11px;color:var(--shp-text2)"><code>${esc(l.inventory_items?.item_code||'')}</code></span>
+                <div style="font-size:11.5px;color:var(--shp-text2);margin-top:2px">
+                  Sold: <b>${l.quantity}</b> ${esc(l.inventory_items?.unit||'pcs')} · Returnable: <b>${l.returnable_quantity}</b> · Unit price: <b>${money(l.unit_price)}</b> · VAT: <b>${Number(l.tax_percent||0)}%</b> · Disc: <b>${money(l.discount)}</b>
+                </div>
+              </div>
+              <div style="text-align:right">
+                <span class="shp-desc" style="font-size:11px">Return Amount</span><br>
+                <b style="font-size:14px" data-ret-amt="${l.id}">৳0.00</b>
+              </div>
+            </div>
+
+            ${disabled ? '' : `
+            <div class="shp-ret-row-fields" id="retFields_${l.id}" style="display:none">
+              <label>Return Qty
+                <input type="number" min="0.001" max="${l.returnable_quantity}" step="${l.inventory_items?.unit==='pcs'?1:0.001}" value="1" data-input-qty="${l.id}">
+              </label>
+              <label>Return Reason
+                <select data-input-reason="${l.id}">
+                  <option value="Customer Changed Mind">Customer Changed Mind</option>
+                  <option value="Defective">Defective</option>
+                  <option value="Wrong Product">Wrong Product</option>
+                  <option value="Damaged">Damaged</option>
+                  <option value="Wrong Specification">Wrong Specification</option>
+                  <option value="Other">Other</option>
+                </select>
+              </label>
+              <label id="retNoteWrap_${l.id}" style="display:none">Reason Note
+                <input type="text" placeholder="Explain return reason..." data-input-note="${l.id}">
+              </label>
+              <label>Condition
+                <select data-input-condition="${l.id}">
+                  <option value="Sellable">Sellable (Restock to inventory)</option>
+                  <option value="Damaged">Damaged (Quarantine · no restock)</option>
+                  <option value="Defective">Defective (Quarantine · no restock)</option>
+                </select>
+              </label>
+              <label>Penalty / Deduction
+                <input type="number" min="0" step="0.01" placeholder="0.00" value="0" data-input-penalty="${l.id}">
+              </label>
+            </div>
+            `}
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div class="shp-ret-summary-box" id="retSummaryBox"></div>
+
+      <!-- REFUND SETTLEMENT (ALL IN 1 PAGE) -->
+      <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:14px;margin:14px 0">
+        <h4 style="font-size:13px;margin:0 0 10px;display:flex;align-items:center;gap:8px">
+          ${shpBadge('Refund to Customer', 'emerald')}
+          <span>2. Immediate Refund Settlement: <b id="retRefundAmtDisplay" style="color:#059669;margin-left:4px">৳0.00</b></span>
+        </h4>
+        <div class="shp-grid2">
+          <label>Refund Method
+            <select id="retRefundMethod">
+              <option value="cash">Cash</option>
+              <option value="bank">Bank</option>
+              <option value="bkash">bKash</option>
+              <option value="nagad">Nagad</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>Transaction / Reference ID
+            <input type="text" id="retTrxId" placeholder="e.g. TRX123456 / Cheque No (optional)">
+          </label>
+        </div>
+      </div>
+
+      <label style="display:block;margin:12px 0">Return Notes / Comments (optional)
+        <input type="text" id="retGeneralNotes" placeholder="Additional details or reference notes...">
+      </label>
+
+      <div class="shp-form-actions">
+        <button type="button" class="shp-btn shp-btn-soft" id="btnCancelEdit">Back</button>
+        <button type="button" class="shp-btn shp-btn-primary" id="btnReviewReturn" disabled>Review & Confirm Return →</button>
+      </div>
+    `;
+
+    step2Box.querySelector('#btnBackToStep1').onclick = () => {
+      step2Box.style.display = 'none';
+      step1Box.style.display = 'block';
+      e.querySelector('.shp-modalbox').classList.remove('shp-modal-xl');
+      e.querySelector('.shp-modalbox').classList.add('shp-modal-lg');
+      e.querySelector('.shp-modalhead h2').textContent = 'New sales return';
+    };
+    step2Box.querySelector('#btnCancelEdit').onclick = () => step2Box.querySelector('#btnBackToStep1').click();
+
+    lines.forEach(l => {
+      if(l.returnable_quantity <= 0) return;
+      let card = step2Box.querySelector('#retCard_' + l.id);
+      let chk = step2Box.querySelector(`[data-check-line="${l.id}"]`);
+      let fields = step2Box.querySelector('#retFields_' + l.id);
+      let qtyInp = step2Box.querySelector(`[data-input-qty="${l.id}"]`);
+      let reasonSel = step2Box.querySelector(`[data-input-reason="${l.id}"]`);
+      let noteWrap = step2Box.querySelector('#retNoteWrap_' + l.id);
+      let noteInp = step2Box.querySelector(`[data-input-note="${l.id}"]`);
+      let condSel = step2Box.querySelector(`[data-input-condition="${l.id}"]`);
+      let penInp = step2Box.querySelector(`[data-input-penalty="${l.id}"]`);
+
+      chk.onchange = () => {
+        let isSel = chk.checked;
+        selectedItems[l.id].selected = isSel;
+        card.classList.toggle('selected', isSel);
+        fields.style.display = isSel ? 'grid' : 'none';
+        updateUI();
+      };
+
+      qtyInp.oninput = () => {
+        let q = Number(qtyInp.value);
+        if(q > l.returnable_quantity){
+          qtyInp.value = l.returnable_quantity;
+          q = l.returnable_quantity;
+        }
+        selectedItems[l.id].quantity = q;
+        updateUI();
+      };
+
+      reasonSel.onchange = () => {
+        selectedItems[l.id].reason = reasonSel.value;
+        noteWrap.style.display = reasonSel.value === 'Other' ? 'flex' : 'none';
+        updateUI();
+      };
+
+      noteInp.oninput = () => {
+        selectedItems[l.id].reasonNote = noteInp.value;
+      };
+
+      condSel.onchange = () => {
+        selectedItems[l.id].condition = condSel.value;
+      };
+
+      penInp.oninput = () => {
+        selectedItems[l.id].penalty = Number(penInp.value || 0);
+        updateUI();
+      };
+    });
+
+    updateUI();
+
+    step2Box.querySelector('#btnReviewReturn').onclick = () => {
+      let activeItems = Object.values(selectedItems).filter(si => si.selected && Number(si.quantity) > 0);
+      if(!activeItems.length) return toast('Please select at least one item to return.');
+
+      for(let si of activeItems){
+        if(si.reason === 'Other' && !si.reasonNote.trim()){
+          return toast(`Please enter a reason note for ${si.line.inventory_items?.description||'the item'}.`);
+        }
+      }
+
+      let totals = calculateTotals();
+      let refundMethod = step2Box.querySelector('#retRefundMethod')?.value || 'cash';
+      let trxId = step2Box.querySelector('#retTrxId')?.value?.trim() || null;
+      let notes = step2Box.querySelector('#retGeneralNotes')?.value?.trim() || '';
+
+      let payload = {
+        invoice_id: inv.id,
+        notes: notes || null,
+        refund_method: refundMethod,
+        transaction_id: trxId,
+        items: activeItems.map(si => ({
+          invoice_line_id: si.line.id,
+          item_id: si.line.item_id,
+          quantity: Number(si.quantity),
+          unit_price: Number(si.line.unit_price),
+          reason: si.reason,
+          reason_note: si.reasonNote || null,
+          condition: si.condition,
+          penalty: Number(si.penalty || 0)
+        }))
+      };
+
+      confirmReturnModal({
+        invoice: inv,
+        customerName: partyName,
+        items: activeItems,
+        totals,
+        refundMethod,
+        trxId,
+        payload
+      }, onDone, e);
+    };
+  };
+}
+
+function confirmReturnModal({ invoice, customerName, items, totals, refundMethod, trxId, payload }, onDone, parentModal){
+  let cm = shpModal('Confirm sales return & refund', `
+    <div style="font-size:13px;line-height:1.6">
+      <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px;margin-bottom:14px">
+        <div><b>Original Invoice:</b> <code>${esc(invoice.invoice_number)}</code></div>
+        <div><b>Customer:</b> ${esc(customerName)}</div>
+        <div><b>Invoice Date:</b> ${esc(invoice.invoice_date)}</div>
+      </div>
+
+      <h4 style="font-size:13px;margin:12px 0 6px">Returned Items:</h4>
+      <div>
+        ${items.map(si => {
+          let uPrice = Number(si.line.unit_price);
+          let qty = Number(si.quantity);
+          let lSub = Math.round(qty * uPrice * 100) / 100;
+          let taxPct = Number(si.line.tax_percent || invoice.tax_percent || 0);
+          let lTax = Math.round(lSub * taxPct) / 100;
+          let origSold = Number(si.line.quantity);
+          let origDisc = Number(si.line.discount || 0);
+          let lDisc = origSold > 0 ? Math.round((qty / origSold) * origDisc * 100) / 100 : 0;
+          let pen = Math.max(0, Number(si.penalty || 0));
+          let retAmt = Math.max(0, Math.round((lSub + lTax - lDisc - pen) * 100) / 100);
+          return `
+          <div class="shp-ret-confirm-item">
+            <div style="display:flex;justify-content:space-between">
+              <b>${esc(si.line.inventory_items?.description||'Item')} × ${si.quantity} ${esc(si.line.inventory_items?.unit||'pcs')}</b>
+              <b>${money(retAmt)}</b>
+            </div>
+            <div style="font-size:11.5px;color:var(--shp-text2)">
+              Reason: <b>${esc(si.reason)}</b>${si.reasonNote ? ` (${esc(si.reasonNote)})` : ''} · Condition: <b>${esc(si.condition)}</b>
+              ${si.condition === 'Sellable' ? ' <span class="shp-badge shp-t-emerald" style="font-size:9.5px">Restock</span>' : ' <span class="shp-badge shp-t-rose" style="font-size:9.5px">Quarantined</span>'}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+
+      <div style="background:var(--shp-card);border:1px solid var(--shp-line);border-radius:8px;padding:12px;margin:16px 0">
+        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Item amount</span><b>${money(totals.originalItemAmount)}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>VAT / Tax</span><b>+${money(totals.totalTax)}</b></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0"><span>Discount</span><b>−${money(totals.totalDiscount)}</b></div>
+        ${totals.totalPenalty > 0 ? `<div style="display:flex;justify-content:space-between;padding:3px 0"><span>Penalty</span><b>−${money(totals.totalPenalty)}</b></div>` : ''}
+        <div style="display:flex;justify-content:space-between;border-top:1px solid var(--shp-line);padding-top:8px;margin-top:6px;font-size:16px">
+          <b>Total Refund:</b><b style="color:#059669">${money(totals.grandReturnAmount)}</b>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:12.5px;color:var(--shp-text2)">
+          <span>Refund Method:</span><b>${esc(refundMethod.toUpperCase())}${trxId ? ' (Ref: ' + esc(trxId) + ')' : ''}</b>
+        </div>
+      </div>
+
+      <div class="shp-form-actions">
+        <button type="button" class="shp-btn shp-btn-soft" id="btnBackConfirm">Back to Edit</button>
+        <button type="button" class="shp-btn shp-btn-primary" id="btnDoConfirmReturn">Complete Return & Refund</button>
+      </div>
+    </div>
+  `, 'shp-modal-md');
+
+  cm.querySelector('#btnBackConfirm').onclick = () => cm.remove();
+  cm.querySelector('#btnDoConfirmReturn').onclick = async () => {
+    let btn = cm.querySelector('#btnDoConfirmReturn');
+    btn.disabled = true;
+    btn.textContent = 'Processing return...';
+    try {
+      let res = await api('returns', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      cm.remove();
+      if(parentModal) parentModal.remove();
+      toast(`Sales return ${res.returnNumber} completed!`);
+      if(onDone) onDone();
+      returnDetailModal(res.return.id, onDone);
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = 'Complete Return & Refund';
+      toast(err.message);
+    }
+  };
+}
+
+async function returnDetailModal(returnId, onRefresh){
+  try {
+    let ret = await api('returns/' + returnId);
+    let inv = ret.invoices || {};
+    let cust = ret.customers || {};
+    let custName = ret.customer_name || cust.name || 'Walk-in Customer';
+    let custPhone = cust.phone || '—';
+    let custAddress = cust.address || '—';
+    let items = ret.return_items || [];
+    let movements = ret.inventory_stock_movements || [];
+
+    let totalAmt = Number(ret.total_return_amount || 0);
+
+    let itemMap = {};
+    items.forEach(it => {
+      if (it.item_id) {
+        itemMap[it.item_id] = {
+          code: it.inventory_items?.item_code || '',
+          desc: it.inventory_items?.description || ''
+        };
+      }
+    });
+
+    let m = shpModal('Return Details · ' + ret.return_number, `
+      <div style="font-size:13px">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:14px;background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px">
+          <div>
+            <b style="font-size:16px">${esc(ret.return_number)}</b> ${shpBadge('Refunded', 'emerald')}<br>
+            <span style="color:var(--shp-text2)">Date: <b>${esc(ret.return_date)}</b> · Handled by: <b>${esc(ret.created_by_user||'Staff')}</b></span>
+          </div>
+          <div style="text-align:right">
+            <span>Original Invoice: <b><code>${esc(inv.invoice_number||'—')}</code></b></span><br>
+            <span style="color:var(--shp-text2)">Invoice Date: ${esc(inv.invoice_date||'—')}</span>
+          </div>
+        </div>
+
+        <div style="margin-bottom:14px;background:var(--shp-card);border:1px solid var(--shp-line);border-radius:8px;padding:10px 12px">
+          <b>Customer:</b> ${esc(custName)} · <b>Phone:</b> ${esc(custPhone)} · <b>Address:</b> ${esc(custAddress)}
+        </div>
+
+        <h4 style="font-size:13px;margin:14px 0 6px">Returned Products</h4>
+        <div class="shp-tw"><table><thead><tr>
+          <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>VAT</th><th>Disc.</th><th>Penalty</th><th>Amount</th><th>Reason</th><th>Condition</th>
+        </tr></thead><tbody>
+        ${items.map((it, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td class="shp-wrap"><b>${esc(it.inventory_items?.description||'Item')}</b><br><small class="shp-desc">${esc(it.inventory_items?.item_code||'')}</small></td>
+          <td><b>${it.quantity}</b> ${esc(it.inventory_items?.unit||'pcs')}</td>
+          <td>${money(it.unit_price)}</td>
+          <td>${Number(it.tax_percent||0)}%</td>
+          <td>${money(it.discount)}</td>
+          <td>${money(it.penalty)}</td>
+          <td><b>${money(it.return_amount)}</b></td>
+          <td class="shp-wrap">${esc(it.reason)}${it.reason_note ? `<br><small class="shp-desc">${esc(it.reason_note)}</small>` : ''}</td>
+          <td>${it.condition === 'Sellable' ? shpBadge('Sellable', 'emerald') : shpBadge(it.condition, 'rose')}</td>
+        </tr>`).join('')}
+        </tbody></table></div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0;background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px">
+          <div><span class="shp-desc">Return Amount</span><br><b style="font-size:15px">${money(totalAmt)}</b></div>
+          <div><span class="shp-desc">Refunded to Customer</span><br><b style="font-size:15px;color:#059669">${money(totalAmt)}</b></div>
+          <div><span class="shp-desc">Refund Method</span><br><b>${esc((ret.refund_method||'cash').toUpperCase())}${ret.transaction_id ? ' (' + esc(ret.transaction_id) + ')' : ''}</b></div>
+          <div><span class="shp-desc">Refund Status</span><br>${shpBadge('Refunded in full', 'emerald')}</div>
+        </div>
+
+        ${movements.length ? `
+          <h4 style="font-size:13px;margin:16px 0 6px">Inventory Movement</h4>
+          <div class="shp-tw"><table><thead><tr>
+            <th>Item</th><th>Movement Type</th><th>Qty</th><th>Stock Before</th><th>Stock After</th><th>Status</th>
+          </tr></thead><tbody>
+          ${movements.map(m => {
+            let itm = m.inventory_items || {};
+            let code = itm.item_code || itemMap[m.item_id]?.code || shortId(m.item_id);
+            let desc = itm.description || itemMap[m.item_id]?.desc || 'Item';
+            return `<tr>
+              <td class="shp-wrap"><b>${esc(desc)}</b><br><small class="shp-desc">${esc(code)}</small></td>
+              <td><code>${esc(m.movement_type)}</code></td>
+              <td><b>${m.quantity}</b></td>
+              <td>${m.stock_before ?? '—'}</td>
+              <td>${m.stock_after ?? '—'}</td>
+              <td>${m.condition === 'Sellable' ? '<span style="color:#059669;font-weight:600">Restocked to available inventory</span>' : '<span style="color:#dc2626;font-weight:600">Quarantined (' + esc(m.condition) + ')</span>'}</td>
+            </tr>`;
+          }).join('')}
+          </tbody></table></div>
+        ` : ''}
+
+        <div class="shp-form-actions" style="margin-top:20px">
+          <button type="button" class="shp-btn shp-btn-soft" id="btnDetailPrint">Print Return Slip</button>
+          <button type="button" class="shp-btn shp-btn-ghost" id="btnDetailClose">Close</button>
+        </div>
+      </div>
+    `, 'shp-modal-xl');
+
+    m.querySelector('#btnDetailClose').onclick = () => m.remove();
+    m.querySelector('#btnDetailPrint').onclick = () => printReturnSlip(ret);
+  } catch(err) {
+    toast('Could not load return details: ' + err.message);
+  }
+}
+
+async function printReturnSlipById(returnId){
+  try {
+    let ret = await api('returns/' + returnId);
+    printReturnSlip(ret);
+  } catch(err){
+    toast('Could not prepare return slip: ' + err.message);
+  }
+}
+
+async function printReturnSlip(ret){
+  let [store, tb] = await Promise.all([
+    api('shop/settings').catch(()=>({ name: state.store?.name||'EMS Store' })),
+    api('truebill/availability').catch(()=>({ enabled:false, ever:false }))
+  ]);
+  let showQR = !!tb.enabled;
+  let inv = ret.invoices || {};
+  let cust = ret.customers || {};
+  let custName = ret.customer_name || cust.name || 'Walk-in Customer';
+  let custPhone = cust.phone || '—';
+  let custAddress = cust.address || '—';
+  let items = ret.return_items || [];
+  let base = (tb.url || location.origin).replace(/\/$/, '');
+  let token = ret.verification_token || ret.id;
+  let verifyUrl = token ? base + '/?verify=' + token : base;
+  let qrSvg = showQR ? getQrSvg(verifyUrl) : '';
+
+  let html = `<!DOCTYPE html><html><head><title>${esc(ret.return_number)}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:12mm 15mm;color:#111;font-size:11px;line-height:1.4}
+    .printHeader{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+    .shopInfo h2{font-size:18px;margin:0 0 3px}
+    .titleRight{text-align:right}
+    .titleRight h1{font-size:20px;margin:0 0 4px}
+    .infoGrid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0}
+    .infoGrid h3{font-size:11px;margin:0 0 5px;text-transform:uppercase;color:#555}
+    .infoGrid p{margin:2px 0}
+    table{width:100%;border-collapse:collapse;margin:14px 0}
+    th{background:#111;color:#fff;text-align:left;padding:6px 8px;font-size:10px}
+    td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:10.5px}
+    .right{text-align:right}
+    .printBottom{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px;margin-top:14px}
+    .slipQR{display:flex;align-items:flex-start;gap:10px}
+    .slipQR svg{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}
+    .slipQR img{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}
+    .qrwrap{display:inline-block;line-height:0;width:110px;height:110px}
+    .qrtext{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:110px}
+    .qrtext b{font-size:11px;color:#111}
+    .qrtext small{font-size:9px;color:#666;letter-spacing:.3px}
+    .totalsWrap{display:flex;justify-content:flex-end}
+    .totalsWrap>div{width:280px}
+    .totalsWrap p{display:flex;justify-content:space-between;margin:4px 0}
+    .totalLine{border-top:1px solid #111;padding-top:6px;font-size:14px;font-weight:bold}
+    .signWrap{display:flex;justify-content:space-between;margin-top:50px;padding-top:10px}
+    .signLine{border-top:1px solid #777;width:180px;text-align:center;padding-top:4px;font-size:10px}
+    @media print{
+      body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .slipQR, .slipQR svg, .slipQR img{display:flex!important;visibility:visible!important}
+    }
+  </style></head><body>
+    <div class="printHeader">
+      <div class="shopInfo">
+        <h2>${esc(store.name)}</h2>
+        <p>${esc(store.address||'')}<br>${esc(store.phone||'')}${store.email ? ' · ' + esc(store.email) : ''}</p>
+      </div>
+      <div class="titleRight">
+        <h1>SALES RETURN & REFUND SLIP</h1>
+        <b># ${esc(ret.return_number)}</b><br>
+        <span>Date: ${esc(ret.return_date)}</span>
+      </div>
+    </div>
+
+    <div class="infoGrid">
+      <div>
+        <h3>Customer</h3>
+        <p><b>Name:</b> ${esc(custName)}</p>
+        <p><b>Phone:</b> ${esc(custPhone)}</p>
+        <p><b>Address:</b> ${esc(custAddress)}</p>
+      </div>
+      <div>
+        <h3>Reference Details</h3>
+        <p><b>Original Invoice:</b> ${esc(inv.invoice_number||'—')}</p>
+        <p><b>Invoice Date:</b> ${esc(inv.invoice_date||'—')}</p>
+        <p><b>Processed By:</b> ${esc(ret.created_by_user||'Staff')}</p>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr>
+        <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>VAT</th><th>Disc.</th><th>Penalty</th><th class="right">Return Total</th>
+      </tr></thead>
+      <tbody>
+        ${items.map((it, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td><b>${esc(it.inventory_items?.description||'Item')}</b><br><small>${esc(it.inventory_items?.item_code||'')} [${esc(it.condition)}]</small></td>
+          <td>${it.quantity} ${esc(it.inventory_items?.unit||'pcs')}</td>
+          <td>${invoiceMoney(it.unit_price)}</td>
+          <td>${Number(it.tax_percent||0)}%</td>
+          <td>${invoiceMoney(it.discount)}</td>
+          <td>${invoiceMoney(it.penalty)}</td>
+          <td class="right">${invoiceMoney(it.return_amount)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <div class="printBottom">
+      ${showQR ? `
+      <div class="slipQR">
+        <div class="qrwrap">${qrSvg}</div>
+        <div class="qrtext"><b>Scan For Verify</b><small>TrueBill Digital Verification</small></div>
+      </div>` : '<div></div>'}
+      <div class="totalsWrap">
+        <div>
+          <p><span>Item Amount:</span><b>${invoiceMoney(ret.subtotal)}</b></p>
+          <p><span>VAT / Tax:</span><b>+${invoiceMoney(ret.tax_amount)}</b></p>
+          <p><span>Discount:</span><b>−${invoiceMoney(ret.discount_amount)}</b></p>
+          ${Number(ret.penalty_amount||0) > 0 ? `<p><span>Penalty:</span><b>−${invoiceMoney(ret.penalty_amount)}</b></p>` : ''}
+          <p class="totalLine"><span>Total Refund Amount:</span><b>${invoiceMoney(ret.total_return_amount)}</b></p>
+          <p><span>Refund Method:</span><b>${esc((ret.refund_method||ret.payment_method||'cash').toUpperCase())}${ret.transaction_id ? ' (' + esc(ret.transaction_id) + ')' : ''}</b></p>
+          <p><span>Status:</span><b style="color:#059669">Refunded in Full</b></p>
+        </div>
+      </div>
+    </div>
+
+    ${ret.notes ? `<div style="margin-top:14px;padding:8px;border:1px solid #ddd"><b>Notes:</b> ${esc(ret.notes)}</div>` : ''}
+
+    <div class="signWrap">
+      <div class="signLine">Customer Signature</div>
+      <div class="signLine">Authorized By</div>
+    </div>
+  </body></html>`;
+
+  let w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>w.print(), 350);
+}
+
+/* ═══════════ SALES EXCHANGE MODALS & WORKFLOW ═══════════ */
+function newExchangeModal(onDone){
+  let e = shpModal('New sales exchange', `
+    <div id="excStep1">
+      <p class="shp-desc">Search for the original sales invoice to start a sales exchange.</p>
+      <div style="display:flex;gap:8px;margin:12px 0 16px">
+        <input id="excInvInput" class="shp-search" style="flex:1" placeholder="Enter invoice number (e.g. SAL-000001)" autocomplete="off">
+        <button type="button" class="shp-btn shp-btn-primary" id="btnDoSearchInv">Search</button>
+      </div>
+      <div id="excInvResult"></div>
+    </div>
+    <div id="excStep2" style="display:none"></div>
+  `, 'shp-modal-xl');
+
+  const invInput = e.querySelector('#excInvInput');
+  const searchBtn = e.querySelector('#btnDoSearchInv');
+  const resultBox = e.querySelector('#excInvResult');
+  const step1Box = e.querySelector('#excStep1');
+  const step2Box = e.querySelector('#excStep2');
+
+  const doSearch = async () => {
+    let val = invInput.value.trim();
+    if(!val) return toast('Please enter an invoice number.');
+    resultBox.innerHTML = '<p class="shp-desc">Searching invoice...</p>';
+    searchBtn.disabled = true;
+    try {
+      let data = await api('returns/invoice-lookup?invoice_number=' + encodeURIComponent(val));
+      searchBtn.disabled = false;
+      let inv = data.invoice;
+      let party = data.customer;
+      let partyName = party?.name || inv.custom_party_name || 'Walk-in Customer';
+      let partyPhone = party?.phone || inv.custom_party_phone || '—';
+      let partyAddress = party?.address || inv.custom_party_address || '—';
+      let partyCode = party?.customer_code || 'Custom customer';
+      let allLines = data.lines || [];
+      let totalReturnable = allLines.reduce((sum, l) => sum + Number(l.returnable_quantity || 0), 0);
+
+      resultBox.innerHTML = `
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:14px;margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:10px">
+            <div>
+              <b style="font-size:16px">${esc(inv.invoice_number)}</b>
+              <span style="margin-left:8px;color:var(--shp-text2)">${esc(inv.invoice_date)}</span>
+            </div>
+            <div>
+              ${shpBadge(Number(inv.total_due) <= 0 ? 'Paid in Full' : 'Due: ' + money(inv.total_due), Number(inv.total_due) <= 0 ? 'emerald' : 'amber')}
+            </div>
+          </div>
+          <div class="shp-grid2" style="font-size:12.5px;color:var(--shp-text2)">
+            <div><b>Customer:</b> ${esc(partyName)} (${esc(partyCode)})<br><b>Phone:</b> ${esc(partyPhone)}<br><b>Address:</b> ${esc(partyAddress)}</div>
+            <div><b>Subtotal:</b> ${money(inv.subtotal)}<br><b>VAT/Tax:</b> ${money(inv.tax_amount)} · <b>Discount:</b> ${money(inv.discount)}<br><b>Paid amount:</b> ${money(inv.paid_amount)}</div>
+          </div>
+        </div>
+
+        <div style="margin-top:12px">
+          <h4 style="font-size:13px;margin:0 0 8px">Original Invoice Items</h4>
+          <div class="shp-tw"><table><thead><tr>
+            <th>Item</th><th>Unit Price</th><th>Sold Qty</th><th>Returned / Exchanged</th><th>Available for Exchange</th><th>Unit</th>
+          </tr></thead><tbody>
+          ${allLines.map(l => `<tr>
+            <td class="shp-wrap"><b>${esc(l.inventory_items?.description||'Item')}</b><br><small class="shp-desc">${esc(l.inventory_items?.item_code||'')}</small></td>
+            <td>${money(l.unit_price)}</td>
+            <td>${l.quantity}</td>
+            <td>${l.already_returned_quantity}</td>
+            <td><b>${l.returnable_quantity}</b>${l.is_fully_returned ? ' <span class="shp-badge shp-t-zinc" style="font-size:10px">None left</span>' : ''}</td>
+            <td>${esc(l.inventory_items?.unit||'pcs')}</td>
+          </tr>`).join('')}
+          </tbody></table></div>
+        </div>
+
+        ${totalReturnable <= 0 ? `
+          <div style="background:color-mix(in srgb,var(--shp-line) 40%,transparent);border:1px solid var(--shp-line);border-radius:8px;padding:12px;margin-top:14px;text-align:center">
+            <b style="color:var(--shp-text2)">All items from this invoice have already been returned or exchanged.</b>
+          </div>
+        ` : `
+          <div style="margin-top:16px;text-align:right">
+            <button type="button" class="shp-btn shp-btn-primary" id="btnStartExchange">Start Exchange →</button>
+          </div>
+        `}
+      `;
+
+      let startBtn = resultBox.querySelector('#btnStartExchange');
+      if(startBtn){
+        startBtn.onclick = () => renderExchangeEditor(data);
+      }
+    } catch(err) {
+      searchBtn.disabled = false;
+      resultBox.innerHTML = `<div style="background:color-mix(in srgb,#ef4444 10%,transparent);border:1px solid #ef4444;border-radius:8px;padding:12px;color:#dc2626">${esc(err.message)}</div>`;
+    }
+  };
+
+  searchBtn.onclick = doSearch;
+  invInput.onkeydown = ev => { if(ev.key === 'Enter') { ev.preventDefault(); doSearch(); } };
+
+  const renderExchangeEditor = async (lookupData) => {
+    step1Box.style.display = 'none';
+    step2Box.style.display = 'block';
+    step2Box.innerHTML = '<p class="shp-desc">Loading inventory items...</p>';
+
+    let inventoryItems = await api('invoice-items?kind=sale').catch(()=>[]);
+    let inv = lookupData.invoice;
+    let party = lookupData.customer;
+    let partyName = party?.name || inv.custom_party_name || 'Walk-in Customer';
+
+    // State for returned items
+    let returnedState = {};
+    (lookupData.lines || []).forEach(l => {
+      returnedState[l.id] = {
+        selected: false,
+        line: l,
+        quantity: Math.min(1, l.returnable_quantity),
+        reason: 'Customer Changed Mind',
+        reasonNote: '',
+        condition: 'Sellable'
+      };
+    });
+
+    // State for replacement items: array of { id, item, quantity, unit_price, tax_percent, discount }
+    let replacementItems = [];
+
+    const lineReturnValue = (st) => {
+      let l = st.line;
+      let q = Number(st.quantity || 0);
+      let uPrice = Number(l.unit_price);
+      let lSub = q * uPrice;
+      let taxPct = Number(l.tax_percent || inv.tax_percent || 0);
+      let lTax = lSub * (taxPct / 100);
+      let origSoldQty = Number(l.quantity);
+      let origDisc = Number(l.discount || 0);
+      let lDisc = origSoldQty > 0 ? (q / origSoldQty) * origDisc : 0;
+      return Math.max(0, Math.round((lSub + lTax - lDisc) * 100) / 100);
+    };
+
+    const replacementLineTotal = (rep) => {
+      let q = Number(rep.quantity || 0);
+      let price = Number(rep.unit_price || 0);
+      let taxPct = Number(rep.tax_percent || 0);
+      let disc = Number(rep.discount || 0);
+      let lSub = q * price;
+      let lTax = lSub * (taxPct / 100);
+      return Math.max(0, Math.round((lSub + lTax - disc) * 100) / 100);
+    };
+
+    const calculateTotals = () => {
+      let activeReturned = Object.values(returnedState).filter(s => s.selected && s.quantity > 0);
+      let retTotal = activeReturned.reduce((sum, s) => sum + lineReturnValue(s), 0);
+      retTotal = Math.round(retTotal * 100) / 100;
+
+      let newSubtotal = 0, newTax = 0, newDisc = 0, newTotal = 0;
+      replacementItems.forEach(rep => {
+        let q = Number(rep.quantity || 0);
+        let price = Number(rep.unit_price || 0);
+        let taxPct = Number(rep.tax_percent || 0);
+        let disc = Number(rep.discount || 0);
+        let lSub = q * price;
+        let lTax = lSub * (taxPct / 100);
+        newSubtotal += lSub;
+        newTax += lTax;
+        newDisc += disc;
+        newTotal += Math.max(0, lSub + lTax - disc);
+      });
+      newSubtotal = Math.round(newSubtotal * 100) / 100;
+      newTax = Math.round(newTax * 100) / 100;
+      newDisc = Math.round(newDisc * 100) / 100;
+      newTotal = Math.round(newTotal * 100) / 100;
+
+      let difference = Math.round((newTotal - retTotal) * 100) / 100;
+
+      return {
+        retTotal,
+        newSubtotal,
+        newTax,
+        newDisc,
+        newTotal,
+        difference,
+        activeReturnedCount: activeReturned.length,
+        replacementCount: replacementItems.length
+      };
+    };
+
+    const renderStep2UI = () => {
+      let totals = calculateTotals();
+
+      step2Box.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--shp-line)">
+          <div>
+            <b style="font-size:15px">Exchange for ${esc(inv.invoice_number)}</b>
+            <span style="color:var(--shp-text2);margin-left:8px">Customer: <b>${esc(partyName)}</b></span>
+          </div>
+          <button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="btnBackToStep1">← Change Invoice</button>
+        </div>
+
+        <!-- SECTION 1: RETURNED PRODUCTS -->
+        <section class="shp-exc-section">
+          <h4>
+            <span>1. Select Product to Return (from Original Invoice)</span>
+            <span class="shp-badge shp-t-sky">${totals.activeReturnedCount} selected · Value: ${money(totals.retTotal)}</span>
+          </h4>
+          <p class="shp-desc" style="margin-bottom:12px">Check the items being returned, select return reason and condition.</p>
+
+          ${(lookupData.lines || []).map(l => {
+            let st = returnedState[l.id];
+            let isZero = l.returnable_quantity <= 0;
+            let lineVal = lineReturnValue(st);
+            return `
+              <div class="shp-ret-item-card ${st.selected ? 'selected' : ''} ${isZero ? 'disabled' : ''}" id="excRetCard_${l.id}">
+                <div class="shp-ret-row-head">
+                  <div class="shp-ret-check">
+                    <input type="checkbox" data-chk-ret="${l.id}" ${st.selected ? 'checked' : ''} ${isZero ? 'disabled' : ''}>
+                  </div>
+                  <div>
+                    <b>${esc(l.inventory_items?.description || 'Item')}</b>
+                    <small class="shp-desc" style="display:block">Code: <code>${esc(l.inventory_items?.item_code || '')}</code> · Sold: ${l.quantity} ${esc(l.inventory_items?.unit || 'pcs')} · Already returned/exchanged: ${l.already_returned_quantity} · Unit Price: ${money(l.unit_price)}</small>
+                  </div>
+                  <div style="text-align:right">
+                    ${isZero ? '<span class="shp-badge shp-t-zinc">None left</span>' : `
+                      <span class="shp-desc">Return Value:</span><br>
+                      <b style="font-size:13px">${money(lineVal)}</b>
+                    `}
+                  </div>
+                </div>
+
+                <div class="shp-ret-row-fields" id="excRetFields_${l.id}" style="display:${st.selected ? 'grid' : 'none'}">
+                  <label>Exchange Qty (Max: ${l.returnable_quantity})
+                    <input type="number" min="1" max="${l.returnable_quantity}" step="1" value="${st.quantity}" data-input-ret-qty="${l.id}">
+                  </label>
+                  <label>Return Reason
+                    <select data-input-ret-reason="${l.id}">
+                      <option value="Customer Changed Mind" ${st.reason==='Customer Changed Mind'?'selected':''}>Customer Changed Mind</option>
+                      <option value="Defective" ${st.reason==='Defective'?'selected':''}>Defective</option>
+                      <option value="Wrong Product" ${st.reason==='Wrong Product'?'selected':''}>Wrong Product</option>
+                      <option value="Wrong Specification" ${st.reason==='Wrong Specification'?'selected':''}>Wrong Specification</option>
+                      <option value="Damaged" ${st.reason==='Damaged'?'selected':''}>Damaged</option>
+                      <option value="Other" ${st.reason==='Other'?'selected':''}>Other</option>
+                    </select>
+                  </label>
+                  <div id="excNoteWrap_${l.id}" style="display:${st.reason==='Other'?'flex':'none'};flex-direction:column;gap:4px">
+                    <label>Reason Note
+                      <input type="text" placeholder="Explain reason" value="${esc(st.reasonNote)}" data-input-ret-note="${l.id}">
+                    </label>
+                  </div>
+                  <label>Condition
+                    <select data-input-ret-condition="${l.id}">
+                      <option value="Sellable" ${st.condition==='Sellable'?'selected':''}>Sellable (Restock to inventory)</option>
+                      <option value="Damaged" ${st.condition==='Damaged'?'selected':''}>Damaged (Quarantine · no restock)</option>
+                      <option value="Defective" ${st.condition==='Defective'?'selected':''}>Defective (Quarantine · no restock)</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </section>
+
+        <!-- SECTION 2: REPLACEMENT / NEW PRODUCTS -->
+        <section class="shp-exc-section">
+          <h4>
+            <span>2. Replacement / New Products</span>
+            <button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="btnAddReplacementProduct">+ Add Product</button>
+          </h4>
+          <p class="shp-desc" style="margin-bottom:12px">Select one or more replacement or additional products from inventory.</p>
+
+          <div id="excReplacementsWrap">
+            ${replacementItems.length ? `
+              <div class="shp-tw"><table><thead><tr>
+                <th>Product</th><th>Qty</th><th>Unit Price</th><th>VAT %</th><th>Disc.</th><th>Total</th><th></th>
+              </tr></thead><tbody>
+              ${replacementItems.map((rep, idx) => `
+                <tr>
+                  <td class="shp-wrap">
+                    <b>${esc(rep.item.description)}</b><br>
+                    <small class="shp-desc"><code>${esc(rep.item.item_code)}</code> · Stock: ${rep.item.total_stock} ${esc(rep.item.unit||'pcs')}</small>
+                  </td>
+                  <td style="width:90px">
+                    <input type="number" min="0.001" max="${rep.item.total_stock}" step="1" value="${rep.quantity}" data-rep-qty="${idx}" style="width:75px;padding:4px 6px">
+                  </td>
+                  <td style="width:105px">
+                    <input type="number" min="0" step="0.01" value="${rep.unit_price}" data-rep-price="${idx}" style="width:95px;padding:4px 6px">
+                  </td>
+                  <td style="width:80px">
+                    <input type="number" min="0" step="0.01" value="${rep.tax_percent}" data-rep-tax="${idx}" style="width:65px;padding:4px 6px">
+                  </td>
+                  <td style="width:90px">
+                    <input type="number" min="0" step="0.01" value="${rep.discount}" data-rep-disc="${idx}" style="width:80px;padding:4px 6px">
+                  </td>
+                  <td><b>${money(replacementLineTotal(rep))}</b></td>
+                  <td>
+                    <button type="button" class="shp-icobtn shp-danger" data-rep-del="${idx}" title="Remove item">×</button>
+                  </td>
+                </tr>
+              `).join('')}
+              </tbody></table></div>
+            ` : `
+              <div style="background:var(--shp-inset);border:1px dashed var(--shp-line);border-radius:8px;padding:20px;text-align:center">
+                <p class="shp-desc" style="margin:0 0 10px">No replacement products added yet.</p>
+                <button type="button" class="shp-btn shp-btn-soft" id="btnAddReplacementProductEmpty">+ Add Product (Item Picker)</button>
+              </div>
+            `}
+          </div>
+        </section>
+
+        <!-- SECTION 3: EXCHANGE CALCULATION & DIFFERENCE -->
+        <section class="shp-exc-section">
+          <h4>3. Exchange Calculation</h4>
+          <div class="shp-exc-calc-box">
+            <div class="shp-exc-calc-row">
+              <span>Returned Products Value:</span>
+              <b>${money(totals.retTotal)}</b>
+            </div>
+            <div class="shp-exc-calc-row">
+              <span>New / Replacement Products Total:</span>
+              <b>${money(totals.newTotal)}</b>
+            </div>
+            <div class="shp-exc-calc-row diff" style="color:${totals.difference > 0 ? '#0284c7' : (totals.difference < 0 ? '#e11d48' : 'var(--shp-text)')}">
+              <span>${totals.difference > 0 ? 'Additional Payment (Customer Pays):' : (totals.difference < 0 ? 'Customer Refund (Store Pays):' : 'Difference (Even Exchange):')}</span>
+              <span>${totals.difference > 0 ? '+' : ''}${money(totals.difference)}</span>
+            </div>
+          </div>
+
+          <!-- Dynamic payment / refund selector -->
+          ${totals.difference > 0 ? `
+            <div style="background:color-mix(in srgb,#0284c7 8%,transparent);border:1px solid #0284c7;border-radius:8px;padding:12px;margin:12px 0">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                ${shpBadge('Customer Pays', 'sky')}
+                <b>Additional Payment Required: ${money(totals.difference)}</b>
+              </div>
+              <div class="shp-grid2">
+                <label>Payment Method
+                  <select id="excPayMethod">
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank</option>
+                    <option value="bkash">bKash</option>
+                    <option value="nagad">Nagad</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label>Transaction / Reference ID
+                  <input type="text" id="excTrxId" placeholder="e.g. TRX123456 (optional)">
+                </label>
+              </div>
+            </div>
+          ` : (totals.difference < 0 ? `
+            <div style="background:color-mix(in srgb,#f59e0b 8%,transparent);border:1px solid #f59e0b;border-radius:8px;padding:12px;margin:12px 0">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                ${shpBadge('Store Refunds', 'amber')}
+                <b>Refund to Customer: ${money(Math.abs(totals.difference))}</b>
+              </div>
+              <div class="shp-grid2">
+                <label>Refund Method
+                  <select id="excPayMethod">
+                    <option value="cash">Cash</option>
+                    <option value="bank">Bank</option>
+                    <option value="bkash">bKash</option>
+                    <option value="nagad">Nagad</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label>Transaction / Reference ID
+                  <input type="text" id="excTrxId" placeholder="e.g. TRX123456 (optional)">
+                </label>
+              </div>
+            </div>
+          ` : `
+            <div style="background:color-mix(in srgb,#10b981 8%,transparent);border:1px solid #10b981;border-radius:8px;padding:12px;margin:12px 0">
+              <div style="display:flex;align-items:center;gap:6px">
+                ${shpBadge('Even Exchange', 'emerald')}
+                <b>Even Exchange: Difference is ${money(0)}. No additional payment or refund required.</b>
+              </div>
+            </div>
+          `)}
+
+          <label style="margin-top:10px">Exchange Notes
+            <textarea id="excGeneralNotes" rows="2" placeholder="Optional internal notes about this exchange"></textarea>
+          </label>
+        </section>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px" class="shp-exc-step2-actions">
+          <button type="button" class="shp-btn shp-btn-soft" id="btnBackToStep1Bottom">← Back to Invoice</button>
+          <button type="button" class="shp-btn shp-btn-primary" id="btnReviewExchange">Review & Confirm Exchange →</button>
+        </div>
+      `;
+
+      bindStep2Events();
+    };
+
+    const bindStep2Events = () => {
+      // Step 1 Back buttons
+      let b1 = step2Box.querySelector('#btnBackToStep1');
+      let b2 = step2Box.querySelector('#btnBackToStep1Bottom');
+      if(b1) b1.onclick = () => { step2Box.style.display = 'none'; step1Box.style.display = 'block'; };
+      if(b2) b2.onclick = () => { step2Box.style.display = 'none'; step1Box.style.display = 'block'; };
+
+      // Returned items bindings
+      (lookupData.lines || []).forEach(l => {
+        let chk = step2Box.querySelector(`[data-chk-ret="${l.id}"]`);
+        if(!chk) return;
+        let card = step2Box.querySelector('#excRetCard_' + l.id);
+        let fields = step2Box.querySelector('#excRetFields_' + l.id);
+        let qtyInp = step2Box.querySelector(`[data-input-ret-qty="${l.id}"]`);
+        let reasonSel = step2Box.querySelector(`[data-input-ret-reason="${l.id}"]`);
+        let noteWrap = step2Box.querySelector('#excNoteWrap_' + l.id);
+        let noteInp = step2Box.querySelector(`[data-input-ret-note="${l.id}"]`);
+        let condSel = step2Box.querySelector(`[data-input-ret-condition="${l.id}"]`);
+
+        chk.onchange = () => {
+          returnedState[l.id].selected = chk.checked;
+          card.classList.toggle('selected', chk.checked);
+          fields.style.display = chk.checked ? 'grid' : 'none';
+          renderStep2UI();
+        };
+
+        if(qtyInp){
+          qtyInp.oninput = () => {
+            let q = Number(qtyInp.value || 0);
+            if(q > l.returnable_quantity){
+              qtyInp.value = l.returnable_quantity;
+              q = l.returnable_quantity;
+            }
+            returnedState[l.id].quantity = q;
+            renderStep2UI();
+          };
+        }
+
+        if(reasonSel){
+          reasonSel.onchange = () => {
+            returnedState[l.id].reason = reasonSel.value;
+            noteWrap.style.display = reasonSel.value === 'Other' ? 'flex' : 'none';
+          };
+        }
+
+        if(noteInp){
+          noteInp.oninput = () => {
+            returnedState[l.id].reasonNote = noteInp.value;
+          };
+        }
+
+        if(condSel){
+          condSel.onchange = () => {
+            returnedState[l.id].condition = condSel.value;
+          };
+        }
+      });
+
+      // Add replacement product buttons
+      const openAddPicker = () => {
+        openItemPicker('sale', inventoryItems, (pickedItem, qty, price, vat, disc) => {
+          replacementItems.push({
+            id: 'rep_' + Math.random().toString(36).slice(2, 9),
+            item: pickedItem,
+            quantity: qty,
+            unit_price: price,
+            tax_percent: vat,
+            discount: disc
+          });
+          renderStep2UI();
+        });
+      };
+
+      let addBtn = step2Box.querySelector('#btnAddReplacementProduct');
+      let addBtnEmpty = step2Box.querySelector('#btnAddReplacementProductEmpty');
+      if(addBtn) addBtn.onclick = openAddPicker;
+      if(addBtnEmpty) addBtnEmpty.onclick = openAddPicker;
+
+      // Replacement row inputs
+      replacementItems.forEach((rep, idx) => {
+        let qInp = step2Box.querySelector(`[data-rep-qty="${idx}"]`);
+        let pInp = step2Box.querySelector(`[data-rep-price="${idx}"]`);
+        let tInp = step2Box.querySelector(`[data-rep-tax="${idx}"]`);
+        let dInp = step2Box.querySelector(`[data-rep-disc="${idx}"]`);
+        let delBtn = step2Box.querySelector(`[data-rep-del="${idx}"]`);
+
+        if(qInp) qInp.oninput = () => { rep.quantity = Number(qInp.value || 0); renderStep2UI(); };
+        if(pInp) pInp.oninput = () => { rep.unit_price = Number(pInp.value || 0); renderStep2UI(); };
+        if(tInp) tInp.oninput = () => { rep.tax_percent = Number(tInp.value || 0); renderStep2UI(); };
+        if(dInp) dInp.oninput = () => { rep.discount = Number(dInp.value || 0); renderStep2UI(); };
+        if(delBtn) delBtn.onclick = () => { replacementItems.splice(idx, 1); renderStep2UI(); };
+      });
+
+      // Review & Confirm button
+      let btnReview = step2Box.querySelector('#btnReviewExchange');
+      if(btnReview){
+        btnReview.onclick = () => {
+          let activeReturned = Object.values(returnedState).filter(s => s.selected && Number(s.quantity) > 0);
+          if(!activeReturned.length) return toast('Please select at least one product to return.');
+
+          for(let st of activeReturned){
+            if(st.reason === 'Other' && !st.reasonNote.trim()){
+              return toast(`Please enter a reason note for ${st.line.inventory_items?.description || 'the returned item'}.`);
+            }
+          }
+
+          if(!replacementItems.length) return toast('Please add at least one replacement / new product.');
+
+          for(let rep of replacementItems){
+            if(Number(rep.quantity) <= 0) return toast(`Please enter a valid quantity for ${rep.item.description}.`);
+            if(Number(rep.quantity) > Number(rep.item.total_stock)){
+              return toast(`Quantity for "${rep.item.description}" exceeds available stock (${rep.item.total_stock}).`);
+            }
+          }
+
+          let totals = calculateTotals();
+          let payMethod = step2Box.querySelector('#excPayMethod')?.value || 'cash';
+          let trxId = step2Box.querySelector('#excTrxId')?.value?.trim() || null;
+          let notes = step2Box.querySelector('#excGeneralNotes')?.value?.trim() || '';
+
+          confirmExchangeModal({
+            invoice: inv,
+            customer: party,
+            activeReturned,
+            replacementItems,
+            totals,
+            payMethod,
+            trxId,
+            notes,
+            parentModal: e,
+            onDone
+          });
+        };
+      }
+    };
+
+    renderStep2UI();
+  };
+}
+
+function confirmExchangeModal(data){
+  let { invoice: inv, customer: party, activeReturned, replacementItems, totals, payMethod, trxId, notes, parentModal, onDone } = data;
+  let custName = party?.name || inv.custom_party_name || 'Walk-in Customer';
+
+  let diffText = totals.difference > 0 ?
+    `<span style="color:#0284c7;font-weight:bold">+${money(totals.difference)} (Customer Pays via ${esc(payMethod.toUpperCase())})</span>` :
+    (totals.difference < 0 ?
+      `<span style="color:#f59e0b;font-weight:bold">-${money(Math.abs(totals.difference))} (Store Refunds via ${esc(payMethod.toUpperCase())})</span>` :
+      `<span style="color:#10b981;font-weight:bold">Even Exchange (${money(0)})</span>`);
+
+  let e = shpModal('Confirm Sales Exchange', `
+    <div>
+      <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px;margin-bottom:14px">
+        <p style="margin:2px 0"><b>Original Invoice:</b> <code>${esc(inv.invoice_number)}</code> (${esc(inv.invoice_date)})</p>
+        <p style="margin:2px 0"><b>Customer:</b> ${esc(custName)}</p>
+      </div>
+
+      <h4 style="font-size:12.5px;margin:10px 0 6px">Returned Products:</h4>
+      ${activeReturned.map(st => {
+        let l = st.line;
+        let q = Number(st.quantity);
+        let uPrice = Number(l.unit_price);
+        let lSub = q * uPrice;
+        let taxPct = Number(l.tax_percent || inv.tax_percent || 0);
+        let lTax = lSub * (taxPct / 100);
+        let origSoldQty = Number(l.quantity);
+        let origDisc = Number(l.discount || 0);
+        let lDisc = origSoldQty > 0 ? (q / origSoldQty) * origDisc : 0;
+        let lineVal = Math.max(0, Math.round((lSub + lTax - lDisc) * 100) / 100);
+        return `
+          <div class="shp-ret-confirm-item">
+            <div style="display:flex;justify-content:space-between">
+              <b>${esc(l.inventory_items?.description || 'Item')} × ${st.quantity} ${esc(l.inventory_items?.unit || 'pcs')}</b>
+              <b>${money(lineVal)}</b>
+            </div>
+            <div style="font-size:11.5px;color:var(--shp-text2)">
+              Reason: <b>${esc(st.reason)}</b>${st.reasonNote ? ` (${esc(st.reasonNote)})` : ''} · Condition: <b>${esc(st.condition)}</b>
+              ${st.condition === 'Sellable' ? ' <span class="shp-badge shp-t-emerald" style="font-size:9.5px">Restock</span>' : ' <span class="shp-badge shp-t-rose" style="font-size:9.5px">Quarantined</span>'}
+            </div>
+          </div>
+        `;
+      }).join('')}
+
+      <h4 style="font-size:12.5px;margin:14px 0 6px">New / Replacement Products:</h4>
+      ${replacementItems.map(rep => {
+        let q = Number(rep.quantity);
+        let p = Number(rep.unit_price);
+        let tax = q * p * (Number(rep.tax_percent || 0) / 100);
+        let tot = Math.max(0, q * p + tax - Number(rep.discount || 0));
+        return `
+          <div class="shp-exc-confirm-item">
+            <div style="display:flex;justify-content:space-between">
+              <b>${esc(rep.item.description)} × ${rep.quantity} ${esc(rep.item.unit || 'pcs')}</b>
+              <b>${money(tot)}</b>
+            </div>
+            <div style="font-size:11.5px;color:var(--shp-text2)">
+              Unit Price: ${money(rep.unit_price)} · Disc: ${money(rep.discount)}
+            </div>
+          </div>
+        `;
+      }).join('')}
+
+      <div class="shp-ret-summary-box">
+        <div class="shp-ret-summary-row"><span>Returned Products Value:</span><b>${money(totals.retTotal)}</b></div>
+        <div class="shp-ret-summary-row"><span>New Products Total:</span><b>${money(totals.newTotal)}</b></div>
+        <div class="shp-ret-summary-row total"><span>Difference:</span>${diffText}</div>
+        ${trxId ? `<div class="shp-ret-summary-row" style="font-size:11.5px"><span>Transaction Ref:</span><code>${esc(trxId)}</code></div>` : ''}
+      </div>
+
+      <div class="shp-form-actions" style="margin-top:16px">
+        <button type="button" class="shp-btn shp-btn-soft" id="btnCancelConfirm">Back</button>
+        <button type="button" class="shp-btn shp-btn-primary" id="btnDoSubmitExchange">Complete Exchange</button>
+      </div>
+    </div>
+  `, 'shp-modal-lg');
+
+  e.querySelector('#btnCancelConfirm').onclick = () => e.remove();
+
+  e.querySelector('#btnDoSubmitExchange').onclick = async () => {
+    let btn = e.querySelector('#btnDoSubmitExchange');
+    btn.disabled = true;
+    btn.textContent = 'Processing exchange...';
+
+    let payload = {
+      invoice_id: inv.id,
+      notes: notes || null,
+      returned_items: activeReturned.map(st => ({
+        invoice_line_id: st.line.id,
+        item_id: st.line.item_id,
+        quantity: Number(st.quantity),
+        reason: st.reason,
+        reason_note: st.reasonNote || null,
+        condition: st.condition
+      })),
+      new_items: replacementItems.map(rep => ({
+        item_id: rep.item.id,
+        quantity: Number(rep.quantity),
+        unit_price: Number(rep.unit_price),
+        tax_percent: Number(rep.tax_percent || 0),
+        discount: Number(rep.discount || 0)
+      })),
+      payment_method: totals.difference !== 0 ? payMethod : 'none',
+      transaction_id: trxId
+    };
+
+    try {
+      let res = await api('exchanges', {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      e.remove();
+      if(parentModal) parentModal.remove();
+      toast(`Sales exchange ${res.exchangeNumber} completed!`);
+      if(onDone) onDone();
+      exchangeDetailModal(res.exchange.id, onDone);
+    } catch(err) {
+      btn.disabled = false;
+      btn.textContent = 'Complete Exchange';
+      toast(err.message);
+    }
+  };
+}
+
+async function exchangeDetailModal(exchangeId, onDone){
+  let e = shpModal('Exchange Details', '<p class="shp-desc">Loading exchange details...</p>', 'shp-modal-xl');
+  try {
+    let exc = await api('exchanges/' + exchangeId);
+    let inv = exc.invoices || {};
+    let cust = exc.customers || {};
+    let custName = exc.customer_name || cust.name || 'Walk-in Customer';
+    let items = exc.exchange_items || [];
+    let returnedItems = items.filter(x => x.item_type === 'returned');
+    let newItems = items.filter(x => x.item_type === 'new');
+    let movements = exc.inventory_stock_movements || [];
+
+    let itemMap = {};
+    items.forEach(it => {
+      if (it.item_id) {
+        itemMap[it.item_id] = {
+          code: it.inventory_items?.item_code || '',
+          desc: it.inventory_items?.description || ''
+        };
+      }
+    });
+
+    let diff = Number(exc.difference_amount || 0);
+    let diffBadge = diff > 0 ?
+      `<span class="shp-badge shp-t-sky">Additional Payment: +${money(diff)}</span>` :
+      (diff < 0 ?
+        `<span class="shp-badge shp-t-amber">Refund: -${money(Math.abs(diff))}</span>` :
+        `<span class="shp-badge shp-t-emerald">Even Exchange (${money(0)})</span>`);
+
+    e.querySelector('.shp-modalbody').innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--shp-line)">
+        <div>
+          <b style="font-size:18px">${esc(exc.exchange_number)}</b>
+          <span style="margin-left:10px;color:var(--shp-text2)">Date: <b>${esc(exc.exchange_date)}</b></span>
+        </div>
+        <div style="display:inline-flex;gap:6px">
+          ${diffBadge}
+          ${shpBadge('Completed', 'emerald')}
+        </div>
+      </div>
+
+      <div class="shp-grid2" style="font-size:12.5px;color:var(--shp-text2);margin-bottom:16px;background:var(--shp-inset);padding:12px;border-radius:8px">
+        <div>
+          <p style="margin:2px 0"><b>Customer:</b> ${esc(custName)}</p>
+          <p style="margin:2px 0"><b>Phone:</b> ${esc(cust.phone || '—')}</p>
+          <p style="margin:2px 0"><b>Processed by:</b> ${esc(exc.created_by_user || 'Staff')}</p>
+        </div>
+        <div>
+          <p style="margin:2px 0"><b>Original Sales Invoice:</b> <code>${esc(inv.invoice_number || '—')}</code></p>
+          <p style="margin:2px 0"><b>Payment / Settlement:</b> ${esc(exc.payment_method?.toUpperCase() || 'NONE')}${exc.transaction_id ? ' · Ref: ' + esc(exc.transaction_id) : ''}</p>
+          ${exc.notes ? `<p style="margin:2px 0"><b>Notes:</b> ${esc(exc.notes)}</p>` : ''}
+        </div>
+      </div>
+
+      <h4 style="font-size:13px;margin:12px 0 6px">Returned Products</h4>
+      <div class="shp-tw"><table><thead><tr>
+        <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Tax %</th><th>Disc.</th><th>Return Value</th><th>Reason</th><th>Condition</th>
+      </tr></thead><tbody>
+      ${returnedItems.map((it, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td class="shp-wrap"><b>${esc(it.inventory_items?.description || 'Item')}</b><br><small class="shp-desc">${esc(it.inventory_items?.item_code || '')}</small></td>
+          <td><b>${it.quantity}</b> ${esc(it.inventory_items?.unit || 'pcs')}</td>
+          <td>${money(it.unit_price)}</td>
+          <td>${Number(it.tax_percent || 0)}%</td>
+          <td>${money(it.discount)}</td>
+          <td><b>${money(it.total_amount)}</b></td>
+          <td class="shp-wrap">${esc(it.reason || '—')}${it.reason_note ? `<br><small class="shp-desc">${esc(it.reason_note)}</small>` : ''}</td>
+          <td>${it.condition === 'Sellable' ? shpBadge('Sellable', 'emerald') : shpBadge(it.condition, 'rose')}</td>
+        </tr>
+      `).join('')}
+      </tbody></table></div>
+
+      <h4 style="font-size:13px;margin:16px 0 6px">Replacement / New Products</h4>
+      <div class="shp-tw"><table><thead><tr>
+        <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Tax %</th><th>Disc.</th><th>Line Total</th>
+      </tr></thead><tbody>
+      ${newItems.map((it, idx) => `
+        <tr>
+          <td>${idx + 1}</td>
+          <td class="shp-wrap"><b>${esc(it.inventory_items?.description || 'Item')}</b><br><small class="shp-desc">${esc(it.inventory_items?.item_code || '')}</small></td>
+          <td><b>${it.quantity}</b> ${esc(it.inventory_items?.unit || 'pcs')}</td>
+          <td>${money(it.unit_price)}</td>
+          <td>${Number(it.tax_percent || 0)}%</td>
+          <td>${money(it.discount)}</td>
+          <td><b>${money(it.total_amount)}</b></td>
+        </tr>
+      `).join('')}
+      </tbody></table></div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin:16px 0;background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:8px;padding:12px">
+        <div><span class="shp-desc">Returned Value</span><br><b style="font-size:15px">${money(exc.returned_total)}</b></div>
+        <div><span class="shp-desc">New Products Total</span><br><b style="font-size:15px">${money(exc.new_items_total)}</b></div>
+        <div><span class="shp-desc">Difference</span><br><b style="font-size:15px;color:${diff > 0 ? '#0284c7' : (diff < 0 ? '#e11d48' : 'inherit')}">${diff > 0 ? '+' : ''}${money(diff)}</b></div>
+        <div><span class="shp-desc">Action / Settlement</span><br><b>${diff > 0 ? 'Additional Paid: ' + money(diff) : (diff < 0 ? 'Refunded: ' + money(Math.abs(diff)) : 'Even Exchange')}</b></div>
+      </div>
+
+      ${movements.length ? `
+        <h4 style="font-size:13px;margin:14px 0 6px">Inventory Movements</h4>
+        <div class="shp-tw"><table><thead><tr>
+          <th>Item</th><th>Type</th><th>Qty</th><th>Stock Change</th><th>Condition</th><th>Notes</th>
+        </tr></thead><tbody>
+        ${movements.map(m => {
+          let itm = m.inventory_items || {};
+          let code = itm.item_code || itemMap[m.item_id]?.code || shortId(m.item_id);
+          let desc = itm.description || itemMap[m.item_id]?.desc || 'Item';
+          return `<tr>
+            <td class="shp-wrap"><b>${esc(desc)}</b><br><small class="shp-desc">${esc(code)}</small></td>
+            <td><code>${esc(m.movement_type)}</code></td>
+            <td><b>${Number(m.quantity) > 0 ? '+' : ''}${m.quantity}</b></td>
+            <td>${m.stock_before != null ? `${m.stock_before} → ${m.stock_after}` : 'No stock change'}</td>
+            <td>${m.condition === 'Sellable' ? shpBadge('Sellable', 'emerald') : shpBadge(m.condition, 'rose')}</td>
+            <td class="shp-wrap">${esc(m.notes || '—')}</td>
+          </tr>`;
+        }).join('')}
+        </tbody></table></div>
+      ` : ''}
+
+      <div class="shp-form-actions" style="margin-top:16px">
+        <button type="button" class="shp-btn shp-btn-primary" id="btnPrintExchangeDoc">Print Exchange Invoice</button>
+        <button type="button" class="shp-btn shp-btn-soft" id="btnCloseExchangeDoc">Close</button>
+      </div>
+    `;
+
+    e.querySelector('#btnCloseExchangeDoc').onclick = () => e.remove();
+    e.querySelector('#btnPrintExchangeDoc').onclick = () => printExchangeSlip(exc);
+  } catch(err) {
+    e.querySelector('.shp-modalbody').innerHTML = `<p style="color:#ef4444">${esc(err.message)}</p>`;
+  }
+}
+
+async function printExchangeSlipById(exchangeId){
+  try {
+    let exc = await api('exchanges/' + exchangeId);
+    printExchangeSlip(exc);
+  } catch(err) {
+    toast('Could not prepare exchange invoice: ' + err.message);
+  }
+}
+
+async function printExchangeSlip(exc){
+  let [store, tb] = await Promise.all([
+    api('shop/settings').catch(()=>({ name: state.store?.name || 'EMS Store' })),
+    api('truebill/availability').catch(()=>({ enabled:false, ever:false }))
+  ]);
+  let showQR = !!tb.enabled;
+  let inv = exc.invoices || {};
+  let cust = exc.customers || {};
+  let custName = exc.customer_name || cust.name || 'Walk-in Customer';
+  let custPhone = cust.phone || '—';
+  let custAddress = cust.address || '—';
+  let items = exc.exchange_items || [];
+  let returnedItems = items.filter(x => x.item_type === 'returned');
+  let newItems = items.filter(x => x.item_type === 'new');
+  let diff = Number(exc.difference_amount || 0);
+  let base = (tb.url || location.origin).replace(/\/$/, '');
+  let token = exc.verification_token || exc.id;
+  let verifyUrl = token ? base + '/?verify=' + token : base;
+  let qrSvg = showQR ? getQrSvg(verifyUrl) : '';
+
+  let html = `<!DOCTYPE html><html><head><title>${esc(exc.exchange_number)}</title>
+  <style>
+    body{font-family:Arial,sans-serif;padding:12mm 15mm;color:#111;font-size:11px;line-height:1.4}
+    .printHeader{display:flex;justify-content:space-between;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:12px}
+    .shopInfo h2{font-size:18px;margin:0 0 3px}
+    .titleRight{text-align:right}
+    .titleRight h1{font-size:20px;margin:0 0 4px}
+    .infoGrid{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:12px 0}
+    .infoGrid h3{font-size:11px;margin:0 0 5px;text-transform:uppercase;color:#555}
+    .infoGrid p{margin:2px 0}
+    table{width:100%;border-collapse:collapse;margin:10px 0}
+    th{background:#111;color:#fff;text-align:left;padding:6px 8px;font-size:10px}
+    td{padding:6px 8px;border-bottom:1px solid #ddd;font-size:10.5px}
+    .right{text-align:right}
+    .secTitle{font-size:12px;font-weight:bold;margin:14px 0 4px;text-transform:uppercase;border-bottom:1px solid #aaa;padding-bottom:2px}
+    .printBottom{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px;margin-top:14px}
+    .slipQR{display:flex;align-items:flex-start;gap:10px}
+    .slipQR svg{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}
+    .slipQR img{width:110px;height:110px;border:1px solid #ddd;padding:3px;background:#fff;display:block}
+    .qrwrap{display:inline-block;line-height:0;width:110px;height:110px}
+    .qrtext{display:flex;flex-direction:column;justify-content:center;gap:2px;min-height:110px}
+    .qrtext b{font-size:11px;color:#111}
+    .qrtext small{font-size:9px;color:#666;letter-spacing:.3px}
+    .totalsWrap{display:flex;justify-content:flex-end}
+    .totalsWrap>div{width:300px}
+    .totalsWrap p{display:flex;justify-content:space-between;margin:4px 0}
+    .totalLine{border-top:1px solid #111;padding-top:6px;font-size:13px;font-weight:bold}
+    .diffLine{border-top:2px solid #111;margin-top:6px;padding-top:6px;font-size:15px;font-weight:bold}
+    .signWrap{display:flex;justify-content:space-between;margin-top:50px;padding-top:10px}
+    .signLine{border-top:1px solid #777;width:180px;text-align:center;padding-top:4px;font-size:10px}
+    @media print{
+      body{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .slipQR, .slipQR svg, .slipQR img{display:flex!important;visibility:visible!important}
+    }
+  </style></head><body>
+    <div class="printHeader">
+      <div class="shopInfo">
+        <h2>${esc(store.name)}</h2>
+        <p>${esc(store.address||'')}<br>${esc(store.phone||'')}${store.email ? ' · ' + esc(store.email) : ''}</p>
+      </div>
+      <div class="titleRight">
+        <h1>SALES EXCHANGE INVOICE</h1>
+        <b># ${esc(exc.exchange_number)}</b><br>
+        <span>Date: ${esc(exc.exchange_date)}</span>
+      </div>
+    </div>
+
+    <div class="infoGrid">
+      <div>
+        <h3>Customer Information</h3>
+        <p><b>Name:</b> ${esc(custName)}</p>
+        <p><b>Phone:</b> ${esc(custPhone)}</p>
+        <p><b>Address:</b> ${esc(custAddress)}</p>
+      </div>
+      <div>
+        <h3>Reference Details</h3>
+        <p><b>Original Invoice:</b> ${esc(inv.invoice_number||'—')}</p>
+        <p><b>Original Invoice Date:</b> ${esc(inv.invoice_date||'—')}</p>
+        <p><b>Processed By:</b> ${esc(exc.created_by_user||'Staff')}</p>
+      </div>
+    </div>
+
+    <div class="secTitle">Returned Products</div>
+    <table>
+      <thead><tr>
+        <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Tax %</th><th>Disc.</th><th class="right">Return Value</th>
+      </tr></thead>
+      <tbody>
+        ${returnedItems.map((it, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td><b>${esc(it.inventory_items?.description||'Item')}</b><br><small>${esc(it.inventory_items?.item_code||'')} [${esc(it.condition)}] - ${esc(it.reason||'')}</small></td>
+          <td>${it.quantity} ${esc(it.inventory_items?.unit||'pcs')}</td>
+          <td>${invoiceMoney(it.unit_price)}</td>
+          <td>${Number(it.tax_percent||0)}%</td>
+          <td>${invoiceMoney(it.discount)}</td>
+          <td class="right">${invoiceMoney(it.total_amount)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <div class="secTitle">New / Replacement Products</div>
+    <table>
+      <thead><tr>
+        <th>#</th><th>Product</th><th>Qty</th><th>Unit Price</th><th>Tax %</th><th>Disc.</th><th class="right">Line Total</th>
+      </tr></thead>
+      <tbody>
+        ${newItems.map((it, idx) => `<tr>
+          <td>${idx + 1}</td>
+          <td><b>${esc(it.inventory_items?.description||'Item')}</b><br><small>${esc(it.inventory_items?.item_code||'')}</small></td>
+          <td>${it.quantity} ${esc(it.inventory_items?.unit||'pcs')}</td>
+          <td>${invoiceMoney(it.unit_price)}</td>
+          <td>${Number(it.tax_percent||0)}%</td>
+          <td>${invoiceMoney(it.discount)}</td>
+          <td class="right">${invoiceMoney(it.total_amount)}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <div class="printBottom">
+      ${showQR ? `
+      <div class="slipQR">
+        <div class="qrwrap">${qrSvg}</div>
+        <div class="qrtext"><b>Scan For Verify</b><small>TrueBill Digital Verification</small></div>
+      </div>` : '<div></div>'}
+      <div class="totalsWrap">
+        <div>
+          <p><span>Returned Products Value:</span><b>${invoiceMoney(exc.returned_total)}</b></p>
+          <p><span>Replacement Products Total:</span><b>${invoiceMoney(exc.new_items_total)}</b></p>
+          <p class="diffLine"><span>${diff > 0 ? 'Additional Payment:' : (diff < 0 ? 'Customer Refund:' : 'Difference:')}</span><b>${diff > 0 ? '+' : ''}${invoiceMoney(diff)}</b></p>
+          ${diff !== 0 ? `<p><span>Method:</span><b>${esc(exc.payment_method?.toUpperCase()||'CASH')} ${exc.transaction_id ? '(' + esc(exc.transaction_id) + ')' : ''}</b></p>` : '<p><span>Settlement:</span><b>Even Exchange</b></p>'}
+        </div>
+      </div>
+    </div>
+
+    ${exc.notes ? `<div style="margin-top:14px;padding:8px;border:1px solid #ddd"><b>Notes:</b> ${esc(exc.notes)}</div>` : ''}
+
+    <div class="signWrap">
+      <div class="signLine">Customer Signature</div>
+      <div class="signLine">Authorized By</div>
+    </div>
+  </body></html>`;
+
+  let w = window.open('','_blank');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(()=>w.print(), 350);
+}
+
+function auditInspectModal(x){
+  let m=x.metadata||x.what?.metadata||{};
+  let metaEntries=Object.entries(m);
+  let e=shpModal(`Audit Event Details · #${x.id}`,`
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;">
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:12px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+            <span class="shp-chipic shp-t-${x.who?.tone||x.actor?.tone||'sky'}">${lucide('user')}</span>
+            <b style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--shp-mono);color:var(--shp-muted);">Who (Actor)</b>
+          </div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:2px;">${esc(x.who?.name||x.actor?.name||'System')}</div>
+          <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+            <span class="shp-tag shp-t-${x.who?.tone||x.actor?.tone||'zinc'}">${esc(x.who?.role||x.actor?.role||'User')}</span>
+            <code>${esc(x.who?.userId||x.actor?.userId||'—')}</code>
+          </div>
+          ${(x.who?.email||x.actor?.email)?`<div style="font-size:11.5px;color:var(--shp-muted);margin-top:4px;">${esc(x.who?.email||x.actor?.email)}</div>`:''}
+        </div>
+
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:12px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+            <span class="shp-chipic shp-t-${x.where?.tone||'emerald'}">${lucide(x.where?.icon||'grid')}</span>
+            <b style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--shp-mono);color:var(--shp-muted);">Where (Location)</b>
+          </div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:2px;">${esc(x.where?.module||'Shop Dashboard')}</div>
+          <div style="font-size:12px;color:var(--shp-muted);margin-top:2px;">
+            Shop: <b>${esc(state.store?.name||'Current Shop')}</b>
+            ${state.store?.category?` · <span class="shp-tag shp-t-sky">${esc(state.store.category)}</span>`:''}
+          </div>
+          <div style="font-size:11px;font-family:var(--shp-mono);color:var(--shp-muted2);margin-top:4px;">Route: /${esc(x.where?.slug||'dashboard')}</div>
+        </div>
+
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:12px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+            <span class="shp-chipic shp-t-${x.what?.tone||'amber'}">${lucide('activity')}</span>
+            <b style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--shp-mono);color:var(--shp-muted);">What (Action)</b>
+          </div>
+          <div style="font-size:14px;font-weight:700;margin-bottom:4px;">${esc(x.what?.label||x.action)}</div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span class="shp-tag shp-t-${x.what?.tone||'zinc'}">${esc(x.action)}</span>
+            ${x.what?.code&&x.what.code!=='—'?`<code>${esc(x.what.code)}</code>`:''}
+          </div>
+          <p style="font-size:12px;color:var(--shp-text2);margin:8px 0 0 0;line-height:1.4;">${esc(x.what?.summary||x.summary||'—')}</p>
+        </div>
+
+        <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:12px;padding:12px;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+            <span class="shp-chipic shp-t-violet">${lucide('clock')}</span>
+            <b style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--shp-mono);color:var(--shp-muted);">When (Time)</b>
+          </div>
+          <div style="font-size:13px;font-weight:700;margin-bottom:2px;font-family:var(--shp-mono);">${new Date(x.created_at).toLocaleDateString()}</div>
+          <div style="font-size:12px;font-family:var(--shp-mono);color:var(--shp-muted);">${new Date(x.created_at).toLocaleTimeString()}</div>
+          <div style="margin-top:6px;"><span class="shp-tag shp-t-violet">${ago(x.created_at)}</span></div>
+          <div style="font-size:10px;font-family:var(--shp-mono);color:var(--shp-muted2);margin-top:6px;word-break:break-all;">${esc(x.created_at)}</div>
+        </div>
+      </div>
+
+      <div style="background:var(--shp-card);border:1px solid var(--shp-line);border-radius:14px;padding:14px;">
+        <h4 style="font-size:12px;font-family:var(--shp-mono);letter-spacing:.08em;text-transform:uppercase;margin:0 0 8px 0;color:var(--shp-muted);">Event Context &amp; Details</h4>
+        ${metaEntries.length?`<div class="shp-tw"><table><thead><tr><th>Property</th><th>Value</th></tr></thead><tbody>${metaEntries.map(([k,v])=>`<tr><td><code>${esc(k)}</code></td><td>${typeof v==='object'?`<pre style="margin:0;font-size:11px;font-family:var(--shp-mono);max-height:140px;overflow:auto;">${esc(JSON.stringify(v,null,2))}</pre>`:esc(String(v))}</td></tr>`).join('')}</tbody></table></div>`:`<p style="font-size:12px;color:var(--shp-muted);margin:0;">No additional payload metadata recorded for this event.</p>`}
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;">
+        <button type="button" class="shp-btn shp-btn-soft" id="closeInspectBtn">Close</button>
+      </div>
+    </div>
+  `,'shp-modal-wide');
+  e.querySelector('#closeInspectBtn').onclick=()=>e.remove();
+}
+
+function downloadAuditCsv(rows){
+  const headers=['Timestamp','Actor Name','User ID','Role','Module (Where)','Action (What)','Action Label','Target Code','Description','Metadata'];
+  const data=rows.map(r=>[
+    r.created_at,
+    r.who?.name||r.actor?.name||'',
+    r.who?.userId||r.actor?.userId||'',
+    r.who?.role||r.actor?.role||'',
+    r.where?.module||'',
+    r.what?.action||r.action||'',
+    r.what?.label||'',
+    r.what?.code||r.detail||'',
+    r.what?.summary||r.summary||'',
+    JSON.stringify(r.what?.metadata||r.metadata||{})
+  ]);
+  const csvCell=v=>'"'+String(v??'').replace(/"/g,'""')+'"';
+  const csv=[headers.map(csvCell).join(','),...data.map(row=>row.map(csvCell).join(','))].join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8;'}));
+  a.download=`audit-log-${(state.store?.name||'shop').toLowerCase().replace(/[^a-z0-9]/g,'-')}-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  toast('Audit log exported to CSV.');
+}
+
+async function renderAuditLogView(container){
+  container.innerHTML=`<div class="shp-pagegap">${SKEL.table(4,6)}</div>`;
+  let logs=await api('shop/activity-logs');
+
+  let uniqueActors=new Set(logs.map(x=>x.who?.userId||x.actor?.userId).filter(Boolean)).size;
+  let uniqueModules=new Set(logs.map(x=>x.where?.module).filter(Boolean)).size;
+  let latestAgo=logs.length?ago(logs[0].created_at):'—';
+
+  let actorsList=[...new Set(logs.map(x=>JSON.stringify({id:x.who?.userId||x.actor?.userId,name:x.who?.name||x.actor?.name,role:x.who?.role||x.actor?.role})))]
+    .map(x=>JSON.parse(x)).filter(x=>x.id);
+
+  let modulesList=[...new Set(logs.map(x=>x.where?.module).filter(Boolean))].sort();
+
+  container.innerHTML=`
+    <div class="shp-audit-kpis">
+      <div class="shp-audit-kpi"><small>Audit Events</small><strong>${logs.length}</strong></div>
+      <div class="shp-audit-kpi"><small>Active Users</small><strong>${uniqueActors}</strong></div>
+      <div class="shp-audit-kpi"><small>Modules Audited</small><strong>${uniqueModules}</strong></div>
+      <div class="shp-audit-kpi"><small>Latest Activity</small><strong style="font-size:12.5px;">${latestAgo}</strong></div>
+    </div>
+
+    <div class="shp-toolbar shp-audit-toolbar" style="margin-bottom:12px;">
+      <input id="auditSearch" class="shp-search" placeholder="Search who, what, where, when, codes, details..." style="flex:1;min-width:200px;">
+      <select id="auditFilterWhere" style="min-width:140px;">
+        <option value="">All Modules (Where)</option>
+        ${modulesList.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('')}
+      </select>
+      <select id="auditFilterWho" style="min-width:140px;">
+        <option value="">All Users (Who)</option>
+        ${actorsList.map(a=>`<option value="${esc(a.id)}">${esc(a.name)} (${esc(a.id)})</option>`).join('')}
+      </select>
+      <select id="auditFilterWhat" style="min-width:130px;">
+        <option value="">All Actions (What)</option>
+        <option value="post">Invoices (Sale / Purchase)</option>
+        <option value="return">Return & Exchange</option>
+        <option value="inventory">Inventory</option>
+        <option value="due">Due Recoveries</option>
+        <option value="customer">Customers & Suppliers</option>
+        <option value="expense">Expenses</option>
+        <option value="staff">Staff & Attendance</option>
+        <option value="login">Sign-In / Access</option>
+        <option value="tools">ConnectX, Zudo, Vaultium</option>
+      </select>
+      <button type="button" class="shp-btn shp-btn-soft" id="auditExportBtn" title="Export as CSV">${lucide('download')} Export CSV</button>
+    </div>
+
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <small id="auditCountLabel" style="font-size:11.5px;color:var(--shp-muted);font-family:var(--shp-mono);text-transform:uppercase;letter-spacing:0.04em;">Showing ${logs.length} audit events</small>
+    </div>
+
+    <div id="auditTableWrap"></div>
+  `;
+
+  let searchInput=container.querySelector('#auditSearch');
+  let whereSelect=container.querySelector('#auditFilterWhere');
+  let whoSelect=container.querySelector('#auditFilterWho');
+  let whatSelect=container.querySelector('#auditFilterWhat');
+  let countLabel=container.querySelector('#auditCountLabel');
+  let tableWrap=container.querySelector('#auditTableWrap');
+  let exportBtn=container.querySelector('#auditExportBtn');
+
+  function filterLogs(){
+    let q=(searchInput.value||'').trim().toLowerCase();
+    let mod=whereSelect.value;
+    let actorId=whoSelect.value;
+    let actionKind=whatSelect.value;
+
+    return logs.filter(x=>{
+      if(mod && x.where?.module!==mod) return false;
+      if(actorId && (x.who?.userId||x.actor?.userId)!==actorId) return false;
+      if(actionKind){
+        let act=String(x.action||'').toLowerCase();
+        let ent=String(x.entity_type||'').toLowerCase();
+        if(actionKind==='post' && !act.includes('post') && !ent.includes('invoice')) return false;
+        if(actionKind==='return' && !act.includes('return') && !act.includes('exchange') && !ent.includes('return') && !ent.includes('exchange')) return false;
+        if(actionKind==='inventory' && !ent.includes('inventory') && !act.includes('stock')) return false;
+        if(actionKind==='due' && !act.includes('due') && !ent.includes('due')) return false;
+        if(actionKind==='customer' && !ent.includes('customer') && !ent.includes('supplier')) return false;
+        if(actionKind==='expense' && !ent.includes('expense')) return false;
+        if(actionKind==='staff' && !ent.includes('staff') && !ent.includes('attendance') && !act.includes('salary')) return false;
+        if(actionKind==='login' && !act.includes('login') && !act.includes('access')) return false;
+        if(actionKind==='tools' && !ent.includes('connectx') && !ent.includes('zudo') && !ent.includes('vaultium')) return false;
+      }
+      if(q){
+        let hay=`${x.who?.name||''} ${x.who?.userId||''} ${x.who?.role||''} ${x.where?.module||''} ${x.what?.label||''} ${x.what?.summary||''} ${x.what?.code||''} ${x.action||''} ${x.entity_type||''} ${x.created_at||''} ${JSON.stringify(x.metadata||{})}`.toLowerCase();
+        if(!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }
+
+  function renderTable(){
+    let rows=filterLogs();
+    countLabel.textContent=`Showing ${rows.length} of ${logs.length} audit events`;
+
+    if(!rows.length){
+      tableWrap.innerHTML=shpEmpty('No audit events matched your search or filters.');
+      return;
+    }
+
+    tableWrap.innerHTML=`
+      <div class="shp-tw">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:130px;">When</th>
+              <th style="width:160px;">Who</th>
+              <th style="width:140px;">Where</th>
+              <th>What</th>
+              <th style="width:80px;text-align:right;">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(x=>`
+              <tr>
+                <td>
+                  <div class="shp-audit-when">
+                    <b>${new Date(x.created_at).toLocaleDateString()}</b>
+                    <small>${new Date(x.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · ${ago(x.created_at)}</small>
+                  </div>
+                </td>
+                <td>
+                  <div class="shp-audit-who">
+                    <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">
+                      <span class="shp-tag shp-t-${x.who?.tone||x.actor?.tone||'zinc'}">${esc(x.who?.role||x.actor?.role||'User')}</span>
+                      <b>${esc(x.who?.name||x.actor?.name||'—')}</b>
+                    </div>
+                    <code>${esc(x.who?.userId||x.actor?.userId||'—')}</code>
+                  </div>
+                </td>
+                <td>
+                  <div class="shp-audit-where">
+                    <span class="shp-chipic shp-t-${x.where?.tone||'zinc'}">${lucide(x.where?.icon||'grid')}</span>
+                    <b>${esc(x.where?.module||'General')}</b>
+                  </div>
+                </td>
+                <td>
+                  <div class="shp-audit-what">
+                    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:3px;">
+                      <span class="shp-tag shp-t-${x.what?.tone||'zinc'}">${esc(x.what?.label||x.action)}</span>
+                      ${x.what?.code&&x.what?.code!=='—'?`<code>${esc(x.what.code)}</code>`:''}
+                    </div>
+                    <p style="margin:0;font-size:12px;color:var(--shp-text);line-height:1.4;">${esc(x.what?.summary||x.summary||'—')}</p>
+                  </div>
+                </td>
+                <td style="text-align:right;">
+                  <button type="button" class="shp-btn shp-btn-soft shp-btn-sm" data-inspect-audit="${x.id}">Inspect</button>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    tableWrap.querySelectorAll('[data-inspect-audit]').forEach(btn=>{
+      btn.onclick=()=>{
+        let rec=logs.find(r=>String(r.id)===String(btn.dataset.inspectAudit));
+        if(rec) auditInspectModal(rec);
+      };
+    });
+  }
+
+  searchInput.oninput=renderTable;
+  whereSelect.onchange=renderTable;
+  whoSelect.onchange=renderTable;
+  whatSelect.onchange=renderTable;
+  exportBtn.onclick=()=>downloadAuditCsv(filterLogs());
+
+  renderTable();
+}
+
+async function auditLogPage(){
+  if(!canAccess('settings','view')){toast('Permission denied.');return page('dashboard')}
+  $('#page').innerHTML=shpHead('Preferences','Audit Log','Complete chronological audit trail across every module and page (Who, What, Where, When).')+`<div class="shp-pagegap"><section class="shp-panel" id="auditPanel"><div class="shp-panel-head"><div><h3>Shop Audit Trail</h3><p class="shp-desc">Every action across Sales, Purchases, Inventory, Customers, Staff, Returns, Dues and System Access.</p></div></div><div id="auditContainer"></div></section></div>`;
+  await renderAuditLogView($('#auditContainer'));
+}
+
+async function settings(initialTab='store'){
+  let tab=initialTab;
+  $('#page').innerHTML=shpHead('Preferences','Settings','Store identity, low-stock alert and the shop audit log.')+`<div class="shp-chips"><button class="shp-chip ${tab==='store'?'on':''}" data-setting-tab="store">Store Details</button><button class="shp-chip ${tab==='activity'?'on':''}" data-setting-tab="activity">Audit Log</button></div><div id="settingContent" class="shp-pagegap"></div>`;
+  async function render(){
+    let el=$('#settingContent');
+    el.innerHTML=`<section class="shp-panel">${SKEL.head()}${tab==='store'?SKEL.kv(9):SKEL.toolbar()+SKEL.table(4,6)}</section>`;
+    if(tab==='store'){
+      let x=await api('shop/settings');
+      el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>Store details</h3><p class="shp-desc">Managed by your administrator. Contact them to change store identity.</p></div>${shpBadge(x.status==='active'?'Active':'Inactive',x.status==='active'?'emerald':'zinc')}</div><div class="shp-kv"><div><span>Store name</span><b>${esc(x.name)}</b></div><div><span>Shop ID</span><b><code>${esc(x.shop_code)}</code></b></div><div><span>Shop category</span><b><span class="shp-tag shp-t-sky">${esc(x.category||'General Store')}</span></b></div><div><span>Address</span><b>${esc(x.address||'—')}</b></div><div><span>Phone</span><b>${esc(x.phone||'—')}${x.phone2?' / '+esc(x.phone2):''}</b></div><div><span>Email</span><b>${esc(x.email||'—')}</b></div><div><span>Website</span><b>${esc(x.website||'—')}</b></div><div><span>Low stock alert</span><b>${esc(x.low_stock_threshold)}</b></div><div><span>Status</span><b>${esc(x.status)}</b></div></div></section>`;
+    }else{
+      el.innerHTML=`<section class="shp-panel" id="auditPanel"><div class="shp-panel-head"><div><h3>Shop Audit Trail</h3><p class="shp-desc">Complete chronological audit trail across every module and page (Who, What, Where, When).</p></div></div><div id="auditContainer"></div></section>`;
+      await renderAuditLogView($('#auditContainer'));
+    }
+  }
+  document.querySelectorAll('[data-setting-tab]').forEach(b=>b.onclick=()=>{
+    tab=b.dataset.settingTab;
+    document.querySelectorAll('[data-setting-tab]').forEach(x=>x.classList.toggle('on',x===b));
+    render();
+  });
+  await render();
+}
 /* modal(): unused legacy helper removed with the Shop Panel redesign */
 /* ───────────────────────── Notification centres (shop & admin) ───────────────────────── */
 const NTF_LABELS={connectx:'ConnectX',zudo:'Zudo AI',business_health:'AI Business Health',truebill:'TrueBill',vaultium:'Vaultium'};
@@ -1748,7 +5137,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')drawerClose()});
 addEventListener('resize',()=>{if(window.innerWidth>960)drawerClose()});
 
-if(new URLSearchParams(location.search).get('verify')){verificationPage(new URLSearchParams(location.search).get('verify'))}else if(new URLSearchParams(location.search).get('page')){publicPage(new URLSearchParams(location.search).get('page'))}else if(state){scheduleLogout();home()}else login();
+let initialVerifyToken=getVerifyToken();if(initialVerifyToken){verificationPage(initialVerifyToken)}else if(new URLSearchParams(location.search).get('page')){publicPage(new URLSearchParams(location.search).get('page'))}else if(state){scheduleLogout();home()}else login();
 /* Cold-open splash: fade out once the first screen is painted AND the animated intro has played its beat. */
 function hideSplash(){try{window.emsSplashHide&&window.emsSplashHide()}catch{}}
 let _splashWaited=false;
@@ -1869,7 +5258,9 @@ async function helpdeskAdmin(){
     if(mark&&d.messages.some(m=>m.sender_type==='owner'&&!m.read_by_admin))await api('helpdesk',{method:'PATCH',body:'{}'}).catch(()=>{});
   };
   await draw();
-  $('#admForm').onsubmit=async e=>{e.preventDefault();const input=$('#admInput'),content=input.value.trim();if(!content)return;const btn=$('#admSend');btn.disabled=true;try{await api('helpdesk',{method:'POST',body:JSON.stringify({content})});input.value='';await draw(false)}catch(err){toast(err.message)}finally{btn.disabled=false;input.focus()}};
+  const form=$('#admForm'), input=$('#admInput');
+  if(input)input.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();form?.requestSubmit()}};
+  form.onsubmit=async e=>{e.preventDefault();const content=input.value.trim();if(!content)return;const btn=$('#admSend');btn.disabled=true;try{await api('helpdesk',{method:'POST',body:JSON.stringify({content})});input.value='';await draw(false)}catch(err){toast(err.message)}finally{btn.disabled=false;input.focus()}};
 }
 
 async function premiumAddons(){
@@ -1902,7 +5293,7 @@ async function premiumAddons(){
     </div>
     <div class="adm-shop">
       <div class="adm-addons">${d.settings.map(x=>{const st=statusOf(x);return `<article class="adm-addon">${addonArt(x)}<h3>${esc(addonName(x))}</h3><p>${esc(x.details||'')}</p><div class="adm-addon-foot"><span class="adm-badge adm-t-${stTone(st.cls)}">${esc(st.label)}</span><button class="adm-btn adm-btn-sm ${st.key==='buy'?'adm-btn-primary':''}" data-buy-addon="${x.addon_key}" ${st.key==='buy'?'':'disabled'}>${buttonFor(st)}</button></div></article>`}).join('')}</div>
-      ${addonCart.length?`<aside class="adm-checkout"><h3>Checkout</h3>${addonCart.map((i,n)=>`<div class="adm-cartitem"><span><b>${esc(addonName(i))}</b><small>${addonIsVault(i)?`${i.daily_limit} GB · ${i.validity_days} month${i.validity_days>1?'s':''}`:addonNoLimit(i)?`${i.validity_days} days`:`${i.daily_limit}/day · ${i.validity_days} days`}</small></span><b>${money(i.validity_days*i.daily_limit*i.unit_price)} BDT</b><button type="button" class="adm-btn adm-btn-ghost adm-btn-sm" data-remove-cart="${n}" title="Remove" aria-label="Remove from cart">×</button></div>`).join('')}<div class="adm-carttotals"><p><span>Subtotal</span><b id="addonSub">${money(sub)} BDT</b></p><div class="adm-couponrow"><input id="addonCoupon" placeholder="Coupon code" ${addonCoupon?`value="${esc(addonCoupon.code)}" readonly`:''}>${addonCoupon?`<button type="button" id="addonCouponClear" class="adm-btn adm-btn-soft adm-btn-sm">Clear</button>`:`<button type="button" id="addonCouponApply" class="adm-btn adm-btn-soft adm-btn-sm">Apply</button>`}</div>${addonCoupon?`<p><span>Coupon (${esc(addonCoupon.code)} −${addonCoupon.percent_off}%)</span><b>−${money(discount)} BDT</b></p>`:''}<p class="grand"><span>Grand Total</span><b id="addonGrand">${money(grand)} BDT</b></p></div>${d.payment_info?`<div class="adm-payinfo"><span class="adm-kicker">Payment instructions</span><p>${esc(d.payment_info).replace(/\n/g,'<br>')}</p></div>`:''}<div class="adm-grid2"><label>Payment method<select id="addonPay"><option value="bkash">bKash</option><option value="nagad">Nagad</option></select></label><label>Payment number<input id="addonPayNumber" placeholder="Required" required></label></div><label>Transaction ID<input id="addonTrx" placeholder="Required" required></label><button type="button" id="addonConfirm" class="adm-btn adm-btn-primary">Confirm purchase</button></aside>`:''}
+      ${addonCart.length?`<aside class="adm-checkout"><h3>Checkout</h3>${addonCart.map((i,n)=>`<div class="adm-cartitem"><span><b>${esc(addonName(i))}</b><small>${addonIsVault(i)?`${i.daily_limit} GB · ${i.validity_days} days`:addonNoLimit(i)?`${i.validity_days} days`:`${i.daily_limit}/day · ${i.validity_days} days`}</small></span><b>${money(i.validity_days*i.daily_limit*i.unit_price)} BDT</b><button type="button" class="adm-btn adm-btn-ghost adm-btn-sm" data-remove-cart="${n}" title="Remove" aria-label="Remove from cart">×</button></div>`).join('')}<div class="adm-carttotals"><p><span>Subtotal</span><b id="addonSub">${money(sub)} BDT</b></p><div class="adm-couponrow"><input id="addonCoupon" placeholder="Coupon code" ${addonCoupon?`value="${esc(addonCoupon.code)}" readonly`:''}>${addonCoupon?`<button type="button" id="addonCouponClear" class="adm-btn adm-btn-soft adm-btn-sm">Clear</button>`:`<button type="button" id="addonCouponApply" class="adm-btn adm-btn-soft adm-btn-sm">Apply</button>`}</div>${addonCoupon?`<p><span>Coupon (${esc(addonCoupon.code)} −${addonCoupon.percent_off}%)</span><b>−${money(discount)} BDT</b></p>`:''}<p class="grand"><span>Grand Total</span><b id="addonGrand">${money(grand)} BDT</b></p></div>${d.payment_info?`<div class="adm-payinfo"><span class="adm-kicker">Payment instructions</span><p>${esc(d.payment_info).replace(/\n/g,'<br>')}</p></div>`:''}<div class="adm-grid2"><label>Payment method<select id="addonPay"><option value="bkash">bKash</option><option value="nagad">Nagad</option></select></label><label>Payment number<input id="addonPayNumber" placeholder="Required" required></label></div><label>Transaction ID<input id="addonTrx" placeholder="Required" required></label><button type="button" id="addonConfirm" class="adm-btn adm-btn-primary">Confirm purchase</button></aside>`:''}
     </div>
     <section class="adm-panel">
       <div class="adm-panel-head"><div><h3>Purchase history</h3><p class="adm-desc">Every add-on purchase request, with verification status and expiry.</p></div></div>
@@ -1922,10 +5313,36 @@ async function premiumAddons(){
 
 function addonCartModal(x,refresh){
   const noLimit=addonNoLimit(x), isVault=addonIsVault(x);
-  const e=admModal(esc(addonName(x)),`<form class="adm-form"><p>${esc(x.details||'')}</p><p class="adm-desc">${isVault?'Price = months × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT (GB is your storage allowance)':noLimit?'Price = validity days × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT':'Price = validity days × daily limit × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT'}</p><div class="adm-grid2">${isVault?`<label>Storage (GB)<input id="agb" type="number" min="${x.min_daily_limit}" max="${x.max_daily_limit}" value="${x.min_daily_limit}" required></label><label>Months<input id="am" type="number" min="${x.min_days}" max="${x.max_days}" value="${x.min_days}" required></label>`:`<label>Validity days<input id="ad" type="number" min="${x.min_days}" max="${x.max_days}" value="${x.min_days}" required></label>${noLimit?'':`<label>Daily limit<input id="al" type="number" min="${x.min_daily_limit}" max="${x.max_daily_limit}" value="${x.min_daily_limit}" required></label>`}`}</div><div class="adm-carttotals"><p class="grand"><span>Total</span><b id="at"></b></p></div><div class="adm-form-actions"><button class="adm-btn adm-btn-primary">Add to cart</button></div></form>`);
-  const calc=()=>{let total;if(isVault){total=+$('#am').value*Number(x.unit_price)}else{const days=+$('#ad').value,limit=noLimit?1:+$('#al').value;total=days*limit*Number(x.unit_price)}$('#at').textContent=total.toLocaleString('en-BD')+' BDT'};
-  calc();if(isVault){$('#agb').oninput=calc;$('#am').oninput=calc}else{$('#ad').oninput=calc;if(!noLimit)$('#al').oninput=calc}
-  e.querySelector('form').onsubmit=v=>{v.preventDefault();let days,limit;if(isVault){days=+$('#am').value;limit=+$('#agb').value;if(days<x.min_days||days>x.max_days)return toast('Months must be between '+x.min_days+' and '+x.max_days+'.');if(limit<x.min_daily_limit||limit>x.max_daily_limit)return toast('Storage must be between '+x.min_daily_limit+' and '+x.max_daily_limit+' GB.')}else{days=+$('#ad').value;if(days<x.min_days||days>x.max_days)return toast('Validity days must be between '+x.min_days+' and '+x.max_days+'.');limit=1;if(!noLimit){limit=+$('#al').value;if(limit<x.min_daily_limit||limit>x.max_daily_limit)return toast('Daily limit must be between '+x.min_daily_limit+' and '+x.max_daily_limit+'.')}}addonCart=addonCart.filter(i=>i.addon_key!==x.addon_key);addonCart.push({addon_key:x.addon_key,title:x.title,validity_days:days,daily_limit:limit,unit_price:Number(x.unit_price)});addonCoupon=null;e.remove();refresh()};
+  const e=admModal(esc(addonName(x)),`<form class="adm-form"><p>${esc(x.details||'')}</p><p class="adm-desc">${isVault?'Price = validity days × GB × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT':noLimit?'Price = validity days × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT':'Price = validity days × daily limit × '+Number(x.unit_price).toLocaleString('en-BD')+' BDT'}</p><div class="adm-grid2">${isVault?`<label>Storage (GB)<input id="agb" type="number" min="${x.min_daily_limit}" max="${x.max_daily_limit}" value="${x.min_daily_limit}" required></label><label>Validity days<input id="ad" type="number" min="${x.min_days}" max="${x.max_days}" value="${x.min_days}" required></label>`:`<label>Validity days<input id="ad" type="number" min="${x.min_days}" max="${x.max_days}" value="${x.min_days}" required></label>${noLimit?'':`<label>Daily limit<input id="al" type="number" min="${x.min_daily_limit}" max="${x.max_daily_limit}" value="${x.min_daily_limit}" required></label>`}`}</div><div class="adm-carttotals"><p class="grand"><span>Total</span><b id="at">0 BDT</b></p></div><div class="adm-form-actions"><button class="adm-btn adm-btn-primary">Add to cart</button></div></form>`);
+  const calc=()=>{
+    const days=Math.max(0,+(e.querySelector('#ad')?.value||0));
+    const limit=isVault?Math.max(0,+(e.querySelector('#agb')?.value||0)):(noLimit?1:Math.max(0,+(e.querySelector('#al')?.value||0)));
+    const total=days*limit*Number(x.unit_price);
+    const at=e.querySelector('#at');
+    if(at)at.textContent=total.toLocaleString('en-BD')+' BDT';
+  };
+  e.querySelectorAll('input').forEach(inp=>{
+    inp.oninput=calc;
+    inp.onchange=calc;
+    inp.onkeyup=calc;
+  });
+  calc();
+  e.querySelector('form').onsubmit=v=>{
+    v.preventDefault();
+    const days=Math.max(0,+(e.querySelector('#ad')?.value||0));
+    const limit=isVault?Math.max(0,+(e.querySelector('#agb')?.value||0)):(noLimit?1:Math.max(0,+(e.querySelector('#al')?.value||0)));
+    if(days<x.min_days||days>x.max_days)return toast('Validity days must be between '+x.min_days+' and '+x.max_days+'.');
+    if(!noLimit){
+      const label=isVault?'Storage':'Daily limit';
+      const unit=isVault?' GB':'';
+      if(limit<x.min_daily_limit||limit>x.max_daily_limit)return toast(label+' must be between '+x.min_daily_limit+' and '+x.max_daily_limit+unit+'.');
+    }
+    addonCart=addonCart.filter(i=>i.addon_key!==x.addon_key);
+    addonCart.push({addon_key:x.addon_key,title:x.title,validity_days:days,daily_limit:limit,unit_price:Number(x.unit_price)});
+    addonCoupon=null;
+    e.remove();
+    refresh();
+  };
 }
 
 
@@ -2037,9 +5454,9 @@ function addonSetup(x){
     <label>Status<select name="enabled"><option value="true" ${x.enabled?'selected':''}>Active</option><option value="false" ${!x.enabled?'selected':''}>Inactive</option></select></label>
     <label>Details<textarea name="details" rows="2">${esc(x.details)}</textarea></label>
     <div class="ob-grid2">
-      <label>Unit price${isVault?' (per month)':''}<input name="unit_price" type="number" step=".01" value="${x.unit_price}"></label>
-      <label>Minimum ${isVault?'months':'days'}<input name="min_days" type="number" value="${x.min_days}"></label>
-      <label>Maximum ${isVault?'months':'days'}<input name="max_days" type="number" value="${x.max_days}"></label>
+      <label>Unit price${isVault?' (per GB / day)':''}<input name="unit_price" type="number" step=".01" value="${x.unit_price}"></label>
+      <label>Minimum days<input name="min_days" type="number" value="${x.min_days}"></label>
+      <label>Maximum days<input name="max_days" type="number" value="${x.max_days}"></label>
       ${noLimit?'':`<label>Minimum ${isVault?'GB':'daily limit'}<input name="min_daily_limit" type="number" value="${x.min_daily_limit}"></label><label>Maximum ${isVault?'GB':'daily limit'}<input name="max_daily_limit" type="number" value="${x.max_daily_limit}"></label>`}
     </div>
     <button class="ob-btn ob-btn-primary">Save setup</button>

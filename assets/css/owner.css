@@ -410,9 +410,9 @@ body.ob-on .ob ::selection,body.ob-on .ob-modalbox ::selection{background:rgba(1
   .ob{grid-template-columns:1fr}
   /* Left-to-right half-screen navigation drawer */
   .ob .appBurger{display:inline-flex!important}
-  .ob-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:50vw;min-width:280px;max-width:360px;z-index:100;
+  .ob-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:min(320px,84vw);min-width:260px;max-width:360px;z-index:100;
     transform:translateX(-104%);transition:transform .32s cubic-bezier(.32,.72,0,1);
-    border-right:1px solid var(--ob-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));will-change:transform}
+    border-right:1px solid var(--ob-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom));will-change:transform}
   body.drawer-open .ob-side{transform:translateX(0);box-shadow:0 24px 60px rgba(0,0,0,.38)}
   .ob-nav{flex-direction:column}
   .ob-navgroup>p{display:block}
@@ -425,8 +425,9 @@ body.ob-on .ob ::selection,body.ob-on .ob-modalbox ::selection{background:rgba(1
   .ob-user{padding:3px}
   .ob-page{padding:16px 14px 28px}
   .ob-chat{grid-template-columns:1fr;min-height:0}
-  .ob-chat-list{border-right:0;border-bottom:1px solid var(--ob-line);max-height:42vh}
+  .ob-chat-list{border-right:0;border-bottom:1px solid var(--ob-line);max-height:220px}
   .ob-msg{max-width:86%}
+  .ob-tw{-webkit-overflow-scrolling:touch;width:100%}
 }
 @media(max-width:640px){
   .ob-kpis{grid-template-columns:1fr}
@@ -438,6 +439,12 @@ body.ob-on .ob ::selection,body.ob-on .ob-modalbox ::selection{background:rgba(1
   .ob-couponadd{grid-template-columns:1fr 56px}
   .ob-couponadd .ob-btn{grid-column:1/-1}
   .ob-toppage span{display:none}
+  .ob-page{padding:12px 10px 84px}
+  .ob-card,.ob-panel{padding:12px 14px;border-radius:16px}
+  .ob-modal{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))!important;align-items:flex-end}
+  .ob-modalbox{width:100%!important;max-height:93vh!important;border-radius:18px 18px 14px 14px!important}
+  .ob-modalhead{padding:12px 14px!important}
+  .ob-modalbody{padding:12px 14px!important;gap:10px!important}
 }
 
 /* ── Skeleton tokens (shared skeleton system lives in app.css) ── */

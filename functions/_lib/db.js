@@ -52,11 +52,11 @@ const NON_UUID_PK = new Set([...SERIAL_TABLES, ...BOOL_PK_TABLES, 'platform_sett
 /* timestamp-column presence (mirrors the SQLite schema) */
 const HAS_UPDATED = new Set(['administrators', 'stores', 'staff', 'suppliers', 'customers', 'inventory_items', 'invoices', 'expenses',
   'ems_owners', 'license_plans', 'blog_posts', 'zudo_conversations', 'staff_salary_invoices', 'addon_checkout_settings', 'addon_settings',
-  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements']);
+  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements', 'returns', 'exchanges']);
 const NO_CREATED = new Set(['current_entitlements', 'zudo_settings', 'business_health_settings', 'connectx_settings',
   'addon_checkout_settings', 'platform_settings', 'public_pages', 'addon_settings',
   'device_logins', 'truebill_scans', 'invoice_lines']);
-const UUID_DEFAULTS = { invoices: ['verification_token'], connectx_messages: ['idempotency_key'] };
+const UUID_DEFAULTS = { invoices: ['verification_token'], connectx_messages: ['idempotency_key'], returns: ['verification_token'], exchanges: ['verification_token'] };
 
 /* parent embeds: resource joined through a local FK column */
 const EMBEDS = {
@@ -73,6 +73,39 @@ const EMBEDS = {
   },
   invoice_lines: {
     invoices: { table: 'invoices', fk: 'invoice_id' },
+    inventory_items: { table: 'inventory_items', fk: 'item_id' },
+  },
+  returns: {
+    stores: { table: 'stores', fk: 'store_id' },
+    invoices: { table: 'invoices', fk: 'invoice_id' },
+    customers: { table: 'customers', fk: 'customer_id' },
+    return_items: { table: 'return_items', fk: 'return_id', many: true,
+      nested: { inventory_items: { table: 'inventory_items', fk: 'item_id' } } },
+    inventory_stock_movements: { table: 'inventory_stock_movements', fk: 'return_id', many: true,
+      nested: { inventory_items: { table: 'inventory_items', fk: 'item_id' } } },
+  },
+  return_items: {
+    returns: { table: 'returns', fk: 'return_id' },
+    inventory_items: { table: 'inventory_items', fk: 'item_id' },
+    invoice_lines: { table: 'invoice_lines', fk: 'invoice_line_id' },
+  },
+  exchanges: {
+    stores: { table: 'stores', fk: 'store_id' },
+    invoices: { table: 'invoices', fk: 'invoice_id' },
+    customers: { table: 'customers', fk: 'customer_id' },
+    exchange_items: { table: 'exchange_items', fk: 'exchange_id', many: true,
+      nested: { inventory_items: { table: 'inventory_items', fk: 'item_id' } } },
+    inventory_stock_movements: { table: 'inventory_stock_movements', fk: 'exchange_id', many: true,
+      nested: { inventory_items: { table: 'inventory_items', fk: 'item_id' } } },
+  },
+  exchange_items: {
+    exchanges: { table: 'exchanges', fk: 'exchange_id' },
+    inventory_items: { table: 'inventory_items', fk: 'item_id' },
+    invoice_lines: { table: 'invoice_lines', fk: 'invoice_line_id' },
+  },
+  inventory_stock_movements: {
+    returns: { table: 'returns', fk: 'return_id' },
+    exchanges: { table: 'exchanges', fk: 'exchange_id' },
     inventory_items: { table: 'inventory_items', fk: 'item_id' },
   },
 };
@@ -148,7 +181,7 @@ function operand(table, col, token, params) {
   }
   const ops = { eq: '=', neq: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=', like: 'LIKE', ilike: 'LIKE' };
   let sqlOp = ops[op] || '=';
-  if (op === 'ilike') raw = raw; // SQLite LIKE is case-insensitive for ASCII; good enough for codes
+  if (op === 'like' || op === 'ilike') raw = raw.replaceAll('*', '%');
   params.push(scalar(table, col, raw, isBoolCol));
   return ' ' + sqlOp + ' ?';
 }
@@ -156,6 +189,7 @@ function scalar(table, col, raw, isBoolCol) {
   if (isBoolCol && (raw === 'true' || raw === 'false')) return raw === 'true' ? 1 : 0;
   if (raw === 'true') return 1; // settings id booleans
   if (raw === 'false') return 0;
+  if (/(?:_code|_number|_id|_token|phone|phone2|user_id|shop_code)$/.test(col)) return String(raw);
   if (/^-?\d+(\.\d+)?$/.test(raw)) return Number(raw);
   return raw;
 }
@@ -401,6 +435,10 @@ async function d1Rpc(env, name, bodyRaw) {
   if (name === 'delete_posted_invoice') {
     const [inv] = await d1All(env, `SELECT * FROM invoices WHERE id=? AND store_id=?`, [b.p_invoice_id, b.p_store_id]);
     if (!inv) throw Error('Invoice not found');
+    const [ret] = await d1All(env, `SELECT id FROM returns WHERE invoice_id=? LIMIT 1`, [inv.id]);
+    if (ret) throw Error('Cannot delete invoice: it has associated sales returns.');
+    const [exc] = await d1All(env, `SELECT id FROM exchanges WHERE invoice_id=? LIMIT 1`, [inv.id]);
+    if (exc) throw Error('Cannot delete invoice: it has associated sales exchanges.');
     const lines = await d1All(env, `SELECT * FROM invoice_lines WHERE invoice_id=?`, [inv.id]);
     const stmts = [];
     for (const ln of lines) {
@@ -436,7 +474,7 @@ async function d1Rpc(env, name, bodyRaw) {
 
   if (name === 'factory_reset_ems') {
     const children = ['invoice_lines', 'staff_salary_invoices', 'attendance', 'device_logins', 'activity_logs', 'error_logs',
-      'due_recoveries', 'business_health_reports', 'zudo_messages', 'zudo_conversations', 'connectx_messages', 'helpdesk_messages',
+      'due_recoveries', 'business_health_reports', 'zudo_messages', 'zudo_conversations', 'connectx_messages', 'connectx_sms_messages', 'helpdesk_messages',
       'truebill_scans', 'vaultium_files', 'invoices', 'inventory_items', 'expenses', 'staff', 'suppliers', 'customers', 'stores',
       'addon_purchases', 'addon_coupons', 'addon_settings', 'addon_checkout_settings', 'blog_posts', 'contact_messages', 'public_pages',
       'current_entitlements', 'licenses', 'license_plans', 'platform_activity_logs', 'platform_settings',

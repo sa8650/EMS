@@ -74,6 +74,7 @@ create table if not exists public.stores (
   email                text,
   website              text,
   shop_code            char(4) not null unique,
+  category             text not null default 'General Store',
   status               public.store_status not null default 'inactive',
   low_stock_threshold  numeric(14,3) not null default 5 check(low_stock_threshold >= 0),
   created_at           timestamptz not null default now(),
@@ -584,6 +585,111 @@ create table if not exists public.vaultium_files (
   created_at     timestamptz not null default now()
 );
 
+-- ---------------------------------------------------- RETURNS & REFUNDS
+create table if not exists public.returns (
+  id                  uuid primary key default gen_random_uuid(),
+  store_id            uuid not null references public.stores(id) on delete cascade,
+  invoice_id          uuid not null references public.invoices(id) on delete restrict,
+  return_number       text not null,
+  customer_id         uuid references public.customers(id) on delete set null,
+  customer_name       text,
+  return_date         date not null default current_date,
+  subtotal            numeric(14,2) not null default 0,
+  tax_amount          numeric(14,2) not null default 0,
+  discount_amount     numeric(14,2) not null default 0,
+  penalty_amount      numeric(14,2) not null default 0,
+  total_return_amount numeric(14,2) not null default 0,
+  refunded_amount     numeric(14,2) not null default 0,
+  refund_method       text default 'cash',
+  transaction_id      text,
+  status              text not null default 'refunded' check(status in ('pending_refund','partially_refunded','refunded')),
+  notes               text,
+  created_by          uuid,
+  verification_token  uuid not null default gen_random_uuid(),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique(store_id, return_number)
+);
+
+create table if not exists public.return_items (
+  id                  uuid primary key default gen_random_uuid(),
+  return_id           uuid not null references public.returns(id) on delete cascade,
+  invoice_line_id     uuid references public.invoice_lines(id) on delete set null,
+  item_id             uuid not null references public.inventory_items(id) on delete restrict,
+  quantity            numeric(14,3) not null check(quantity > 0),
+  unit_price          numeric(14,2) not null check(unit_price >= 0),
+  tax_percent         numeric(7,3)  not null default 0,
+  tax_amount          numeric(14,2) not null default 0,
+  discount            numeric(14,2) not null default 0,
+  penalty             numeric(14,2) not null default 0,
+  return_amount       numeric(14,2) not null check(return_amount >= 0),
+  reason              text not null check(reason in ('Customer Changed Mind','Defective','Wrong Product','Damaged','Wrong Specification','Other')),
+  reason_note         text,
+  condition           text not null check(condition in ('Sellable','Damaged','Defective','Warranty')),
+  imei_serial         text,
+  created_at          timestamptz not null default now()
+);
+
+create table if not exists public.exchanges (
+  id                  uuid primary key default gen_random_uuid(),
+  store_id            uuid not null references public.stores(id) on delete cascade,
+  invoice_id          uuid not null references public.invoices(id) on delete restrict,
+  exchange_number     text not null,
+  customer_id         uuid references public.customers(id) on delete set null,
+  customer_name       text,
+  exchange_date       date not null default current_date,
+  returned_total      numeric(14,2) not null default 0,
+  new_items_subtotal  numeric(14,2) not null default 0,
+  new_items_tax       numeric(14,2) not null default 0,
+  new_items_discount  numeric(14,2) not null default 0,
+  new_items_total     numeric(14,2) not null default 0,
+  difference_amount   numeric(14,2) not null default 0,
+  action_type         text not null default 'even' check(action_type in ('payment','refund','even')),
+  payment_method      text check(payment_method in ('cash','bank','bkash','nagad','other','none')) default 'none',
+  transaction_id      text,
+  status              text not null default 'completed' check(status in ('completed','cancelled')),
+  notes               text,
+  created_by          uuid,
+  verification_token  uuid not null default gen_random_uuid(),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique(store_id, exchange_number)
+);
+
+create table if not exists public.exchange_items (
+  id                  uuid primary key default gen_random_uuid(),
+  exchange_id         uuid not null references public.exchanges(id) on delete cascade,
+  item_type           text not null check(item_type in ('returned','new')),
+  invoice_line_id     uuid references public.invoice_lines(id) on delete set null,
+  item_id             uuid not null references public.inventory_items(id) on delete restrict,
+  quantity            numeric(14,3) not null check(quantity > 0),
+  unit_price          numeric(14,2) not null check(unit_price >= 0),
+  tax_percent         numeric(7,3)  not null default 0,
+  tax_amount          numeric(14,2) not null default 0,
+  discount            numeric(14,2) not null default 0,
+  total_amount        numeric(14,2) not null check(total_amount >= 0),
+  reason              text,
+  reason_note         text,
+  condition           text,
+  created_at          timestamptz not null default now()
+);
+
+create table if not exists public.inventory_stock_movements (
+  id                  uuid primary key default gen_random_uuid(),
+  store_id            uuid not null references public.stores(id) on delete cascade,
+  item_id             uuid not null references public.inventory_items(id) on delete restrict,
+  return_id           uuid references public.returns(id) on delete cascade,
+  exchange_id         uuid references public.exchanges(id) on delete cascade,
+  movement_type       text not null,
+  quantity            numeric(14,3) not null,
+  stock_before        numeric(14,3),
+  stock_after         numeric(14,3),
+  condition           text not null,
+  notes               text,
+  created_by          uuid,
+  created_at          timestamptz not null default now()
+);
+
 -- -------------------------------------------------- HUMAN-READABLE CODE SEQS
 create sequence if not exists public.supplier_code_seq start 1;
 create sequence if not exists public.customer_code_seq start 1;
@@ -609,8 +715,31 @@ create index if not exists idx_licenses_admin_status              on public.lice
 create index if not exists idx_licenses_admin_entitlements        on public.licenses(admin_id, status, connectx_enabled, starts_at, expires_at);
 create index if not exists idx_due_recoveries_store_source        on public.due_recoveries(store_id, source_type, source_id, created_at desc);
 create unique index if not exists invoices_verification_token_uq  on public.invoices(verification_token);
+create unique index if not exists returns_verification_token_uq   on public.returns(verification_token);
+create unique index if not exists exchanges_verification_token_uq on public.exchanges(verification_token);
 create index if not exists idx_connectx_store_created             on public.connectx_messages(store_id, created_at desc);
 create index if not exists idx_connectx_store_visible             on public.connectx_messages(store_id, shop_deleted_at, created_at desc);
+
+create table if not exists public.connectx_sms_messages (
+  id              uuid primary key default gen_random_uuid(),
+  store_id        uuid not null references public.stores(id) on delete cascade,
+  user_id         uuid,
+  recipient_type  text not null check(recipient_type in ('customer','supplier','staff','manual')),
+  recipient_id    uuid,
+  recipient_name  text,
+  to_phone        text not null,
+  message_type    text not null,
+  invoice_id      uuid,
+  message_body    text not null,
+  status          text not null default 'queued' check(status in ('queued','sending','sent','failed')),
+  device_id       text,
+  attempts        integer not null default 0,
+  error_message   text,
+  created_at      timestamptz not null default now(),
+  sent_at         timestamptz
+);
+create index if not exists idx_cx_sms_store_created on public.connectx_sms_messages(store_id, created_at desc);
+create index if not exists idx_cx_sms_store_status on public.connectx_sms_messages(store_id, status);
 create index if not exists idx_zudo_convs_user                    on public.zudo_conversations(store_id, user_id, updated_at desc);
 create index if not exists idx_zudo_convs_visible                 on public.zudo_conversations(store_id, user_id, shop_deleted_at, updated_at desc);
 create index if not exists idx_zudo_msgs_conversation             on public.zudo_messages(conversation_id, created_at);
@@ -864,7 +993,8 @@ begin
     'connectx_settings','connectx_messages','zudo_settings','zudo_conversations','zudo_messages',
     'business_health_settings','business_health_reports',
     'public_pages','blog_posts','contact_messages','truebill_scans',
-    'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files']
+    'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files',
+    'returns','return_items','inventory_stock_movements','exchanges','exchange_items']
   loop
     execute format('revoke all on table public.%I from anon, authenticated', t);
     execute format('alter table public.%I enable row level security', t);

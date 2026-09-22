@@ -310,12 +310,64 @@ body.adm-on .adm-form-actions{display:flex;gap:8px;justify-content:flex-end;flex
 .adm-couponrow input{flex:1;min-width:0}
 
 /* ---------------------------------------------------------------------
-   11 · HelpDesk chat
+   11 · HelpDesk chat (1-page fixed layout)
 --------------------------------------------------------------------- */
-.adm-chat{flex:1;display:flex;flex-direction:column;border-radius:20px;border:1px solid var(--adm-line);background:var(--adm-inset);overflow:hidden;box-shadow:var(--adm-ring);min-height:min(620px,calc(100dvh - 250px))}
+body.adm-on.adm-fixed-page,
+body.adm-on:has(.adm-chat){
+  height:100dvh;
+  max-height:100dvh;
+  overflow:hidden;
+}
+body.adm-on.adm-fixed-page .adm,
+body.adm-on:has(.adm-chat) .adm{
+  height:100dvh;
+  max-height:100dvh;
+  overflow:hidden;
+}
+body.adm-on.adm-fixed-page .adm-main,
+body.adm-on:has(.adm-chat) .adm-main{
+  height:100dvh;
+  max-height:100dvh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+body.adm-on.adm-fixed-page .adm-top,
+body.adm-on:has(.adm-chat) .adm-top{
+  flex:0 0 auto;
+}
+body.adm-on.adm-fixed-page .adm-page,
+body.adm-on:has(.adm-chat) .adm-page{
+  flex:1 1 0%;
+  min-height:0;
+  height:calc(100dvh - 56px);
+  max-height:calc(100dvh - 56px);
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+  padding:16px 22px 18px;
+  gap:10px;
+}
+body.adm-on.adm-fixed-page .adm-head,
+body.adm-on:has(.adm-chat) .adm-head{
+  flex:0 0 auto;
+  margin-bottom:0;
+}
+.adm-chat{
+  flex:1 1 0%;
+  min-height:0;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  border-radius:20px;
+  border:1px solid var(--adm-line);
+  background:var(--adm-inset);
+  overflow:hidden;
+  box-shadow:var(--adm-ring);
+}
 .adm-chat-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--adm-line);background:var(--adm-card)}
 .adm-chat-head h3{font-size:13px!important;font-weight:650!important}
-.adm-msgs{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:10px;padding:18px}
+.adm-msgs{flex:1 1 0%;min-height:0;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:10px;padding:18px;-webkit-overflow-scrolling:touch}
 .adm-msg{display:flex;flex-direction:column;gap:4px;max-width:72%}
 .adm-msgtime{font-family:var(--adm-mono);font-size:8.5px;font-weight:600;letter-spacing:.06em;color:var(--adm-muted2)}
 .adm-msgbody{font-size:12.5px;line-height:1.55;padding:9px 12px;border-radius:13px;background:var(--adm-inset2);border:1px solid var(--adm-line);color:var(--adm-text);word-break:break-word;white-space:pre-wrap}
@@ -327,7 +379,7 @@ body.adm-on .adm-form-actions{display:flex;gap:8px;justify-content:flex-end;flex
 .adm-chatempty b{font-size:13px;font-weight:650;color:var(--adm-text)}
 .adm-chatempty p{font-size:11.5px;color:var(--adm-muted);line-height:1.55}
 .adm-composer{flex:0 0 auto;display:flex;gap:10px;align-items:flex-end;padding:12px 14px;border-top:1px solid var(--adm-line);background:var(--adm-card)}
-.adm-composer textarea{flex:1;min-width:0;resize:none;min-height:44px}
+.adm-composer textarea{flex:1;min-width:0;resize:none;min-height:44px;max-height:100px}
 .adm-composer .adm-btn{flex:0 0 auto;align-self:flex-end}
 
 /* ---------------------------------------------------------------------
@@ -365,9 +417,9 @@ body.adm-on .adm ::selection,body.adm-on .adm-modalbox ::selection{background:rg
   .adm{grid-template-columns:1fr}
   /* Left-to-right half-screen navigation drawer */
   .adm .appBurger{display:inline-flex!important}
-  .adm-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:50vw;min-width:280px;max-width:360px;z-index:100;
+  .adm-side{position:fixed;left:0;top:0;bottom:0;height:100dvh;width:min(320px,84vw);min-width:260px;max-width:360px;z-index:100;
     transform:translateX(-104%);transition:transform .32s cubic-bezier(.32,.72,0,1);
-    border-right:1px solid var(--adm-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));will-change:transform}
+    border-right:1px solid var(--adm-line);box-shadow:0 0 0 transparent;padding-top:max(16px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom));will-change:transform}
   body.drawer-open .adm-side{transform:translateX(0);box-shadow:0 24px 60px rgba(0,0,0,.38)}
   .adm-brand{padding:0 2px 8px}
   .adm-nav{flex-direction:column;overflow-y:auto;overflow-x:hidden}
@@ -381,8 +433,11 @@ body.adm-on .adm ::selection,body.adm-on .adm-modalbox ::selection{background:rg
   .adm-user b{display:none}
   .adm-user{padding:3px}
   .adm-page{padding:16px 14px 28px}
+  body.adm-on.adm-fixed-page .adm-page,
+  body.adm-on:has(.adm-chat) .adm-page{height:calc(100dvh - 52px)!important;max-height:calc(100dvh - 52px)!important;padding:12px 14px 14px!important}
   .adm-chat{min-height:0}
   .adm-msg{max-width:86%}
+  .adm-tw{-webkit-overflow-scrolling:touch;width:100%}
 }
 @media(max-width:640px){
   .adm-kpis{grid-template-columns:1fr}
@@ -394,6 +449,14 @@ body.adm-on .adm ::selection,body.adm-on .adm-modalbox ::selection{background:rg
   .adm-head-actions .adm-btn{flex:1}
   .adm-search{max-width:100%}
   .adm-toppage span{display:none}
+  .adm-page{padding:12px 10px 84px}
+  body.adm-on.adm-fixed-page .adm-page,
+  body.adm-on:has(.adm-chat) .adm-page{height:calc(100dvh - 52px)!important;max-height:calc(100dvh - 52px)!important;padding:10px 10px 10px!important}
+  .adm-card,.adm-panel{padding:12px 14px;border-radius:16px}
+  .adm-modal{padding:max(8px,env(safe-area-inset-top)) max(8px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(8px,env(safe-area-inset-left))!important;align-items:flex-end}
+  .adm-modalbox{width:100%!important;max-height:93vh!important;border-radius:18px 18px 14px 14px!important}
+  .adm-modalhead{padding:12px 14px!important}
+  .adm-modalbody{padding:12px 14px!important;gap:10px!important}
 }
 
 /* ── Skeleton tokens (shared skeleton system lives in app.css) ── */
@@ -402,3 +465,19 @@ body.adm-on[data-adm-theme="dark"]{--sk-base:color-mix(in srgb,var(--adm-text) 1
 
 /* Hidden attribute must always win over inline-flex badges/chips */
 body.adm-on [hidden]{display:none!important}
+
+/* Create shop modal category step wizard */
+.adm-step-indicator{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.adm-step-badge{font-family:var(--adm-mono);font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;padding:4px 10px;border-radius:7px;background:var(--adm-inset2);color:var(--adm-muted);border:1px solid var(--adm-line)}
+.adm-step-badge.on{background:color-mix(in srgb,var(--adm-primary) 15%,transparent);color:var(--adm-primary);border-color:color-mix(in srgb,var(--adm-primary) 40%,transparent)}
+.adm-step-badge.done{background:color-mix(in srgb,#10b981 15%,transparent);color:#10b981;border-color:color-mix(in srgb,#10b981 40%,transparent)}
+.adm-step-line{flex:1;height:2px;background:var(--adm-line);border-radius:1px}
+.adm-step-line.on{background:var(--adm-primary)}
+.adm-cat-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-radius:12px;background:var(--adm-inset);border:1px solid var(--adm-line);margin-bottom:14px}
+.adm-cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin-top:10px;margin-bottom:14px}
+.adm-cat-card{padding:10px 12px;border-radius:10px;border:1px solid var(--adm-line);background:var(--adm-inset);cursor:pointer;transition:all .15s ease;display:flex;flex-direction:column;gap:3px;text-align:left}
+.adm-cat-card:hover{border-color:color-mix(in srgb,var(--adm-primary) 50%,transparent);background:color-mix(in srgb,var(--adm-primary) 5%,transparent)}
+.adm-cat-card.active{border-color:var(--adm-primary);background:color-mix(in srgb,var(--adm-primary) 12%,transparent);box-shadow:0 0 0 1px var(--adm-primary)}
+.adm-cat-card-title{font-size:12.5px;font-weight:600;color:var(--adm-text)}
+.adm-cat-card-sub{font-size:10px;color:var(--adm-muted)}
+
