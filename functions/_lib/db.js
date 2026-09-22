@@ -28,12 +28,15 @@ const BOOL_COLS = {
   blog_posts: ['published'],
   helpdesk_messages: ['read_by_admin', 'read_by_owner'],
   staff_salary_invoices: ['attendance_based', 'add_outstanding', 'cut_advance'],
+  connectx_devices: ['is_primary'],
+  connectx_shop_sms_settings: ['enabled', 'auto_sale', 'auto_payment', 'auto_due_reminder', 'auto_return', 'auto_exchange', 'auto_refund'],
 };
 const JSON_COLS = {
   staff: ['permissions'],
   activity_logs: ['metadata'], error_logs: ['context'],
   platform_settings: ['setting_value'], platform_activity_logs: ['metadata'],
   business_health_reports: ['snapshot'],
+  connectx_shop_sms_settings: ['templates'],
 };
 const ARRAY_COLS = {
   connectx_messages: ['to_emails', 'cc_emails', 'bcc_emails'],
@@ -52,7 +55,7 @@ const NON_UUID_PK = new Set([...SERIAL_TABLES, ...BOOL_PK_TABLES, 'platform_sett
 /* timestamp-column presence (mirrors the SQLite schema) */
 const HAS_UPDATED = new Set(['administrators', 'stores', 'staff', 'suppliers', 'customers', 'inventory_items', 'invoices', 'expenses',
   'ems_owners', 'license_plans', 'blog_posts', 'zudo_conversations', 'staff_salary_invoices', 'addon_checkout_settings', 'addon_settings',
-  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements', 'returns', 'exchanges']);
+  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements', 'returns', 'exchanges', 'connectx_devices', 'connectx_shop_sms_settings']);
 const NO_CREATED = new Set(['current_entitlements', 'zudo_settings', 'business_health_settings', 'connectx_settings',
   'addon_checkout_settings', 'platform_settings', 'public_pages', 'addon_settings',
   'device_logins', 'truebill_scans', 'invoice_lines']);

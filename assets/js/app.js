@@ -5022,15 +5022,73 @@ async function auditLogPage(){
   await renderAuditLogView($('#auditContainer'));
 }
 
+async function renderConnectXSmsSettings(el){
+  let d;
+  try{d=await api('shop/sms-settings')}catch(e){el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>ConnectX SMS</h3><p class="shp-desc">${esc(e.message)}</p></div></div></section>`;return}
+  let t=d.templates||{};
+  let devices=d.devices||[];
+  let today=d.today||{sent:0,failed:0,pending:0};
+  let chk=(k,label)=>`<label class="shp-toggle" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--shp-line)"><span>${label}</span><input type="checkbox" data-sms-flag="${k}" ${d[k]?'checked':''}></label>`;
+  el.innerHTML=`
+    <section class="shp-panel">
+      <div class="shp-panel-head"><div><h3>SMS Gateway · ConnectX</h3><p class="shp-desc">Customer SMS is sent from the administrator's Android phone SIM. Sales are never blocked if the gateway is offline — jobs stay pending until a device claims them.</p></div>${shpBadge(d.enabled?'SMS on':'SMS off',d.enabled?'emerald':'zinc')}</div>
+      <div class="shp-kv" style="margin-bottom:12px">
+        <div><span>Gateway</span><b>ConnectX Android</b></div>
+        <div><span>Sent today</span><b>${today.sent||0}</b></div>
+        <div><span>Pending</span><b>${today.pending||0}</b></div>
+        <div><span>Failed today</span><b>${today.failed||0}</b></div>
+      </div>
+      ${chk('enabled','Enable SMS for this shop')}
+      ${chk('auto_sale','Automatic SMS on sale')}
+      ${chk('auto_payment','Automatic SMS on payment / due recover')}
+      ${chk('auto_due_reminder','Due reminder SMS (manual or scheduled)')}
+      ${chk('auto_return','Automatic SMS on return')}
+      ${chk('auto_exchange','Automatic SMS on exchange')}
+      ${chk('auto_refund','Automatic SMS on refund')}
+      <p class="shp-desc" style="margin-top:10px">Placeholders: {shop} {name} {invoice} {total} {paid} {due} {amount}</p>
+      <div class="shp-grid2" style="margin-top:8px">
+        ${[['SALE','Sale'],['PAYMENT','Payment'],['DUE_REMINDER','Due reminder'],['RETURN','Return'],['EXCHANGE','Exchange'],['REFUND','Refund']].map(([k,l])=>`<label>${esc(l)} template<textarea data-sms-tpl="${k}" rows="3">${esc(t[k]||'')}</textarea></label>`).join('')}
+      </div>
+      <div class="shp-form-actions" style="margin-top:12px"><button type="button" class="shp-btn shp-btn-primary" id="smsSaveBtn">Save SMS settings</button><button type="button" class="shp-btn shp-btn-soft" id="smsHistoryBtn">Open SMS history</button></div>
+    </section>
+    <section class="shp-panel">
+      <div class="shp-panel-head"><div><h3>ConnectX devices</h3><p class="shp-desc">Primary and secondary Android gateways for this shop. Revoke a device to disconnect it immediately.</p></div>${shpBadge(devices.filter(x=>x.status!=='revoked').length+' linked','sky')}</div>
+      ${devices.length?`<div class="shp-tw"><table><thead><tr><th>Device</th><th>SIM</th><th>Role</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>${devices.map(dev=>`<tr>
+        <td><b>${esc(dev.device_name||'Android phone')}</b><br><small class="shp-desc"><code>${esc(dev.device_public_id||dev.id)}</code></small></td>
+        <td>${esc(dev.sim_carrier||'—')}<br><small>${esc(dev.phone_number||'')}</small></td>
+        <td>${dev.is_primary?shpBadge('Primary','emerald'):shpBadge('Secondary','zinc')}</td>
+        <td>${dev.status==='revoked'?shpBadge('Revoked','rose'):(dev.online?shpBadge('Online','emerald'):shpBadge(esc(dev.status||'offline'),'amber'))}</td>
+        <td>${dev.last_seen?ago(dev.last_seen):'—'}</td>
+        <td style="text-align:right">${dev.status==='revoked'?'':`<button class="shp-btn shp-btn-soft shp-btn-sm" data-cx-primary="${dev.id}" ${dev.is_primary?'disabled':''}>Make primary</button> <button class="shp-btn shp-btn-sm shp-danger" data-cx-revoke="${dev.id}">Revoke</button>`}</td>
+      </tr>`).join('')}</tbody></table></div>`:shpEmpty('No ConnectX Android device is linked. Sign in to the ConnectX app with this administrator email to connect a phone.')}
+    </section>`;
+  el.querySelector('#smsSaveBtn').onclick=async()=>{
+    let patch={templates:{}};
+    el.querySelectorAll('[data-sms-flag]').forEach(i=>patch[i.dataset.smsFlag]=i.checked);
+    el.querySelectorAll('[data-sms-tpl]').forEach(i=>patch.templates[i.dataset.smsTpl]=i.value);
+    try{await api('shop/sms-settings',{method:'PATCH',body:JSON.stringify(patch)});toast('SMS settings saved.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
+  };
+  el.querySelector('#smsHistoryBtn').onclick=()=>page('connectx');
+  el.querySelectorAll('[data-cx-revoke]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Revoke this ConnectX device? It will stop sending SMS until the administrator signs in again.'))return;
+    try{await api('connectx/devices/'+b.dataset.cxRevoke+'/revoke',{method:'POST',body:'{}'});toast('Device revoked.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
+  });
+  el.querySelectorAll('[data-cx-primary]').forEach(b=>b.onclick=async()=>{
+    try{await api('connectx/devices/'+b.dataset.cxPrimary+'/primary',{method:'POST',body:'{}'});toast('Primary device updated.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
+  });
+}
+
 async function settings(initialTab='store'){
   let tab=initialTab;
-  $('#page').innerHTML=shpHead('Preferences','Settings','Store identity, low-stock alert and the shop audit log.')+`<div class="shp-chips"><button class="shp-chip ${tab==='store'?'on':''}" data-setting-tab="store">Store Details</button><button class="shp-chip ${tab==='activity'?'on':''}" data-setting-tab="activity">Audit Log</button></div><div id="settingContent" class="shp-pagegap"></div>`;
+  $('#page').innerHTML=shpHead('Preferences','Settings','Store identity, ConnectX SMS gateway, and the shop audit log.')+`<div class="shp-chips"><button class="shp-chip ${tab==='store'?'on':''}" data-setting-tab="store">Store Details</button><button class="shp-chip ${tab==='sms'?'on':''}" data-setting-tab="sms">Communication</button><button class="shp-chip ${tab==='activity'?'on':''}" data-setting-tab="activity">Audit Log</button></div><div id="settingContent" class="shp-pagegap"></div>`;
   async function render(){
     let el=$('#settingContent');
     el.innerHTML=`<section class="shp-panel">${SKEL.head()}${tab==='store'?SKEL.kv(9):SKEL.toolbar()+SKEL.table(4,6)}</section>`;
     if(tab==='store'){
       let x=await api('shop/settings');
       el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>Store details</h3><p class="shp-desc">Managed by your administrator. Contact them to change store identity.</p></div>${shpBadge(x.status==='active'?'Active':'Inactive',x.status==='active'?'emerald':'zinc')}</div><div class="shp-kv"><div><span>Store name</span><b>${esc(x.name)}</b></div><div><span>Shop ID</span><b><code>${esc(x.shop_code)}</code></b></div><div><span>Shop category</span><b><span class="shp-tag shp-t-sky">${esc(x.category||'General Store')}</span></b></div><div><span>Address</span><b>${esc(x.address||'—')}</b></div><div><span>Phone</span><b>${esc(x.phone||'—')}${x.phone2?' / '+esc(x.phone2):''}</b></div><div><span>Email</span><b>${esc(x.email||'—')}</b></div><div><span>Website</span><b>${esc(x.website||'—')}</b></div><div><span>Low stock alert</span><b>${esc(x.low_stock_threshold)}</b></div><div><span>Status</span><b>${esc(x.status)}</b></div></div></section>`;
+    }else if(tab==='sms'){
+      await renderConnectXSmsSettings(el);
     }else{
       el.innerHTML=`<section class="shp-panel" id="auditPanel"><div class="shp-panel-head"><div><h3>Shop Audit Trail</h3><p class="shp-desc">Complete chronological audit trail across every module and page (Who, What, Where, When).</p></div></div><div id="auditContainer"></div></section>`;
       await renderAuditLogView($('#auditContainer'));
