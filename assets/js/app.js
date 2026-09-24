@@ -201,7 +201,13 @@ tag:'<path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .
 menu:'<line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/>',
 bell:'<path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/>',
 x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
-'rotate-ccw':'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'
+'rotate-ccw':'<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>',
+copy:'<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+smartphone:'<rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/>',
+'external-link':'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+'message-square':'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+'help-circle':'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+check:'<polyline points="20 6 9 17 4 12"/>'
 };
 const lucide=n=>`<svg class="lucide" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUCIDE[n]||LUCIDE.circle}</svg>`;
 const menus=[['Dashboard','dashboard','dashboard'],['Suppliers','supplier','truck'],['Customers','customer','users'],['Inventory','inventory','package'],['Purchases','purchase','cart'],['Sales','sales','receipt'],['Expense','expense','wallet'],['Due Recover','due_recover','coins'],['Return & Exchange','returns_refunds','rotate-ccw','returns-refunds'],['Staff Manager','staff','user-check'],['Report','report','chart'],['Settings','settings','settings'],['Audit Log','settings','activity','audit-log'],['ConnectX','connectx','mail'],['Zudo','zudo','sparkles'],['Vaultium','vaultium','file']];const canAccess=(section,action='view')=>{if(state?.role==='admin'||state?.adminAccess)return true;if(state?.readOnly&&action!=='view'&&!((section==='connectx'&&action==='add')||(section==='zudo'&&action==='add')))return false;if(section==='dashboard'&&action==='view')return true;let p=state?.permissions||{};if(section==='returns_refunds'&&!p.returns_refunds&&p.sales)return p.sales.includes(action);return (p[section]||[]).includes(action)};function home(){if(state?.role==='staff'&&permissionSyncedFor!==state.token){Promise.all([api('me'),api('connectx/availability').catch(()=>({enabled:false})),api('zudo/availability').catch(()=>({enabled:false})),api('business-health/availability').catch(()=>({enabled:false,ever:false})),api('vaultium/availability').catch(()=>({enabled:false,ever:false}))]).then(([m,cx,zudo,bh,vault])=>{state.permissions=m.permissions||{};state.readOnly=!!m.readOnly;state.licenseExpired=!!m.licenseExpired;state.connectxEnabled=!!cx.enabled;state.connectxHistory=!!cx.history;state.zudoEnabled=!!zudo.enabled;state.zudoHistory=!!zudo.history;state.businessHealthEnabled=!!bh.enabled;state.businessHealthEver=!!bh.ever;state.vaultiumEnabled=!!vault.enabled;state.vaultiumEver=!!vault.ever;permissionSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state?.role==='admin'&&entitlementSyncedFor!==state.token){api('admin/entitlement').then(x=>{state.licenseExpired=!!x.hasActivatedLicense&&!x.active;state.entitlement=x;entitlementSyncedFor=state.token;save(state);home()}).catch(e=>{toast(e.message);logout()});return}if(state.role==='owner')return ownerHome();if(state.role==='admin')return adminHome();return shopHome()}
@@ -252,7 +258,7 @@ function readOnlyNotice(){if(document.querySelector('.licenseExpiryModal')||docu
    All styling lives in assets/css/owner.css (scoped to body.ob-on).
    ================================================================ */
 const OB_NAV=[
-  {h:'Platform',items:[['overview','Overview','grid']]},
+  {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
   {h:'Services',items:[['connectx','ConnectX','mail'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
@@ -273,7 +279,8 @@ const obKpi=(icon,tone,label,value,foot)=>`<section class="ob-card ob-kpi"><div 
 
 /* ═══════════════ EMS ADMIN CONSOLE (Agent Bento Grid) ═══════════════ */
 const ADM_NAV=[
-  {h:'Business',items:[['stores','Store manage','store'],['licenses','Licenses','key'],['addons','Premium Add-Ons','gem']]},
+  {h:'Apps & Store',items:[['app-store','App Store','download']]},
+  {h:'Business',items:[['stores','Store manage','store'],['connectx','ConnectX','mail'],['licenses','Licenses','key'],['addons','Premium Add-Ons','gem']]},
   {h:'Account',items:[['profile','My profile','user'],['devices','Devices','devices'],['helpdesk','HelpDesk','help']]}
 ];
 const ADM_LABEL=Object.fromEntries(ADM_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -330,6 +337,7 @@ const SHP_SKEL={
 };
 const ADM_SKEL={
   _:()=>SKEL.panel(SKEL.table()),
+  'app-store':()=>SKEL.cards(3)+SKEL.panel(SKEL.table(3,5)),
   stores:()=>SKEL.kpis(4)+SKEL.cards(3)+SKEL.panel(SKEL.table(3,5)),
   licenses:()=>SKEL.kpis(4)+SKEL.cards(3)+SKEL.panel(SKEL.table(3,6)),
   addons:()=>SKEL.cards(3)+SKEL.panel(SKEL.table(4,5)),
@@ -340,6 +348,7 @@ const ADM_SKEL={
 const OB_SKEL={
   _:()=>SKEL.panel(SKEL.table()),
   overview:()=>SKEL.kpis(4)+`<div class="sk-grid2">${SKEL.panel(SKEL.table(4,4))}${SKEL.panel(SKEL.kv(5))}</div>`+SKEL.panel(SKEL.table(3,6)),
+  'app-store':()=>SKEL.kpis(4)+SKEL.cards(3)+SKEL.panel(SKEL.table(3,5)),
   licenses:()=>SKEL.toolbar()+SKEL.table(6,7),plans:()=>SKEL.cards(3)+SKEL.panel(SKEL.table(3,5)),
   administrators:()=>SKEL.kpis(4)+SKEL.table(6,6),shops:()=>SKEL.toolbar()+SKEL.table(6,7),
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
@@ -358,16 +367,21 @@ function adminHome(){document.body.classList.remove('shp-on');
   document.body.classList.add('adm-on');
   if(!document.body.dataset.admTheme)document.body.dataset.admTheme=localStorage.getItem('ems.admTheme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
   const dark=document.body.dataset.admTheme==='dark';
+  const hasCx=!!state?.entitlement?.connectx_enabled;
+  const filteredNav=ADM_NAV.map(g=>({
+    ...g,
+    items:g.items.filter(([p])=>p!=='connectx'||hasCx)
+  })).filter(g=>g.items.length>0);
   app.innerHTML=`<div class="adm">
     <aside class="adm-side">
       <div class="adm-brand"><span class="adm-mark adm-t-sky">${lucide('grid')}</span><div class="adm-brandtext"><b data-brand-name>${sk('62px',12)}</b><small>powered by <span data-powered-by>${sk('42px',8)}</span></small></div></div>
-      <nav class="adm-nav">${ADM_NAV.map(g=>`<div class="adm-navgroup"><p>${esc(g.h)}</p>${g.items.map(([p,l,i])=>`<button data-admin-page="${p}" title="${esc(l)}"><span class="adm-navicon">${lucide(i)}</span><span class="adm-navlabel">${esc(l)}</span>${p==='helpdesk'?`<span class="adm-navbadge" id="ahbBadge" hidden></span>`:''}</button>`).join('')}</div>`).join('')}</nav>
+      <nav class="adm-nav">${filteredNav.map(g=>`<div class="adm-navgroup"><p>${esc(g.h)}</p>${g.items.map(([p,l,i])=>`<button data-admin-page="${p}" title="${esc(l)}"><span class="adm-navicon">${lucide(i)}</span><span class="adm-navlabel">${esc(l)}</span>${p==='helpdesk'?`<span class="adm-navbadge" id="ahbBadge" hidden></span>`:''}</button>`).join('')}</div>`).join('')}</nav>
       <div class="adm-sidefoot"><button id="out" class="adm-btn adm-btn-ghost adm-btn-sm">${lucide('undo')} Sign out</button></div>
     </aside>
     <div class="adm-main">
       <header class="adm-top">
         <button class="adm-iconbtn appBurger" id="admBurger" type="button" aria-label="Open navigation menu" aria-expanded="false">${lucide('menu')}</button>
-        <div class="adm-toppage"><span>EMS admin console</span><b id="admTopTitle">Store manage</b></div>
+        <div class="adm-toppage"><span>EMS admin console</span><b id="admTopTitle">App Store</b></div>
         <div class="adm-topactions">
           <button id="ntfBell" class="adm-iconbtn" type="button" title="Notifications" aria-label="Notifications" aria-expanded="false">${lucide('bell')}</button>
           <button id="admTheme" class="adm-iconbtn" type="button" title="Switch light / dark appearance" aria-label="Switch appearance">${dark?ADM_SUN:ADM_MOON}</button>
@@ -383,10 +397,14 @@ function adminHome(){document.body.classList.remove('shp-on');
   document.querySelectorAll('[data-admin-page]').forEach(x=>x.onclick=()=>adminPage(x.dataset.adminPage));
   $('#admTheme').onclick=()=>{const next=document.body.dataset.admTheme==='dark'?'light':'dark';document.body.dataset.admTheme=next;localStorage.setItem('ems.admTheme',next);$('#admTheme').innerHTML=next==='dark'?ADM_SUN:ADM_MOON};
   if(state.licenseExpired)readOnlyNotice();
-  adminPage('stores')
+  adminPage('app-store')
 }
 
 async function adminPage(p){
+  if(p==='connectx'&&!state?.entitlement?.connectx_enabled){
+    toast('ConnectX module is not enabled on your current license.');
+    return adminPage('stores');
+  }
   document.body.classList.toggle('adm-fixed-page', p==='helpdesk');
   document.querySelectorAll('[data-admin-page]').forEach(x=>x.classList.toggle('on',x.dataset.adminPage===p));
   const t=$('#admTopTitle');if(t)t.textContent=ADM_LABEL[p]||p;
@@ -394,7 +412,9 @@ async function adminPage(p){
   if(el)el.classList.toggle('adm-page-fixed', p==='helpdesk');
   el.innerHTML=skelFor(ADM_SKEL,p);
   try{
+    if(p==='app-store')return await adminAppStore();
     if(p==='stores')return await stores();
+    if(p==='connectx')return await adminConnectX();
     if(p==='licenses')return await licenses();
     if(p==='addons')return await premiumAddons();
     if(p==='profile')return await profile();
@@ -440,6 +460,7 @@ async function ownerPage(p){
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
   try{let d=await api('platform/overview');
     if(p==='overview')return ownerOverview(d);
+    if(p==='app-store')return await ownerAppStore();
     if(p==='licenses')return ownerLicenses(d);
     if(p==='plans')return ownerPlans();
     if(p==='administrators')return ownerAdmins(d);
@@ -487,6 +508,505 @@ function ownerOverview(d){
       </div>
     </section>
   </div>`
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EMS OWNER CONSOLE — Official App Store Controller
+   ══════════════════════════════════════════════════════════════════════ */
+const APP_PRESETS = [
+  {
+    title: 'ConnectX SMS Gateway',
+    package_name: 'com.ems.connectx',
+    description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
+    version: '1.3.0',
+    version_code: 13,
+    icon_url: '/assets/android-chrome-192.png',
+    release_notes: '• Real-time SIM-based SMS dispatch for Sales, Due Reminders, Returns & Exchanges\n• Multi-SIM slot selection with carrier & phone identification\n• Background foreground service and persistent device heartbeat\n• Modern Light UI theme with pure white background & responsive controls\n• Integrated In-App Update system with mandatory version locking'
+  },
+  {
+    title: 'EMS Mobile POS Terminal',
+    package_name: 'com.ems.pos',
+    description: 'Companion Android Point of Sale terminal for counter sales, camera barcode scanning, Bluetooth ESC/POS thermal printing, and instant inventory synchronization.',
+    version: '1.1.0',
+    version_code: 5,
+    icon_url: '/assets/android-chrome-192.png',
+    release_notes: '• High-speed barcode camera checkout\n• Bluetooth ESC/POS 58mm & 80mm thermal receipt printing\n• Real-time cloud synchronization with EMS database'
+  },
+  {
+    title: 'EMS Inventory Scanner',
+    package_name: 'com.ems.scanner',
+    description: 'Fast wireless barcode and QR scanner companion for warehouse audits, stock level adjustments, and low-stock verification.',
+    version: '1.0.4',
+    version_code: 4,
+    icon_url: '/assets/android-chrome-192.png',
+    release_notes: '• Rapid continuous barcode audit scanning\n• Instant item lookup and stock level adjustments'
+  }
+];
+
+function getOwnerAppIconHtml(app, size = 48) {
+  let iconSrc = String(app?.icon_url || '').trim();
+  let fallbackColor = '#2563EB';
+  let initial = (app?.title || 'EMS').slice(0, 2).toUpperCase();
+  let iconSvg = lucide('package');
+  if (app?.package_name?.includes('sms') || app?.package_name?.includes('connectx')) {
+    fallbackColor = '#2563EB';
+    iconSvg = lucide('message-square');
+  } else if (app?.package_name?.includes('pos')) {
+    fallbackColor = '#059669';
+    iconSvg = lucide('receipt');
+  } else if (app?.package_name?.includes('scan')) {
+    fallbackColor = '#7C3AED';
+    iconSvg = lucide('qr');
+  }
+
+  let fallbackHtml = `
+    <div style="width:100%;height:100%;background:linear-gradient(135deg, ${fallbackColor} 0%, #1D4ED8 100%);display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-weight:700;font-size:${Math.round(size*0.35)}px;border-radius:inherit;">
+      ${iconSvg ? `<div style="display:flex;transform:scale(${size/48});">${iconSvg}</div>` : initial}
+    </div>
+  `;
+
+  if (iconSrc) {
+    return `
+      <div style="width:${size}px;height:${size}px;border-radius:12px;position:relative;overflow:hidden;flex-shrink:0;border:1px solid var(--ob-line);background:var(--ob-card);">
+        ${fallbackHtml}
+        <img src="${esc(iconSrc)}" alt="${esc(app?.title || '')}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:2;background:#FFFFFF;" onerror="this.style.display='none'">
+      </div>
+    `;
+  }
+
+  return `
+    <div style="width:${size}px;height:${size}px;border-radius:12px;position:relative;overflow:hidden;flex-shrink:0;border:1px solid var(--ob-line);">
+      ${fallbackHtml}
+    </div>
+  `;
+}
+
+async function ownerAppStore(){
+  let apps = [];
+  try {
+    apps = await api('platform/app-store');
+  } catch(e) {
+    apps = [];
+  }
+
+  const totalApps = apps.length;
+  const publishedApps = apps.filter(x => x.published).length;
+  const mandatoryApps = apps.filter(x => x.mandatory).length;
+
+  $('#page').innerHTML = `
+    ${obHead('app-store','Central store controller for all official EMS mobile, desktop, and gateway apps.','<button class="ob-btn ob-btn-primary" id="addNewAppBtn">'+lucide('plus')+' Add New App</button>')}
+    <div class="ob-grid ob-kpis">
+      ${obKpi('package','violet','Total Applications',totalApps,`${publishedApps} published / live`)}
+      ${obKpi('download','emerald','Published Apps',publishedApps,'Active in Admin App Store')}
+      ${obKpi('shield','amber','Mandatory Updates',mandatoryApps,mandatoryApps>0?'Enforced version lock':'No mandatory locks')}
+      ${obKpi('smartphone','sky','Official Gateway','ConnectX','Active SMS Engine')}
+    </div>
+
+    <section class="ob-panel" style="margin-top:18px;">
+      <div class="ob-panel-head">
+        <div>
+          <h3>Published Applications & Gateways</h3>
+          <p class="ob-desc">Publish new builds, manage release notes, upload APKs to Cloudflare R2, and configure mandatory updates for installed client apps.</p>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <button class="ob-btn ob-btn-soft ob-btn-sm" id="refreshAppStoreBtn">${lucide('refresh')} Refresh</button>
+        </div>
+      </div>
+
+      ${apps.length ? `
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;padding:16px 0;">
+          ${apps.map(app => {
+            const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+            return `
+              <div class="ob-card" style="padding:18px;display:flex;flex-direction:column;justify-content:space-between;background:var(--ob-card);border:1px solid var(--ob-line);border-radius:14px;position:relative;">
+                <div>
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                      ${getOwnerAppIconHtml(app, 48)}
+                      <div>
+                        <h4 style="margin:0 0 2px 0;font-size:15px;font-weight:700;color:var(--ob-text);">${esc(app.title)}</h4>
+                        <code style="font-size:11px;color:var(--ob-muted);">${esc(app.package_name)}</code>
+                      </div>
+                    </div>
+                    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                      ${app.published ? obBadge('Published','emerald') : obBadge('Draft / Hidden','zinc')}
+                      ${app.mandatory ? obBadge('Mandatory Lock','rose') : ''}
+                    </div>
+                  </div>
+
+                  <p style="font-size:12.5px;color:var(--ob-muted);line-height:1.45;margin:0 0 12px 0;">${esc(app.description || 'No description provided.')}</p>
+
+                  <div class="ob-kv" style="font-size:11.5px;margin-bottom:12px;">
+                    <div><span>Latest Version</span><b>v${esc(app.version)} (Code: ${app.version_code})</b></div>
+                    <div><span>File Size</span><b>${sizeMb}</b></div>
+                    <div><span>APK Filename</span><b><code>${esc(app.apk_filename || (app.package_name+'.apk'))}</code></b></div>
+                    <div><span>Storage</span><b>${app.r2_key ? obBadge('Cloudflare R2','sky') : obBadge('Direct / Hosted','zinc')}</b></div>
+                  </div>
+
+                  ${app.release_notes ? `
+                    <div style="background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:8px;padding:8px 10px;margin-bottom:14px;font-size:11.5px;">
+                      <b style="color:var(--ob-text);display:block;margin-bottom:3px;">Release Notes:</b>
+                      <div style="color:var(--ob-muted);white-space:pre-line;line-height:1.35;max-height:60px;overflow:hidden;text-overflow:ellipsis;">${esc(app.release_notes)}</div>
+                    </div>
+                  ` : ''}
+                </div>
+
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:10px;border-top:1px solid var(--ob-line);margin-top:auto;">
+                  <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-app-edit="${app.id}">
+                    ${lucide('settings')} Update App
+                  </button>
+                  <div style="display:flex;gap:6px;">
+                    <a href="${esc(app.apk_url || '/api/app-store/download/'+encodeURIComponent(app.package_name))}" class="ob-btn ob-btn-ghost ob-btn-sm" download title="Download APK" target="_blank">
+                      ${lucide('download')}
+                    </a>
+                    <button type="button" class="ob-icobtn ob-danger" data-app-delete="${app.id || app.package_name}" title="Delete App">
+                      ${lucide('x')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      ` : obEmpty('No applications published yet. Click "Add New App" to publish your first EMS app.')}
+    </section>
+  `;
+
+  $('#addNewAppBtn').onclick = () => appModal(null);
+  $('#refreshAppStoreBtn')?.addEventListener('click', () => ownerAppStore());
+
+  document.querySelectorAll('[data-app-edit]').forEach(b => {
+    b.onclick = () => {
+      const app = apps.find(x => String(x.id) === String(b.dataset.appEdit));
+      if (app) appModal(app);
+    };
+  });
+
+  document.querySelectorAll('[data-app-delete]').forEach(b => {
+    b.onclick = async () => {
+      const appId = b.dataset.appDelete;
+      const app = apps.find(x => String(x.id) === String(appId) || String(x.package_name) === String(appId));
+      if (!confirm(`Are you sure you want to delete "${app?.title || 'this app'}" from the EMS App Store?`)) return;
+      try {
+        await api('platform/app-store/' + encodeURIComponent(appId), { method: 'DELETE' });
+        toast('✓ Application deleted from App Store.');
+        ownerAppStore();
+      } catch(err) {
+        toast(err.message);
+      }
+    };
+  });
+}
+
+function appModal(app = null) {
+  const isEdit = !!app;
+  const initialIcon = app?.icon_url || '/assets/android-chrome-192.png';
+  const modal = obModal(
+    isEdit ? `Update ${esc(app.title)}` : 'Publish New Application',
+    `
+    <form class="ob-form" id="appStoreForm">
+      ${!isEdit ? `
+        <div style="background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:10px;padding:12px;margin-bottom:14px;">
+          <b style="font-size:12px;color:var(--ob-text);display:block;margin-bottom:6px;">⚡ Quick Presets (1-Click Fill):</b>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;">
+            ${APP_PRESETS.map((p, idx) => `
+              <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-app-preset="${idx}">
+                ${esc(p.title)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      ` : ''}
+
+      <div class="ob-grid2">
+        <label>App Title *
+          <input name="title" id="appFieldTitle" required value="${esc(app?.title || '')}" placeholder="e.g. ConnectX SMS Gateway">
+        </label>
+        <label>Package Name (Identifier) *
+          <input name="package_name" id="appFieldPkg" required value="${esc(app?.package_name || 'com.ems.connectx')}" placeholder="e.g. com.ems.connectx">
+        </label>
+      </div>
+
+      <label>App Description
+        <textarea name="description" id="appFieldDesc" rows="2" placeholder="Describe the purpose, features, and capabilities of this application…">${esc(app?.description || '')}</textarea>
+      </label>
+
+      <div class="ob-grid2">
+        <div>
+          <label>Version Name (e.g. 1.3.0) *
+            <input name="version" id="appFieldVersion" required value="${esc(app?.version || '1.0.0')}" placeholder="e.g. 1.3.0">
+          </label>
+          <div style="display:flex;gap:4px;margin-top:4px;">
+            <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" style="font-size:11px;padding:3px 6px;" id="bumpPatchBtn">+0.0.1 Patch</button>
+            <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" style="font-size:11px;padding:3px 6px;" id="bumpMinorBtn">+0.1.0 Minor</button>
+            <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" style="font-size:11px;padding:3px 6px;" id="bumpMajorBtn">+1.0.0 Major</button>
+          </div>
+        </div>
+        <label>Version Code (Build number) *
+          <input name="version_code" id="appFieldCode" type="number" required min="1" step="1" value="${esc(app?.version_code || 1)}" placeholder="e.g. 13">
+        </label>
+      </div>
+
+      <div class="ob-grid2" style="align-items:flex-end;">
+        <div>
+          <label>App Icon URL / Path
+            <input name="icon_url" id="appIconUrl" value="${esc(initialIcon)}" placeholder="/assets/android-chrome-192.png">
+          </label>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:6px;">
+            <div id="modalIconPreview" style="width:40px;height:40px;border-radius:10px;overflow:hidden;border:1px solid var(--ob-line);background:var(--ob-card);display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+              <img id="modalIconImg" src="${esc(initialIcon)}" alt="Preview" style="width:100%;height:100%;object-fit:cover;" onerror="this.src='/assets/android-chrome-192.png'">
+            </div>
+            <small style="color:var(--ob-muted);font-size:11.5px;">Live icon preview</small>
+          </div>
+        </div>
+        <label>Upload App Icon (PNG / JPEG)
+          <input type="file" id="appIconFile" accept="image/*">
+        </label>
+      </div>
+
+      <div class="ob-grid2">
+        <label>APK Download URL / Route
+          <input name="apk_url" id="appApkUrl" value="${esc(app?.apk_url || '')}" placeholder="Auto-generated on APK upload or enter custom URL">
+        </label>
+        <label>Upload New APK File
+          <input type="file" id="appApkFile" accept=".apk,application/vnd.android.package-archive">
+        </label>
+      </div>
+
+      <div id="uploadProgressBox" style="display:none;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:8px;padding:10px 12px;margin:8px 0;">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
+          <span id="uploadProgressText">Uploading binary to Cloudflare R2…</span>
+          <b id="uploadProgressPercent">0%</b>
+        </div>
+        <div style="height:6px;background:var(--ob-line);border-radius:3px;overflow:hidden;">
+          <div id="uploadProgressBar" style="width:0%;height:100%;background:var(--ob-primary);transition:width .2s;"></div>
+        </div>
+      </div>
+
+      <div class="ob-grid2" style="margin-top:4px;">
+        <label class="ob-toggle" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:10px;">
+          <div>
+            <b style="font-size:13px;color:var(--ob-text);display:block;">Mandatory Update</b>
+            <small style="font-size:11px;color:var(--ob-muted);">Locks Android app until user installs this update.</small>
+          </div>
+          <input type="checkbox" name="mandatory" ${app?.mandatory ? 'checked' : ''}>
+        </label>
+
+        <label class="ob-toggle" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:10px;">
+          <div>
+            <b style="font-size:13px;color:var(--ob-text);display:block;">Published in App Store</b>
+            <small style="font-size:11px;color:var(--ob-muted);">Visible in Administrator App Store.</small>
+          </div>
+          <input type="checkbox" name="published" ${app ? (app.published ? 'checked' : '') : 'checked'}>
+        </label>
+      </div>
+
+      <label style="margin-top:8px;">Release Notes
+        <textarea name="release_notes" id="appFieldNotes" rows="4" placeholder="List new features, improvements, and bug fixes in this release…">${esc(app?.release_notes || '')}</textarea>
+      </label>
+
+      <div class="ob-form-actions" style="margin-top:16px;">
+        <button type="button" class="ob-btn ob-btn-ghost" id="cancelAppBtn">Cancel</button>
+        <button type="submit" class="ob-btn ob-btn-primary" id="saveAppBtn">${isEdit ? 'Publish Update' : 'Publish App'}</button>
+      </div>
+    </form>
+    `,
+    'ob-modal-lg'
+  );
+
+  modal.querySelector('#cancelAppBtn').onclick = () => modal.remove();
+
+  const iconImg = modal.querySelector('#modalIconImg');
+  const iconUrlInput = modal.querySelector('#appIconUrl');
+
+  iconUrlInput.oninput = () => {
+    if (iconImg) iconImg.src = iconUrlInput.value.trim() || '/assets/android-chrome-192.png';
+  };
+
+  // Preset button handlers
+  modal.querySelectorAll('[data-app-preset]').forEach(btn => {
+    btn.onclick = () => {
+      const p = APP_PRESETS[parseInt(btn.dataset.appPreset, 10)];
+      if (!p) return;
+      modal.querySelector('#appFieldTitle').value = p.title;
+      modal.querySelector('#appFieldPkg').value = p.package_name;
+      modal.querySelector('#appFieldDesc').value = p.description;
+      modal.querySelector('#appFieldVersion').value = p.version;
+      modal.querySelector('#appFieldCode').value = p.version_code;
+      iconUrlInput.value = p.icon_url;
+      if (iconImg) iconImg.src = p.icon_url;
+      modal.querySelector('#appFieldNotes').value = p.release_notes;
+      toast(`Loaded preset: ${p.title}`);
+    };
+  });
+
+  // Version bumping helpers
+  function bumpVersion(type) {
+    const vInput = modal.querySelector('#appFieldVersion');
+    const cInput = modal.querySelector('#appFieldCode');
+    const parts = (vInput.value.trim() || '1.0.0').split('.').map(n => parseInt(n, 10) || 0);
+    while (parts.length < 3) parts.push(0);
+
+    let curCode = parseInt(cInput.value, 10) || 1;
+    if (type === 'patch') {
+      parts[2]++;
+      curCode += 1;
+    } else if (type === 'minor') {
+      parts[1]++;
+      parts[2] = 0;
+      curCode += 1;
+    } else if (type === 'major') {
+      parts[0]++;
+      parts[1] = 0;
+      parts[2] = 0;
+      curCode += 1;
+    }
+    vInput.value = parts.join('.');
+    cInput.value = curCode;
+  }
+
+  modal.querySelector('#bumpPatchBtn')?.addEventListener('click', () => bumpVersion('patch'));
+  modal.querySelector('#bumpMinorBtn')?.addEventListener('click', () => bumpVersion('minor'));
+  modal.querySelector('#bumpMajorBtn')?.addEventListener('click', () => bumpVersion('major'));
+
+  let uploadedIconR2Key = app?.icon_r2_key || null;
+  const iconInput = modal.querySelector('#appIconFile');
+  iconInput.onchange = async () => {
+    const file = iconInput.files?.[0];
+    if (!file) return;
+
+    // Instant local preview
+    const reader = new FileReader();
+    reader.onload = (re) => {
+      if (iconImg) iconImg.src = re.target.result;
+      if (iconUrlInput) iconUrlInput.value = re.target.result;
+    };
+    reader.readAsDataURL(file);
+
+    const pkg = modal.querySelector('#appFieldPkg').value.trim() || 'com.ems.app';
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('type', 'icon');
+    fd.append('packageName', pkg);
+    try {
+      const res = await fetch('/api/platform/app-store/upload', {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + state.token },
+        body: fd
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upload failed');
+      uploadedIconR2Key = data.icon_r2_key || data.r2_key || null;
+      if (data.file_url) {
+        iconUrlInput.value = data.file_url;
+        if (iconImg) iconImg.src = data.file_url;
+      }
+      toast('✓ App icon uploaded.');
+    } catch(err) {
+      toast('Icon saved locally: ' + err.message);
+    }
+  };
+
+  modal.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const btn = modal.querySelector('#saveAppBtn');
+    btn.disabled = true;
+    btn.textContent = 'Publishing…';
+
+    try {
+      const form = e.target;
+      const title = form.title.value.trim();
+      const packageName = form.package_name.value.trim();
+      const description = form.description.value.trim();
+      const version = form.version.value.trim();
+      const versionCode = parseInt(form.version_code.value, 10);
+      let iconUrl = form.icon_url.value.trim() || '/assets/android-chrome-192.png';
+      let iconR2Key = uploadedIconR2Key;
+      let apkUrl = form.apk_url.value.trim();
+      const mandatory = form.mandatory.checked;
+      const published = form.published.checked;
+      const releaseNotes = form.release_notes.value.trim();
+
+      let apkR2Key = app?.apk_r2_key || app?.r2_key || null;
+      let r2Key = apkR2Key;
+      let apkSizeBytes = app?.apk_size_bytes || 0;
+      let apkFilename = app?.apk_filename || `${title.replace(/[^a-zA-Z0-9]/g, '')}-${version}.apk`;
+
+      const apkFile = modal.querySelector('#appApkFile').files?.[0];
+      if (apkFile) {
+        modal.querySelector('#uploadProgressBox').style.display = 'block';
+        modal.querySelector('#uploadProgressBar').style.width = '60%';
+        modal.querySelector('#uploadProgressPercent').textContent = '60%';
+
+        const fd = new FormData();
+        fd.append('file', apkFile);
+        fd.append('type', 'apk');
+        fd.append('packageName', packageName);
+        fd.append('versionCode', versionCode);
+
+        const upRes = await fetch('/api/platform/app-store/upload', {
+          method: 'POST',
+          headers: { 'Authorization': 'Bearer ' + state.token },
+          body: fd
+        });
+        const upData = await upRes.json();
+        if (!upRes.ok) throw new Error(upData.error || 'APK upload failed');
+
+        modal.querySelector('#uploadProgressBar').style.width = '100%';
+        modal.querySelector('#uploadProgressPercent').textContent = '100%';
+
+        apkR2Key = upData.apk_r2_key || upData.r2_key || null;
+        r2Key = apkR2Key;
+        apkSizeBytes = upData.size_bytes || apkFile.size;
+        apkFilename = upData.filename || apkFile.name;
+        apkUrl = upData.file_url || `/api/app-store/download/${encodeURIComponent(packageName)}`;
+      }
+
+      if (!apkUrl) {
+        apkUrl = `/api/app-store/download/${encodeURIComponent(packageName)}`;
+      }
+
+      const payload = {
+        title,
+        package_name: packageName,
+        description,
+        version,
+        version_code: versionCode,
+        icon_url: iconUrl,
+        icon_r2_key: iconR2Key || app?.icon_r2_key || null,
+        apk_url: apkUrl,
+        apk_r2_key: apkR2Key || app?.apk_r2_key || app?.r2_key || null,
+        r2_key: apkR2Key || app?.apk_r2_key || app?.r2_key || null,
+        apk_size_bytes: apkSizeBytes,
+        apk_filename: apkFilename,
+        mandatory,
+        published,
+        release_notes: releaseNotes
+      };
+
+      if (isEdit) {
+        await api('platform/app-store/' + encodeURIComponent(app.id || app.package_name), {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+        toast('✓ Application update published to App Store.');
+      } else {
+        await api('platform/app-store', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        toast('✓ Application published to App Store.');
+      }
+
+      modal.remove();
+      ownerAppStore();
+    } catch(err) {
+      toast(err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = isEdit ? 'Publish Update' : 'Publish App';
+    }
+  };
 }
 
 function ownerLicenses(d){
@@ -1729,6 +2249,684 @@ function storeModal(record,fields){
   btnBack.onclick=goBack;btnFooterBack.onclick=goBack;
   e.querySelector('#createStoreForm').onsubmit=async ev=>{ev.preventDefault();try{let b=Object.fromEntries(new FormData(ev.target));b.low_stock_threshold=Number(b.low_stock_threshold);await api('admin/stores',{method:'POST',body:JSON.stringify(b)});e.remove();toast('Store created.');stores()}catch(x){toast(x.message)}};
 }
+
+function showPairingGuideModal(){
+  admModal('ConnectX Android SMS Gateway Setup',`
+    <div class="adm-form" style="gap:16px;">
+      <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:14px;">
+        <h4 style="font-size:13.5px;font-weight:700;margin:0 0 6px 0;color:var(--adm-text);">How to Turn Your Phone into an SMS Gateway</h4>
+        <p class="adm-desc" style="font-size:12px;margin:0;line-height:1.5;">
+          ConnectX uses your real Android device and SIM card to dispatch automated invoices, receipts, and custom notifications with 100% carrier deliverability.
+        </p>
+      </div>
+
+      <div style="display:grid;gap:12px;">
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">1</span>
+          <div>
+            <strong style="font-size:12.5px;display:block;">Install ConnectX APK</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Download and install the latest ConnectX app on your dedicated Android smartphone (Android 8.0 or higher).</p>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">2</span>
+          <div>
+            <strong style="font-size:12.5px;display:block;">Sign in with Administrator Credentials</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Open the app, enter your EMS Server URL, your Administrator Email, and Password. Select your shop from the dropdown.</p>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:12px;align-items:flex-start;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">3</span>
+          <div>
+            <strong style="font-size:12.5px;display:block;">Select SIM Card & Grant SMS Permissions</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Select which SIM card to dispatch messages from and tap <b>Test Gateway</b>. The device will link automatically and appear here.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="adm-payinfo" style="margin-top:6px;">
+        <b style="font-size:12px;color:var(--adm-primary);">Pro-Tip: Background Battery Optimization</b>
+        <p style="margin:0;font-size:11.5px;">For uninterrupted 24/7 background queue dispatching, ensure battery optimization is set to "Unrestricted" for ConnectX on your Android phone.</p>
+      </div>
+
+      <div class="adm-form-actions" style="margin-top:8px;">
+        <button type="button" class="adm-btn adm-btn-primary" onclick="this.closest('.adm-modal').remove()">Done</button>
+      </div>
+    </div>
+  `);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   EMS ADMINISTRATOR CONSOLE — Official App Store
+   ══════════════════════════════════════════════════════════════════════ */
+function getAdminAppIconHtml(app, size = 64) {
+  let iconSrc = String(app?.icon_url || '').trim();
+  let fallbackColor = '#2563EB';
+  let initial = (app?.title || 'EMS').slice(0, 2).toUpperCase();
+  let iconSvg = lucide('package');
+  if (app?.package_name?.includes('sms') || app?.package_name?.includes('connectx')) {
+    fallbackColor = '#2563EB';
+    iconSvg = lucide('message-square');
+  } else if (app?.package_name?.includes('pos')) {
+    fallbackColor = '#059669';
+    iconSvg = lucide('receipt');
+  } else if (app?.package_name?.includes('scan')) {
+    fallbackColor = '#7C3AED';
+    iconSvg = lucide('qr');
+  }
+
+  let fallbackHtml = `
+    <div style="width:100%;height:100%;background:linear-gradient(135deg, ${fallbackColor} 0%, #1D4ED8 100%);display:flex;align-items:center;justify-content:center;color:#FFFFFF;font-weight:800;font-size:${Math.round(size*0.35)}px;border-radius:inherit;">
+      ${iconSvg ? `<div style="display:flex;transform:scale(${size/48});">${iconSvg}</div>` : initial}
+    </div>
+  `;
+
+  if (iconSrc) {
+    return `
+      <div style="width:${size}px;height:${size}px;border-radius:16px;position:relative;overflow:hidden;flex-shrink:0;box-shadow:0 4px 14px rgba(0,0,0,0.06);border:1px solid rgba(0,0,0,0.08);background:#FFFFFF;">
+        ${fallbackHtml}
+        <img src="${esc(iconSrc)}" alt="${esc(app?.title || '')}" style="position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;border-radius:inherit;z-index:2;background:#FFFFFF;" onerror="this.style.display='none'">
+      </div>
+    `;
+  }
+
+  return `
+    <div style="width:${size}px;height:${size}px;border-radius:16px;position:relative;overflow:hidden;flex-shrink:0;box-shadow:0 4px 14px rgba(0,0,0,0.06);border:1px solid rgba(0,0,0,0.08);">
+      ${fallbackHtml}
+    </div>
+  `;
+}
+
+function handleAdminAppDownload(app) {
+  if (!app) return;
+  toast(`✓ Starting download: ${app.apk_filename || (app.title + '.apk')}…`);
+  const dlUrl = `/api/app-store/download/${encodeURIComponent(app.package_name || app.id)}`;
+  const link = document.createElement('a');
+  link.href = dlUrl;
+  link.download = app.apk_filename || `${app.package_name || 'app'}.apk`;
+  link.target = '_blank';
+  document.body.appendChild(link);
+  link.click();
+  setTimeout(() => link.remove(), 2000);
+}
+
+async function adminAppStore(){
+  let apps = [];
+  try {
+    apps = await api('app-store/apps');
+  } catch(e) {
+    apps = [];
+  }
+
+  if (!apps || !apps.length) {
+    apps = [{
+      id: '00000000-0000-0000-0000-000000000001',
+      package_name: 'com.ems.connectx',
+      title: 'ConnectX SMS Gateway',
+      description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
+      version: '1.4.0',
+      version_code: 14,
+      icon_url: '/assets/android-chrome-192.png',
+      apk_url: 'https://github.com/sa8650/ConnectX/releases/download/v1.4.0/ConnectX-v1.4.0.apk',
+      apk_size_bytes: 8645200,
+      apk_filename: 'ConnectX-1.4.0.apk',
+      mandatory: false,
+      release_notes: '• Real-time SIM-based SMS dispatch for Sales, Due Reminders, Returns & Exchanges\n• Multi-SIM slot selection with carrier & phone identification\n• Background foreground service and persistent device heartbeat\n• Modern Light UI theme with pure white background & responsive controls\n• Integrated In-App Update system with mandatory version locking',
+      published: true,
+      updated_at: new Date().toISOString()
+    }];
+  }
+
+  const cxApp = apps.find(a => a.package_name === 'com.ems.connectx') || apps[0];
+
+  $('#page').innerHTML = `
+    ${admHead('Apps & Store', 'Official App Store', '<span class="adm-badge adm-t-sky">'+lucide('shield')+' Verified EMS Ecosystem</span>')}
+
+    <section class="adm-card" style="padding:24px;border-radius:20px;margin-bottom:22px;background:linear-gradient(135deg, rgba(35,131,226,0.08) 0%, rgba(35,131,226,0.02) 100%), #FFFFFF;border:1px solid rgba(35,131,226,0.22);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;position:relative;overflow:hidden;">
+      <div style="position:absolute;right:-20px;bottom:-20px;width:140px;height:140px;background:radial-gradient(circle, rgba(35,131,226,0.12) 0%, transparent 70%);pointer-events:none;"></div>
+      
+      <div style="display:flex;align-items:center;gap:20px;max-width:680px;">
+        ${getAdminAppIconHtml(cxApp, 72)}
+        <div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+            <span class="adm-badge adm-t-emerald" style="font-size:10.5px;">Official Verified Gateway</span>
+            <span class="adm-badge adm-t-sky" style="font-size:10.5px;">v${esc(cxApp.version)}</span>
+          </div>
+          <h2 style="font-size:20px;font-weight:800;color:var(--adm-text);margin:0 0 4px 0;">${esc(cxApp.title)}</h2>
+          <p style="font-size:13px;color:var(--adm-muted);line-height:1.45;margin:0;">
+            Turn any Android phone into a central SMS gateway for your EMS stores. Sends automated invoices, receipts, and payment notifications using your physical SIM balance.
+          </p>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:8px;min-width:190px;">
+        <button type="button" class="adm-btn adm-btn-primary" id="cxHeroDownloadBtn" style="padding:10px 18px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;">
+          ${lucide('download')} Download APK (v${esc(cxApp.version)})
+        </button>
+        <button type="button" class="adm-btn adm-btn-soft adm-btn-sm" id="cxHeroDetailsBtn">
+          ${lucide('file')} View Release Notes & Specs
+        </button>
+      </div>
+    </section>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
+      <div>
+        <h3 style="font-size:16px;font-weight:700;margin:0 0 2px 0;">All Applications (${apps.length})</h3>
+        <p class="adm-desc" style="margin:0;">Official Android APK packages and companion tools certified for EMS V1.</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <input type="text" id="appSearchInput" class="adm-search" placeholder="Search applications…" style="width:220px;">
+      </div>
+    </div>
+
+    <div id="adminAppsGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;">
+      ${renderAdminAppCards(apps)}
+    </div>
+  `;
+
+  $('#cxHeroDownloadBtn')?.addEventListener('click', () => handleAdminAppDownload(cxApp));
+  $('#cxHeroDetailsBtn')?.addEventListener('click', () => adminAppDetailsModal(cxApp));
+
+  $('#appSearchInput')?.addEventListener('input', (e) => {
+    const q = e.target.value.toLowerCase().trim();
+    const filtered = apps.filter(a => 
+      (a.title || '').toLowerCase().includes(q) ||
+      (a.package_name || '').toLowerCase().includes(q) ||
+      (a.description || '').toLowerCase().includes(q)
+    );
+    $('#adminAppsGrid').innerHTML = renderAdminAppCards(filtered);
+    bindAdminAppActions(filtered);
+  });
+
+  bindAdminAppActions(apps);
+}
+
+function renderAdminAppCards(apps) {
+  if (!apps.length) {
+    return admEmpty('No applications match your search query.');
+  }
+  return apps.map(app => {
+    const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+    const updatedDate = app.updated_at ? new Date(app.updated_at).toLocaleDateString() : 'Recent';
+
+    return `
+      <div class="adm-card" style="padding:22px;border-radius:18px;background:#FFFFFF;border:1px solid var(--adm-line);display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,0.03);position:relative;">
+        <div>
+          <div style="display:flex;align-items:flex-start;gap:16px;margin-bottom:14px;">
+            ${getAdminAppIconHtml(app, 64)}
+            <div style="flex:1;min-width:0;">
+              <h4 style="font-size:16px;font-weight:700;color:var(--adm-text);margin:0 0 4px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(app.title || 'EMS Application')}</h4>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                <span class="adm-badge adm-t-sky" style="font-size:10.5px;">v${esc(app.version || '1.0.0')}</span>
+                <span style="font-size:11px;color:var(--adm-muted);">${sizeMb}</span>
+              </div>
+            </div>
+          </div>
+
+          <p style="font-size:12.5px;color:var(--adm-muted);line-height:1.45;margin:0 0 14px 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">
+            ${esc(app.description || 'Official EMS application for store automation.')}
+          </p>
+
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
+            <span class="shp-tag shp-t-sky" style="font-size:10.5px;">Android 8.0+</span>
+            <span class="shp-tag shp-t-emerald" style="font-size:10.5px;">Verified Safe</span>
+            ${app.mandatory ? `<span class="shp-tag shp-t-rose" style="font-size:10.5px;">Mandatory Update</span>` : ''}
+          </div>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--adm-line);margin-top:auto;">
+          <button type="button" class="adm-btn adm-btn-primary adm-btn-sm" data-admin-app-download="${app.id || app.package_name}" style="flex:1;text-align:center;justify-content:center;font-weight:700;">
+            ${lucide('download')} Download APK
+          </button>
+          <button type="button" class="adm-btn adm-btn-soft adm-btn-sm" data-admin-app-details="${app.id || app.package_name}" title="View Details">
+            ${lucide('file')} Details
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function bindAdminAppActions(apps) {
+  document.querySelectorAll('[data-admin-app-download]').forEach(b => {
+    b.onclick = () => {
+      const app = apps.find(x => String(x.id) === String(b.dataset.adminAppDownload) || String(x.package_name) === String(b.dataset.adminAppDownload));
+      if (app) handleAdminAppDownload(app);
+    };
+  });
+
+  document.querySelectorAll('[data-admin-app-details]').forEach(b => {
+    b.onclick = () => {
+      const app = apps.find(x => String(x.id) === String(b.dataset.adminAppDetails) || String(x.package_name) === String(b.dataset.adminAppDetails));
+      if (app) adminAppDetailsModal(app);
+    };
+  });
+}
+
+function adminAppDetailsModal(app) {
+  const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+  const updatedDate = app.updated_at ? new Date(app.updated_at).toLocaleString() : 'Recent';
+
+  const modal = admModal(
+    esc(app.title || 'Application Details'),
+    `
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;align-items:center;gap:16px;padding-bottom:14px;border-bottom:1px solid var(--adm-line);">
+        ${getAdminAppIconHtml(app, 64)}
+        <div>
+          <h3 style="margin:0 0 4px 0;font-size:17px;font-weight:700;color:var(--adm-text);">${esc(app.title || 'EMS App')}</h3>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <code style="font-size:11.5px;color:var(--adm-muted);">${esc(app.package_name || 'com.ems.app')}</code>
+            <span class="adm-badge adm-t-sky">v${esc(app.version || '1.0.0')}</span>
+            <span class="adm-badge adm-t-zinc">Build ${app.version_code || 1}</span>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <h4 style="font-size:13px;font-weight:700;margin:0 0 6px 0;color:var(--adm-text);">Overview</h4>
+        <p style="font-size:13px;color:var(--adm-muted);line-height:1.5;margin:0;">
+          ${esc(app.description || 'No detailed description available.')}
+        </p>
+      </div>
+
+      <div class="adm-kv">
+        <div><span>Version</span><b>v${esc(app.version || '1.0.0')} (Build ${app.version_code || 1})</b></div>
+        <div><span>Download Size</span><b>${sizeMb}</b></div>
+        <div><span>Compatibility</span><b>Android 8.0 (API 26) or higher</b></div>
+        <div><span>Release Date</span><b>${updatedDate}</b></div>
+        <div><span>Package File</span><b><code>${esc(app.apk_filename || ((app.package_name || 'app')+'.apk'))}</code></b></div>
+      </div>
+
+      ${app.release_notes ? `
+        <div style="background:var(--adm-bg);border:1px solid var(--adm-line);border-radius:10px;padding:12px;">
+          <h4 style="font-size:12.5px;font-weight:700;margin:0 0 6px 0;color:var(--adm-text);">What's New in this Version:</h4>
+          <div style="font-size:12.5px;color:var(--adm-muted);white-space:pre-line;line-height:1.5;">${esc(app.release_notes)}</div>
+        </div>
+      ` : ''}
+
+      <div style="background:rgba(35,131,226,0.06);border:1px solid rgba(35,131,226,0.2);border-radius:10px;padding:12px;font-size:12px;color:var(--adm-text);line-height:1.45;">
+        <b>Installation Note:</b> If your Android device shows "Install unknown apps", enable permission for your browser or file manager. Release builds are signed with EMS Official Release Keys for seamless automatic in-app updates.
+      </div>
+
+      <div class="adm-form-actions" style="margin-top:4px;">
+        <button type="button" class="adm-btn adm-btn-primary" id="modalDownloadBtn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:700;">
+          ${lucide('download')} Download APK (${sizeMb})
+        </button>
+      </div>
+    </div>
+    `,
+    'adm-modal-lg'
+  );
+
+  modal.querySelector('#modalDownloadBtn')?.addEventListener('click', () => {
+    handleAdminAppDownload(app);
+  });
+}
+
+async function adminConnectX(){
+  if(!state?.entitlement?.connectx_enabled){
+    $('#page').innerHTML=`
+      <section class="adm-panel adm-narrow" style="margin:40px auto;text-align:center;">
+        <div style="padding:24px 16px;display:flex;flex-direction:column;align-items:center;gap:12px;">
+          ${admChip('mail','amber')}
+          <h3 style="font-size:16px;font-weight:700;margin:0;">ConnectX Add-on Not Enabled</h3>
+          <p class="adm-desc" style="max-width:400px;line-height:1.5;">Your current administrator license plan does not have the ConnectX Email and SMS Gateway module enabled. Upgrade or renew your license plan to activate ConnectX.</p>
+          <button class="adm-btn adm-btn-primary" onclick="adminPage('licenses')">View License Plans</button>
+        </div>
+      </section>
+    `;
+    return;
+  }
+
+  let data=await api('admin/connectx/overview');
+  let shops=data.shops||[];
+  let devices=data.devices||[];
+  let ent=data.entitlement||{};
+
+  let totalShops=shops.length;
+  let activeSmsShops=shops.filter(s=>s.sms?.settings?.enabled).length;
+  let onlineDevices=devices.filter(d=>d.online).length;
+  let totalSmsSentToday=shops.reduce((a,s)=>a+Number(s.sms?.today?.sent||0),0);
+  let totalEmailSentToday=shops.reduce((a,s)=>a+Number(s.email?.usedToday||0),0);
+
+  function renderHardwareDevices(devs){
+    if(!devs.length){
+      return `
+        <div class="adm-empty" style="padding:24px 16px;text-align:center;background:var(--adm-inset);border-radius:14px;border:1px dashed var(--adm-line-strong);">
+          <div style="display:inline-flex;padding:12px;border-radius:50%;background:color-mix(in srgb,var(--adm-primary) 12%,transparent);margin-bottom:10px;">
+            ${lucide('smartphone')}
+          </div>
+          <h4 style="font-size:13.5px;font-weight:700;margin:0 0 6px 0;">No Android Gateway Phones Linked</h4>
+          <p class="adm-desc" style="max-width:480px;margin:0 auto 14px auto;font-size:12px;line-height:1.5;">
+            Turn any Android smartphone into a local SMS Gateway. Download and install the <b>ConnectX</b> Android app, log in with your administrator credentials, and link your shop to start dispatching automated and manual SMS.
+          </p>
+          <button class="adm-btn adm-btn-primary adm-btn-sm" id="cxHowToPairBtn">${lucide('help-circle')} How to Pair Android App</button>
+        </div>
+      `;
+    }
+
+    return `
+      <div class="adm-tw">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Device / Phone</th>
+              <th>Assigned Shop</th>
+              <th>Hardware ID</th>
+              <th>SIM Carrier & Number</th>
+              <th>Last Heartbeat</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${devs.map(d=>{
+              let isOnline=!!d.online;
+              let isRevoked=d.status==='revoked';
+              return `
+                <tr>
+                  <td>
+                    ${isRevoked?admBadge('Revoked','rose'):(isOnline?`<span class="adm-badge adm-t-emerald" style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span> Online</span>`:admBadge('Offline','zinc'))}
+                    ${d.is_primary?`<span class="adm-badge adm-t-sky" style="margin-left:4px;">Primary</span>`:''}
+                  </td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="display:inline-flex;padding:6px;border-radius:8px;background:var(--adm-inset2);color:var(--adm-text);">
+                        ${lucide('smartphone')}
+                      </span>
+                      <div>
+                        <strong style="font-size:12.5px;display:block;">${esc(d.device_name||'Android Device')}</strong>
+                        <small style="color:var(--adm-muted);font-size:11px;">${esc(d.android_version||'Android')} · SDK ${esc(d.app_version||'1.0')}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <strong style="font-size:12px;">${esc(d.shop_name||'General')}</strong>
+                  </td>
+                  <td>
+                    <code>${esc(d.public_id||shortId(d.id))}</code>
+                  </td>
+                  <td>
+                    <div>
+                      <span style="font-weight:600;font-size:12px;">${esc(d.sim_carrier||'SIM')}</span>
+                      ${d.phone_number?`<code style="display:block;font-size:11px;margin-top:2px;">${esc(d.phone_number)}</code>`:'<span style="display:block;color:var(--adm-muted);font-size:11px;">No phone #</span>'}
+                    </div>
+                  </td>
+                  <td>
+                    <div style="font-family:var(--adm-mono);font-size:11px;color:var(--adm-text2);">
+                      ${d.last_seen?ago(d.last_seen):'Never'}
+                    </div>
+                    ${d.last_seen?`<small style="font-family:var(--adm-mono);font-size:10px;color:var(--adm-muted);">${new Date(d.last_seen).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</small>`:''}
+                  </td>
+                  <td style="text-align:right;">
+                    <div style="display:inline-flex;gap:5px;">
+                      ${!d.is_primary&&!isRevoked?`<button class="adm-btn adm-btn-soft adm-btn-sm" data-cx-set-primary="${d.id}" title="Set as primary SMS gateway for its shop">Set Primary</button>`:''}
+                      ${!isRevoked?`<button class="adm-btn adm-btn-danger adm-btn-sm" data-cx-revoke="${d.id}" title="Revoke this device">Revoke</button>`:''}
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderShopGrid(shopList){
+    if(!shopList.length)return admEmpty('No stores found under this administrator account.');
+
+    return shopList.map(st=>{
+      let isEmailOn=!!st.email?.enabled;
+      let isSmsOn=!!st.sms?.settings?.enabled;
+      let devCount=(st.sms?.devices||[]).length;
+      let hasOnlineDev=(st.sms?.devices||[]).some(d=>d.online);
+      let sSet=st.sms?.settings||{};
+
+      return `
+        <div class="adm-storecard" data-shop-id="${st.id}" style="gap:14px;">
+          <div class="adm-store-top">
+            <div class="adm-store-title">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <h3>${esc(st.name)}</h3>
+                <code>${esc(st.shop_code)}</code>
+                ${st.status==='active'?admBadge('Active','emerald'):admBadge(st.status,'amber')}
+              </div>
+              <div class="adm-store-meta" style="margin-top:6px;">
+                <span>${esc(st.category||'General Store')} · ${esc(st.phone||'No phone')} · ${esc(st.address||'No address')}</span>
+              </div>
+            </div>
+            <button class="adm-btn adm-btn-ghost adm-btn-sm" data-goto-shop="${st.id}" title="Open shop panel">${lucide('external-link')} Open</button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
+            <!-- Email Gateway Panel -->
+            <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  ${admChip('mail',isEmailOn?'sky':'zinc')}
+                  <div>
+                    <b style="font-size:12.5px;display:block;">Email Gateway</b>
+                    <small style="color:var(--adm-muted);font-size:11px;">Central Brevo SMTP</small>
+                  </div>
+                </div>
+                ${isEmailOn?admBadge('Active','sky'):admBadge('Inactive','zinc')}
+              </div>
+
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--adm-card);border:1px solid var(--adm-line);">
+                <span style="font-size:11.5px;color:var(--adm-text2);">Today's Email Usage</span>
+                <span class="adm-num" style="font-size:12px;font-weight:700;">${st.email?.usedToday||0} / ${st.email?.dailyLimit||100}</span>
+              </div>
+
+              <p class="adm-desc" style="font-size:11px;margin:0;line-height:1.4;">
+                Automatically sends sales invoices, receipts, and returns via email to customers and suppliers.
+              </p>
+            </div>
+
+            <!-- SMS Gateway Panel -->
+            <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  ${admChip('smartphone',isSmsOn?'emerald':'zinc')}
+                  <div>
+                    <b style="font-size:12.5px;display:block;">SMS Gateway (ConnectX)</b>
+                    <small style="color:var(--adm-muted);font-size:11px;">Local Android Telephony</small>
+                  </div>
+                </div>
+                <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0;">
+                  <span style="font-size:11px;font-weight:650;color:var(--adm-text2);">${isSmsOn?'Enabled':'Disabled'}</span>
+                  <input type="checkbox" data-shop-sms-toggle="${st.id}" ${isSmsOn?'checked':''} style="width:16px;height:16px;cursor:pointer;accent-color:#0ea5e9;">
+                </label>
+              </div>
+
+              <!-- Hardware Device Connection Status -->
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--adm-card);border:1px solid var(--adm-line);">
+                <div style="display:flex;align-items:center;gap:6px;">
+                  ${devCount>0?(hasOnlineDev?'<span style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;display:inline-block;"></span>':'<span style="width:8px;height:8px;border-radius:50%;background:#71717a;display:inline-block;"></span>'):'<span style="width:8px;height:8px;border-radius:50%;background:#f43f5e;display:inline-block;"></span>'}
+                  <span style="font-size:11.5px;font-weight:600;">
+                    ${devCount>0?(hasOnlineDev?`${devCount} phone linked (Online)`:`${devCount} phone linked (Offline)`):'No Android phone linked'}
+                  </span>
+                </div>
+                <div style="font-size:11px;color:var(--adm-muted);">
+                  ${st.sms?.today?.sent||0} sent · ${st.sms?.today?.pending||0} queued
+                </div>
+              </div>
+
+              <!-- Automated SMS Triggers Matrix -->
+              <div style="display:grid;grid-template-columns:repeat(2, 1fr);gap:6px;font-size:11px;">
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin:0;font-weight:500;">
+                  <input type="checkbox" data-trigger="auto_sale" data-shop="${st.id}" ${sSet.auto_sale!==false?'checked':''} style="width:14px;height:14px;accent-color:#0ea5e9;">
+                  <span>Sales Invoice SMS</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin:0;font-weight:500;">
+                  <input type="checkbox" data-trigger="auto_payment" data-shop="${st.id}" ${sSet.auto_payment!==false?'checked':''} style="width:14px;height:14px;accent-color:#0ea5e9;">
+                  <span>Payment Receipt SMS</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin:0;font-weight:500;">
+                  <input type="checkbox" data-trigger="auto_due_reminder" data-shop="${st.id}" ${sSet.auto_due_reminder?'checked':''} style="width:14px;height:14px;accent-color:#0ea5e9;">
+                  <span>Due Reminder SMS</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;margin:0;font-weight:500;">
+                  <input type="checkbox" data-trigger="auto_return" data-shop="${st.id}" ${sSet.auto_return!==false?'checked':''} style="width:14px;height:14px;accent-color:#0ea5e9;">
+                  <span>Return & Exchange SMS</span>
+                </label>
+              </div>
+
+              <div style="display:flex;justify-content:flex-end;margin-top:4px;">
+                <button class="adm-btn adm-btn-primary adm-btn-sm" data-cx-save-shop="${st.id}">Save SMS Settings</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  $('#page').innerHTML=admHead(
+    'connectx',
+    'Manage central Brevo Email and local Android SMS Gateways for every shop under your administrator account.',
+    `<button id="cxPairGuideBtn" class="adm-btn adm-btn-soft">${lucide('smartphone')} App Setup Guide</button>
+     <button id="cxRefreshBtn" class="adm-btn adm-btn-primary">${lucide('refresh-cw')} Refresh</button>`
+  )+`
+    <div class="adm-grid adm-kpis">
+      ${admKpi('store','violet','Active Shops',`${activeSmsShops} / ${totalShops}`,'with SMS gateway enabled')}
+      ${admKpi('smartphone',onlineDevices>0?'emerald':'amber','Android Gateways',`${onlineDevices} online`,`${devices.length} total paired devices`)}
+      ${admKpi('message-square','sky','SMS Sent Today',totalSmsSentToday,'across all shops')}
+      ${admKpi('mail','violet','Emails Sent Today',`${totalEmailSentToday} / ${ent.connectx_daily_limit||100}`,'central Brevo SMTP')}
+    </div>
+
+    <!-- Hardware Fleet Section -->
+    <section class="adm-panel">
+      <div class="adm-panel-head">
+        <div>
+          <h3>Android SMS Gateway Devices (${devices.length})</h3>
+          <p class="adm-desc">Real-time status of paired Android smartphones dispatching SMS through their physical SIM cards.</p>
+        </div>
+      </div>
+      <div id="cxDevicesContainer">
+        ${renderHardwareDevices(devices)}
+      </div>
+    </section>
+
+    <!-- Shop Gateway Management Section -->
+    <section class="adm-panel">
+      <div class="adm-panel-head">
+        <div>
+          <h3>Shop Communication & Gateway Controls</h3>
+          <p class="adm-desc">Enable or disable SMS Gateway and configure automated customer notifications per shop.</p>
+        </div>
+        <input id="cxShopSearch" class="adm-search" placeholder="Search shops by name or shop code..." style="max-width:280px;">
+      </div>
+      <div class="adm-storegrid" id="cxShopGrid">
+        ${renderShopGrid(shops)}
+      </div>
+    </section>
+  `;
+
+  // Bind Events
+  $('#cxRefreshBtn').onclick=()=>adminConnectX();
+  $('#cxPairGuideBtn').onclick=()=>showPairingGuideModal();
+  let pairGuideBtnInner=$('#cxHowToPairBtn');
+  if(pairGuideBtnInner)pairGuideBtnInner.onclick=()=>showPairingGuideModal();
+
+  $('#cxShopSearch').oninput=e=>{
+    let q=e.target.value.toLowerCase().trim();
+    let filtered=shops.filter(s=>!q||(s.name+' '+s.shop_code+' '+(s.phone||'')).toLowerCase().includes(q));
+    $('#cxShopGrid').innerHTML=renderShopGrid(filtered);
+    bindShopControls();
+  };
+
+  function bindShopControls(){
+    document.querySelectorAll('[data-goto-shop]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let shopId=btn.dataset.gotoShop;
+        try{
+          localStorage.setItem('ems.admin.return',JSON.stringify(state));
+          let s=await api('admin/store/'+shopId+'/goto',{method:'POST',body:'{}'});
+          save(s);
+          home();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-cx-save-shop]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let shopId=btn.dataset.cxSaveShop;
+        let card=document.querySelector(`.adm-storecard[data-shop-id="${shopId}"]`);
+        if(!card)return;
+
+        let smsEnabled=card.querySelector(`[data-shop-sms-toggle="${shopId}"]`)?.checked??true;
+        let autoSale=card.querySelector(`[data-trigger="auto_sale"][data-shop="${shopId}"]`)?.checked??true;
+        let autoPayment=card.querySelector(`[data-trigger="auto_payment"][data-shop="${shopId}"]`)?.checked??true;
+        let autoDueReminder=card.querySelector(`[data-trigger="auto_due_reminder"][data-shop="${shopId}"]`)?.checked??false;
+        let autoReturn=card.querySelector(`[data-trigger="auto_return"][data-shop="${shopId}"]`)?.checked??true;
+
+        btn.disabled=true;
+        btn.textContent='Saving...';
+        try{
+          await api('admin/connectx/shop/'+shopId,{
+            method:'PATCH',
+            body:JSON.stringify({
+              smsSettings:{
+                enabled:smsEnabled,
+                auto_sale:autoSale,
+                auto_payment:autoPayment,
+                auto_due_reminder:autoDueReminder,
+                auto_return:autoReturn,
+                auto_exchange:autoReturn,
+                auto_refund:autoReturn
+              }
+            })
+          });
+          toast('SMS Gateway settings saved.');
+          adminConnectX();
+        }catch(e){
+          toast(e.message);
+          btn.disabled=false;
+          btn.textContent='Save SMS Settings';
+        }
+      };
+    });
+  }
+
+  function bindDeviceControls(){
+    document.querySelectorAll('[data-cx-set-primary]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let devId=btn.dataset.cxSetPrimary;
+        try{
+          await api('connectx/devices/'+devId+'/primary',{method:'POST',body:'{}'});
+          toast('Device set as primary gateway.');
+          adminConnectX();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-cx-revoke]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let devId=btn.dataset.cxRevoke;
+        if(!confirm('Are you sure you want to revoke this Android Gateway device? It will stop dispatching SMS.'))return;
+        try{
+          await api('connectx/devices/'+devId+'/revoke',{method:'POST',body:'{}'});
+          toast('Device revoked.');
+          adminConnectX();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+  }
+
+  bindShopControls();
+  bindDeviceControls();
+}
+
 async function devices(){let rows=await api('admin/devices');const storesN=new Set(rows.map(x=>x.stores?.name).filter(Boolean)).size,staffN=new Set(rows.map(x=>x.staff?.user_id).filter(Boolean)).size,times=rows.map(x=>new Date(x.last_seen_at)).filter(d=>!isNaN(d)),last=times.sort((a,b)=>b-a)[0];
 $('#page').innerHTML=admHead('devices','This list records the most recent sign-in activity for each store and device fingerprint.')+`
   <div class="adm-grid adm-kpis">
@@ -2069,6 +3267,57 @@ async function connectX(){
       };
     }
 
+    function cxTable(rows){
+      if(!rows.length)return shpEmpty('No email history found.');
+      return `
+        <div class="shp-tw">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:130px;">Date</th>
+                <th style="width:200px;">Recipient(s)</th>
+                <th>Subject</th>
+                <th style="width:100px;">Status</th>
+                <th style="width:90px;text-align:right;">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map(r=>{
+                let tone=r.status==='sent'?'emerald':(r.status==='failed'?'rose':'sky');
+                let toList=Array.isArray(r.to_emails)?r.to_emails:(typeof r.to_emails==='string'?[r.to_emails]:[]);
+                let toText=toList.join(', ')||'—';
+                return `
+                  <tr>
+                    <td>
+                      <div style="font-family:var(--shp-mono);font-size:11.5px;color:var(--shp-text);">${new Date(r.created_at).toLocaleDateString()}</div>
+                      <small style="font-family:var(--shp-mono);font-size:10px;color:var(--shp-muted);">${new Date(r.created_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})} · ${ago(r.created_at)}</small>
+                    </td>
+                    <td class="shp-wrap">
+                      <div style="font-weight:600;font-size:12px;">${esc(toText)}</div>
+                      ${r.recipient_type?`<small class="shp-tag shp-t-zinc" style="font-size:10px;margin-top:2px;">${esc(r.recipient_type)}</small>`:''}
+                    </td>
+                    <td class="shp-wrap">
+                      <div style="font-weight:550;font-size:12.5px;">${esc(r.subject||'No subject')}</div>
+                      ${r.error_message?`<small style="color:var(--shp-rose);font-size:11px;display:block;">${esc(r.error_message)}</small>`:''}
+                    </td>
+                    <td>
+                      ${shpBadge(r.status==='sent'?'Delivered':(r.status==='failed'?'Failed':r.status),tone)}
+                    </td>
+                    <td style="text-align:right;">
+                      <span style="display:inline-flex;gap:4px;">
+                        <button class="shp-btn shp-btn-soft shp-btn-sm" data-cx-view="${r.id}">View</button>
+                        <button class="shp-icobtn shp-danger" data-cx-delete="${r.id}" title="Remove from shop history" aria-label="Remove from shop history">${lucide('x')}</button>
+                      </span>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
     async function emailSent(){
       $('#connectxEmailContent').innerHTML=`<section class="shp-pagegap">${SKEL.toolbar()+SKEL.table(5,6)}</section>`;
       let rows=await api('connectx/messages');
@@ -2118,6 +3367,15 @@ async function connectX(){
 
   async function renderSmsPortal(){
     let container=$('#connectxPortalContainer');
+    let smsSettings=await api('shop/sms-settings').catch(()=>({enabled:false}));
+    let isSmsEnabledByAdmin=smsSettings.enabled!==false;
+    let isConnectXActive=!!state.connectxEnabled;
+    let canCompose=isSmsEnabledByAdmin && isConnectXActive && canAccess('connectx','add');
+
+    if(!canCompose && smsTab==='compose'){
+      smsTab='history';
+    }
+
     container.innerHTML=`
       <div class="shp-cx">
         <aside class="shp-cx-side shp-t-sky">
@@ -2125,26 +3383,50 @@ async function connectX(){
             <span class="shp-chip-ic">${lucide('message-square')}</span>
             <div><b>SMS Gateway</b><small>SIM-based dispatch</small></div>
           </div>
-          <button class="tab ${smsTab==='compose'?'on':''}" data-sms-tab="compose">Compose<small>New SMS</small></button>
-          <button class="tab ${smsTab==='history'?'on':''}" data-sms-tab="history">History<small>Send queue</small></button>
+          <button class="tab ${smsTab==='compose'?'on':''}" data-sms-tab="compose" ${!canCompose?`disabled title="${!isSmsEnabledByAdmin?'SMS is disabled by the administrator for this shop':(!isConnectXActive?'ConnectX license expired':'Permission denied')}"`:''}>
+            Compose<small>${!isSmsEnabledByAdmin?'Disabled by Admin':(!isConnectXActive?'License Expired':'New SMS')}</small>
+          </button>
+          <button class="tab ${smsTab==='history'?'on':''}" data-sms-tab="history">
+            History<small>Send queue</small>
+          </button>
         </aside>
         <section id="connectxSmsContent"></section>
       </div>
     `;
 
-    document.querySelectorAll('[data-sms-tab]').forEach(b=>b.onclick=()=>{
-      smsTab=b.dataset.smsTab;
-      document.querySelectorAll('[data-sms-tab]').forEach(x=>x.classList.toggle('on',x===b));
-      if(smsTab==='compose')smsCompose();
-      else smsHistory();
+    document.querySelectorAll('[data-sms-tab]').forEach(b=>{
+      b.onclick=()=>{
+        if(b.disabled)return;
+        smsTab=b.dataset.smsTab;
+        document.querySelectorAll('[data-sms-tab]').forEach(x=>x.classList.toggle('on',x===b));
+        if(smsTab==='compose')smsCompose(canCompose,isSmsEnabledByAdmin,isConnectXActive);
+        else smsHistory();
+      };
     });
 
-    if(smsTab==='compose')await smsCompose();
+    if(smsTab==='compose'&&canCompose)await smsCompose(canCompose,isSmsEnabledByAdmin,isConnectXActive);
     else await smsHistory();
   }
 
-  async function smsCompose(){
+  async function smsCompose(canCompose=true,isSmsEnabledByAdmin=true,isConnectXActive=true){
     let c=$('#connectxSmsContent');
+    if(!canCompose){
+      c.innerHTML=`
+        <section class="shp-pagegap">
+          <div class="shp-panel" style="text-align:center;padding:36px 16px;">
+            <div style="display:inline-flex;padding:12px;border-radius:50%;background:color-mix(in srgb,var(--shp-rose) 14%,transparent);color:var(--shp-rose);margin-bottom:12px;">
+              ${lucide('shield')}
+            </div>
+            <h3 style="font-size:15px;margin:0 0 6px 0;">${!isSmsEnabledByAdmin?'SMS Gateway Disabled by Administrator':(!isConnectXActive?'ConnectX License Expired':'Permission Denied')}</h3>
+            <p class="shp-desc" style="max-width:440px;margin:0 auto 16px auto;line-height:1.5;">
+              ${!isSmsEnabledByAdmin?'The administrator has disabled SMS dispatch for this shop. You can browse and search past SMS history, but composing new SMS is disabled.':(!isConnectXActive?'Your ConnectX license or add-on is expired. You have read-only access to browse past SMS history.':'You do not have permission to compose new SMS.')}
+            </p>
+            <button type="button" class="shp-btn shp-btn-soft" onclick="document.querySelector('[data-sms-tab=\\'history\\']')?.click()">View SMS Queue History</button>
+          </div>
+        </section>
+      `;
+      return;
+    }
     c.innerHTML=`
       <section class="shp-pagegap">
         <div id="smsFeedbackBanner" style="display:none;"></div>
@@ -2452,7 +3734,7 @@ async function connectX(){
       let filtered=rows.filter(r=>{
         if(st && r.status!==st)return false;
         if(q){
-          let hay=`${r.recipient_name||''} ${r.to_phone||''} ${r.recipient_type||''} ${r.message_type||''} ${r.message_body||''} ${r.status||''} ${r.invoice_id||''}`.toLowerCase();
+          let hay=`${r.recipient_name||''} ${r.to_phone||''} ${r.recipient_type||''} ${r.message_type||''} ${r.message_body||''} ${r.status||''} ${r.invoice_number||''} ${r.invoice_id||''}`.toLowerCase();
           if(!hay.includes(q))return false;
         }
         return true;
@@ -2466,6 +3748,16 @@ async function connectX(){
     $('#smsRefreshBtn').onclick=smsHistory;
 
     bindSmsActions(rows);
+  }
+
+  function formatSmsInvoiceCode(r){
+    if(r.invoice_number)return r.invoice_number;
+    if(r.message_body){
+      let m=r.message_body.match(/\b(SAL|RET|EXC|PUR|INV)-[A-Z0-9-]+\b/i)||r.message_body.match(/(?:Invoice|Return|Exchange)\s+(?:#\s*)?([A-Z0-9-]+)/i);
+      if(m)return m[1]||m[0];
+    }
+    if(r.invoice_id)return shortId(r.invoice_id);
+    return null;
   }
 
   function renderSmsTable(rows){
@@ -2489,6 +3781,7 @@ async function connectX(){
             ${rows.map(r=>{
               let statusTone=r.status==='sent'?'emerald':(r.status==='failed'?'rose':(r.status==='sending'?'sky':'amber'));
               let recTone=r.recipient_type==='customer'?'violet':(r.recipient_type==='supplier'?'amber':'blue');
+              let docCode=formatSmsInvoiceCode(r);
               return `
                 <tr>
                   <td>
@@ -2508,7 +3801,7 @@ async function connectX(){
                     <span class="shp-tag shp-t-zinc" style="font-size:11px;">${esc(r.message_type||'SMS')}</span>
                   </td>
                   <td>
-                    ${r.invoice_id?`<code>${esc(shortId(r.invoice_id))}</code>`:'<span style="color:var(--shp-muted);">—</span>'}
+                    ${docCode?`<code>${esc(docCode)}</code>`:'<span style="color:var(--shp-muted);">—</span>'}
                   </td>
                   <td>
                     ${shpBadge(r.status==='queued'?'Queued':r.status,statusTone)}
@@ -2554,6 +3847,7 @@ async function connectX(){
   function smsInspectModal(msg){
     let statusTone=msg.status==='sent'?'emerald':(msg.status==='failed'?'rose':(msg.status==='sending'?'sky':'amber'));
     let stats=getSmsStats(msg.message_body);
+    let docCode=formatSmsInvoiceCode(msg);
 
     let e=shpModal(`SMS Details — ${esc(msg.to_phone)}`,`
       <div class="shp-pagegap" style="gap:14px;">
@@ -2568,6 +3862,12 @@ async function connectX(){
             <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Destination</small>
             <b style="font-family:var(--shp-mono);font-size:13px;display:block;margin-top:2px;">${esc(msg.to_phone)}</b>
             <small style="color:var(--shp-muted);font-size:10px;">Physical SIM SMS</small>
+          </div>
+
+          <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
+            <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Invoice / Ref</small>
+            <b style="font-family:var(--shp-mono);font-size:13px;display:block;margin-top:2px;">${esc(docCode||'—')}</b>
+            <small style="color:var(--shp-muted);font-size:10px;">${esc(msg.message_type||'SMS')}</small>
           </div>
 
           <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
@@ -2614,7 +3914,11 @@ async function connectX(){
 
   renderPortal();
 }
-function connectXView(message){let e=shpModal(esc(message.subject),`<div class="shp-cx-email"><div class="shp-cx-email-head"><div><h2>${esc(message.subject)}</h2><p class="shp-desc">To: ${esc(message.to_emails.join(', '))} · ${new Date(message.created_at).toLocaleString()}</p></div></div><div class="shp-cx-email-meta"><span>From: <b>${esc(message.from_email)}</b></span><span>Status: <b>${esc(message.status)}</b></span>${message.cc_emails?.length?`<span>CC: <b>${esc(message.cc_emails.join(', '))}</b></span>`:''}</div><iframe class="shp-cx-frame" sandbox="" srcdoc="${esc(message.body_html)}"></iframe></div>`,'shp-modal-xl')}
+function connectXView(message){
+  let toList=Array.isArray(message.to_emails)?message.to_emails.join(', '):(message.to_emails||'—');
+  let ccList=Array.isArray(message.cc_emails)?message.cc_emails.join(', '):(message.cc_emails||'');
+  let e=shpModal(esc(message.subject||'Email Details'),`<div class="shp-cx-email"><div class="shp-cx-email-head"><div><h2>${esc(message.subject||'No subject')}</h2><p class="shp-desc">To: ${esc(toList)} · ${new Date(message.created_at).toLocaleString()}</p></div></div><div class="shp-cx-email-meta"><span>From: <b>${esc(message.from_email||'—')}</b></span><span>Status: <b>${esc(message.status||'sent')}</b></span>${ccList?`<span>CC: <b>${esc(ccList)}</b></span>`:''}</div><iframe class="shp-cx-frame" sandbox="" srcdoc="${esc(message.body_html||message.custom_body||'')}"></iframe></div>`,'shp-modal-xl');
+}
 async function dueRecover(){
   if(!canAccess('due_recover','view')){toast('Permission denied.');return page('dashboard')}
   let history=[],modalState=null;
@@ -5026,72 +6330,79 @@ async function renderConnectXSmsSettings(el){
   let d;
   try{d=await api('shop/sms-settings')}catch(e){el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>ConnectX SMS</h3><p class="shp-desc">${esc(e.message)}</p></div></div></section>`;return}
   let t=d.templates||{};
-  let devices=d.devices||[];
   let today=d.today||{sent:0,failed:0,pending:0};
-  let chk=(k,label)=>`<label class="shp-toggle" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--shp-line)"><span>${label}</span><input type="checkbox" data-sms-flag="${k}" ${d[k]?'checked':''}></label>`;
+  let isExpired=!state.connectxEnabled&&state.connectxHistory;
+  let chk=(k,label)=>`<label class="shp-toggle" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--shp-line)"><span>${label}</span><input type="checkbox" data-sms-flag="${k}" ${d[k]?'checked':''} ${isExpired?'disabled':''}></label>`;
   el.innerHTML=`
     <section class="shp-panel">
-      <div class="shp-panel-head"><div><h3>SMS Gateway · ConnectX</h3><p class="shp-desc">Customer SMS is sent from the administrator's Android phone SIM. Sales are never blocked if the gateway is offline — jobs stay pending until a device claims them.</p></div>${shpBadge(d.enabled?'SMS on':'SMS off',d.enabled?'emerald':'zinc')}</div>
+      <div class="shp-panel-head">
+        <div>
+          <h3>SMS Gateway · ConnectX</h3>
+          <p class="shp-desc">Automated SMS notifications dispatched to customers via local Android SMS Gateway. Master gateway activation is configured from the Administrator Console.</p>
+        </div>
+        ${isExpired?shpBadge('ConnectX Expired (Read-Only)','amber'):(d.enabled?shpBadge('SMS Active','emerald'):shpBadge('Disabled by Admin','zinc'))}
+      </div>
+
+      ${isExpired?`
+        <div style="background:color-mix(in srgb,var(--shp-amber) 10%,var(--shp-card));border:1px solid color-mix(in srgb,var(--shp-amber) 30%,transparent);border-radius:10px;padding:12px;margin-bottom:12px;">
+          <b style="font-size:12px;color:var(--shp-amber);display:block;">ConnectX License Expired</b>
+          <p class="shp-desc" style="margin:4px 0 0 0;font-size:11.5px;color:var(--shp-text);">
+            Your administrator license or add-on plan for ConnectX has expired. Settings and message templates are currently in read-only mode.
+          </p>
+        </div>
+      `:''}
+
       <div class="shp-kv" style="margin-bottom:12px">
         <div><span>Gateway</span><b>ConnectX Android</b></div>
+        <div><span>Gateway Status</span><b>${d.enabled?'Enabled by Admin':'Disabled by Admin'}</b></div>
         <div><span>Sent today</span><b>${today.sent||0}</b></div>
-        <div><span>Pending</span><b>${today.pending||0}</b></div>
+        <div><span>Pending in queue</span><b>${today.pending||0}</b></div>
         <div><span>Failed today</span><b>${today.failed||0}</b></div>
       </div>
-      ${chk('enabled','Enable SMS for this shop')}
+
       ${chk('auto_sale','Automatic SMS on sale')}
       ${chk('auto_payment','Automatic SMS on payment / due recover')}
       ${chk('auto_due_reminder','Due reminder SMS (manual or scheduled)')}
       ${chk('auto_return','Automatic SMS on return')}
       ${chk('auto_exchange','Automatic SMS on exchange')}
       ${chk('auto_refund','Automatic SMS on refund')}
+
       <p class="shp-desc" style="margin-top:10px">Placeholders: {shop} {name} {invoice} {total} {paid} {due} {amount}</p>
       <div class="shp-grid2" style="margin-top:8px">
-        ${[['SALE','Sale'],['PAYMENT','Payment'],['DUE_REMINDER','Due reminder'],['RETURN','Return'],['EXCHANGE','Exchange'],['REFUND','Refund']].map(([k,l])=>`<label>${esc(l)} template<textarea data-sms-tpl="${k}" rows="3">${esc(t[k]||'')}</textarea></label>`).join('')}
+        ${[['SALE','Sale'],['PAYMENT','Payment'],['DUE_REMINDER','Due reminder'],['RETURN','Return'],['EXCHANGE','Exchange'],['REFUND','Refund']].map(([k,l])=>`<label>${esc(l)} template<textarea data-sms-tpl="${k}" rows="3" ${isExpired?'readonly':''}>${esc(t[k]||'')}</textarea></label>`).join('')}
       </div>
-      <div class="shp-form-actions" style="margin-top:12px"><button type="button" class="shp-btn shp-btn-primary" id="smsSaveBtn">Save SMS settings</button><button type="button" class="shp-btn shp-btn-soft" id="smsHistoryBtn">Open SMS history</button></div>
-    </section>
-    <section class="shp-panel">
-      <div class="shp-panel-head"><div><h3>ConnectX devices</h3><p class="shp-desc">Primary and secondary Android gateways for this shop. Revoke a device to disconnect it immediately.</p></div>${shpBadge(devices.filter(x=>x.status!=='revoked').length+' linked','sky')}</div>
-      ${devices.length?`<div class="shp-tw"><table><thead><tr><th>Device</th><th>SIM</th><th>Role</th><th>Status</th><th>Last seen</th><th></th></tr></thead><tbody>${devices.map(dev=>`<tr>
-        <td><b>${esc(dev.device_name||'Android phone')}</b><br><small class="shp-desc"><code>${esc(dev.device_public_id||dev.id)}</code></small></td>
-        <td>${esc(dev.sim_carrier||'—')}<br><small>${esc(dev.phone_number||'')}</small></td>
-        <td>${dev.is_primary?shpBadge('Primary','emerald'):shpBadge('Secondary','zinc')}</td>
-        <td>${dev.status==='revoked'?shpBadge('Revoked','rose'):(dev.online?shpBadge('Online','emerald'):shpBadge(esc(dev.status||'offline'),'amber'))}</td>
-        <td>${dev.last_seen?ago(dev.last_seen):'—'}</td>
-        <td style="text-align:right">${dev.status==='revoked'?'':`<button class="shp-btn shp-btn-soft shp-btn-sm" data-cx-primary="${dev.id}" ${dev.is_primary?'disabled':''}>Make primary</button> <button class="shp-btn shp-btn-sm shp-danger" data-cx-revoke="${dev.id}">Revoke</button>`}</td>
-      </tr>`).join('')}</tbody></table></div>`:shpEmpty('No ConnectX Android device is linked. Sign in to the ConnectX app with this administrator email to connect a phone.')}
+
+      <div class="shp-form-actions" style="margin-top:12px">
+        ${!isExpired?`<button type="button" class="shp-btn shp-btn-primary" id="smsSaveBtn">Save SMS settings</button>`:''}
+        <button type="button" class="shp-btn shp-btn-soft" id="smsHistoryBtn">Open SMS history</button>
+      </div>
     </section>`;
-  el.querySelector('#smsSaveBtn').onclick=async()=>{
-    let patch={templates:{}};
-    el.querySelectorAll('[data-sms-flag]').forEach(i=>patch[i.dataset.smsFlag]=i.checked);
-    el.querySelectorAll('[data-sms-tpl]').forEach(i=>patch.templates[i.dataset.smsTpl]=i.value);
-    try{await api('shop/sms-settings',{method:'PATCH',body:JSON.stringify(patch)});toast('SMS settings saved.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
-  };
+
+  if(!isExpired&&el.querySelector('#smsSaveBtn')){
+    el.querySelector('#smsSaveBtn').onclick=async()=>{
+      let patch={templates:{}};
+      el.querySelectorAll('[data-sms-flag]').forEach(i=>patch[i.dataset.smsFlag]=i.checked);
+      el.querySelectorAll('[data-sms-tpl]').forEach(i=>patch.templates[i.dataset.smsTpl]=i.value);
+      try{await api('shop/sms-settings',{method:'PATCH',body:JSON.stringify(patch)});toast('SMS settings saved.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
+    };
+  }
   el.querySelector('#smsHistoryBtn').onclick=()=>page('connectx');
-  el.querySelectorAll('[data-cx-revoke]').forEach(b=>b.onclick=async()=>{
-    if(!confirm('Revoke this ConnectX device? It will stop sending SMS until the administrator signs in again.'))return;
-    try{await api('connectx/devices/'+b.dataset.cxRevoke+'/revoke',{method:'POST',body:'{}'});toast('Device revoked.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
-  });
-  el.querySelectorAll('[data-cx-primary]').forEach(b=>b.onclick=async()=>{
-    try{await api('connectx/devices/'+b.dataset.cxPrimary+'/primary',{method:'POST',body:'{}'});toast('Primary device updated.');renderConnectXSmsSettings(el)}catch(e){toast(e.message)}
-  });
 }
 
 async function settings(initialTab='store'){
   let tab=initialTab;
-  $('#page').innerHTML=shpHead('Preferences','Settings','Store identity, ConnectX SMS gateway, and the shop audit log.')+`<div class="shp-chips"><button class="shp-chip ${tab==='store'?'on':''}" data-setting-tab="store">Store Details</button><button class="shp-chip ${tab==='sms'?'on':''}" data-setting-tab="sms">Communication</button><button class="shp-chip ${tab==='activity'?'on':''}" data-setting-tab="activity">Audit Log</button></div><div id="settingContent" class="shp-pagegap"></div>`;
+  let hasConnectX=!!state.connectxEnabled||!!state.connectxHistory;
+  if(tab==='sms'&&!hasConnectX)tab='store';
+
+  $('#page').innerHTML=shpHead('Preferences','Settings','Store identity and ConnectX SMS gateway settings.')+`<div class="shp-chips"><button class="shp-chip ${tab==='store'?'on':''}" data-setting-tab="store">Store Details</button>${hasConnectX?`<button class="shp-chip ${tab==='sms'?'on':''}" data-setting-tab="sms">ConnectX SMS</button>`:''}</div><div id="settingContent" class="shp-pagegap"></div>`;
   async function render(){
     let el=$('#settingContent');
     el.innerHTML=`<section class="shp-panel">${SKEL.head()}${tab==='store'?SKEL.kv(9):SKEL.toolbar()+SKEL.table(4,6)}</section>`;
     if(tab==='store'){
       let x=await api('shop/settings');
       el.innerHTML=`<section class="shp-panel"><div class="shp-panel-head"><div><h3>Store details</h3><p class="shp-desc">Managed by your administrator. Contact them to change store identity.</p></div>${shpBadge(x.status==='active'?'Active':'Inactive',x.status==='active'?'emerald':'zinc')}</div><div class="shp-kv"><div><span>Store name</span><b>${esc(x.name)}</b></div><div><span>Shop ID</span><b><code>${esc(x.shop_code)}</code></b></div><div><span>Shop category</span><b><span class="shp-tag shp-t-sky">${esc(x.category||'General Store')}</span></b></div><div><span>Address</span><b>${esc(x.address||'—')}</b></div><div><span>Phone</span><b>${esc(x.phone||'—')}${x.phone2?' / '+esc(x.phone2):''}</b></div><div><span>Email</span><b>${esc(x.email||'—')}</b></div><div><span>Website</span><b>${esc(x.website||'—')}</b></div><div><span>Low stock alert</span><b>${esc(x.low_stock_threshold)}</b></div><div><span>Status</span><b>${esc(x.status)}</b></div></div></section>`;
-    }else if(tab==='sms'){
+    }else if(tab==='sms'&&hasConnectX){
       await renderConnectXSmsSettings(el);
-    }else{
-      el.innerHTML=`<section class="shp-panel" id="auditPanel"><div class="shp-panel-head"><div><h3>Shop Audit Trail</h3><p class="shp-desc">Complete chronological audit trail across every module and page (Who, What, Where, When).</p></div></div><div id="auditContainer"></div></section>`;
-      await renderAuditLogView($('#auditContainer'));
     }
   }
   document.querySelectorAll('[data-setting-tab]').forEach(b=>b.onclick=()=>{

@@ -30,6 +30,7 @@ const BOOL_COLS = {
   staff_salary_invoices: ['attendance_based', 'add_outstanding', 'cut_advance'],
   connectx_devices: ['is_primary'],
   connectx_shop_sms_settings: ['enabled', 'auto_sale', 'auto_payment', 'auto_due_reminder', 'auto_return', 'auto_exchange', 'auto_refund'],
+  app_store_apps: ['mandatory', 'published'],
 };
 const JSON_COLS = {
   staff: ['permissions'],
@@ -55,7 +56,7 @@ const NON_UUID_PK = new Set([...SERIAL_TABLES, ...BOOL_PK_TABLES, 'platform_sett
 /* timestamp-column presence (mirrors the SQLite schema) */
 const HAS_UPDATED = new Set(['administrators', 'stores', 'staff', 'suppliers', 'customers', 'inventory_items', 'invoices', 'expenses',
   'ems_owners', 'license_plans', 'blog_posts', 'zudo_conversations', 'staff_salary_invoices', 'addon_checkout_settings', 'addon_settings',
-  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements', 'returns', 'exchanges', 'connectx_devices', 'connectx_shop_sms_settings']);
+  'connectx_settings', 'zudo_settings', 'business_health_settings', 'platform_settings', 'public_pages', 'current_entitlements', 'returns', 'exchanges', 'connectx_devices', 'connectx_shop_sms_settings', 'app_store_apps']);
 const NO_CREATED = new Set(['current_entitlements', 'zudo_settings', 'business_health_settings', 'connectx_settings',
   'addon_checkout_settings', 'platform_settings', 'public_pages', 'addon_settings',
   'device_logins', 'truebill_scans', 'invoice_lines']);

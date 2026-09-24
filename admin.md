@@ -6,11 +6,11 @@
 > they were before (proved by byte-identical screenshots before/after).
 
 The Administrator Panel ("admin console") is the workspace of a *business*:
-the person or team that runs one or more shops on EMS. It has exactly six
-pages — **Store Manage, Licenses, Premium Add-Ons, My profile,
-Devices, HelpDesk** — plus the flows that hang off them (create/edit store,
-shop capacity, enter-a-store, buy license, add-on cart & checkout, live chat
-with the platform owner).
+the person or team that runs one or more shops on EMS. Its core pages include
+**App Store, Store Manage, ConnectX, Licenses, Premium Add-Ons, My profile,
+Devices, HelpDesk** — plus the flows that hang off them (downloading official APKs,
+create/edit store, shop capacity, enter-a-store, buy license, add-on cart & checkout,
+live chat with the platform owner).
 
 ---
 

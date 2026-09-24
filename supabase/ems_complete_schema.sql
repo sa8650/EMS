@@ -981,6 +981,30 @@ on conflict(addon_key) do nothing;
 insert into public.zudo_settings(id) values (true) on conflict(id) do nothing;
 insert into public.business_health_settings(id) values (true) on conflict(id) do nothing;
 
+create table if not exists public.app_store_apps (
+  id                   uuid primary key default gen_random_uuid(),
+  package_name         text not null unique,
+  title                text not null,
+  description          text not null default '',
+  version              text not null default '1.4.0',
+  version_code         integer not null default 14,
+  icon_url             text not null default '',
+  icon_r2_key          text,
+  apk_url              text not null default '',
+  apk_r2_key           text,
+  r2_key               text,
+  apk_filename         text not null default '',
+  apk_size_bytes       bigint not null default 0,
+  mandatory            boolean not null default false,
+  release_notes        text not null default '',
+  published            boolean not null default true,
+  created_at           timestamptz not null default now(),
+  updated_at           timestamptz not null default now()
+);
+
+create index if not exists idx_app_store_pkg on public.app_store_apps(package_name);
+create index if not exists idx_app_store_pub on public.app_store_apps(published, version_code desc, created_at desc);
+
 -- ----------------------------------------------------------- RLS / SECURITY
 do $$
 declare t text;
@@ -994,7 +1018,7 @@ begin
     'business_health_settings','business_health_reports',
     'public_pages','blog_posts','contact_messages','truebill_scans',
     'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files',
-    'returns','return_items','inventory_stock_movements','exchanges','exchange_items']
+    'returns','return_items','inventory_stock_movements','exchanges','exchange_items','app_store_apps']
   loop
     execute format('revoke all on table public.%I from anon, authenticated', t);
     execute format('alter table public.%I enable row level security', t);

@@ -49,6 +49,7 @@ the app detects `role === "owner"` and boots the console.
 | Group | Page | What it's for |
 |---|---|---|
 | **Platform** | Overview | Live snapshot: administrators, shops, licenses, pending payments, activity |
+| | App Store | Central official application publisher — APK uploads, version codes, mandatory locks, release notes |
 | **Business** | License control | Approve / reject bKash·Nagad license payment claims |
 | | License plans | Create/edit plans — duration, limits, add-on entitlements |
 | | Administrators | Every business account; activate/deactivate, unlock |
@@ -93,11 +94,11 @@ ownerPage(p)
   ├─ updates the topbar title (#obTopTitle)
   ├─ paints a loading state  (obLoad)
   └─ dispatches to the page renderer:
-       ownerOverview · ownerLicenses · ownerPlans · ownerAdmins · ownerShops
+       ownerOverview · ownerAppStore · ownerLicenses · ownerPlans · ownerAdmins · ownerShops
        ownerBranding · ownerWebsitePages · ownerBlogs · ownerContactMessages
        ownerConnectX · ownerZudo · ownerTrueBill · ownerVaultium
        ownerHelpdesk · ownerAddons · ownerFactoryReset
-       (+ modals: planModal, blogModal, zudoLogModal, addonSetup)
+       (+ modals: appModal, planModal, blogModal, zudoLogModal, addonSetup)
 ```
 
 **Data flow is unchanged from the old panel** — the same endpoints, methods

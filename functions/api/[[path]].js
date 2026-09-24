@@ -156,7 +156,7 @@ function publicStaff(r){delete r.password_hash;return r}
 export async function onRequest(context){const {request,env,params}=context, path=(params.path||[]).join('/'), method=request.method;try{
  {let missing=['SESSION_SECRET'].filter(k=>!env[k]);if(!dbConfigured(env))missing.push(String(env.DB_DRIVER||'').toLowerCase()==='d1'?'DB (D1 binding)':'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or set DB_DRIVER=d1 with a D1 binding named DB)');if(missing.length)return fail('Server configuration is incomplete: missing '+missing.join(', ')+'.',500);}
  if(path==='auth/admin/register'&&method==='POST'){let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!b.phone||!email||!b.password||b.password.length<10)return fail('Name, phone, valid email and a 10-character password are required.');let exists=await db(env,`administrators?email=eq.${encodeURIComponent(email)}&select=id`);if(exists.length)return fail('That email is already registered.',409);let adminCode;for(let i=0;i<12;i++){adminCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`administrators?admin_code=eq.${adminCode}&select=id`);if(!used.length)break;adminCode=null}if(!adminCode)throw Error('Could not reserve an Administrator ID. Please retry.');let [a]=await db(env,'administrators',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name.trim(),address:b.address||null,phone:b.phone.trim(),email,password_hash:await hash(b.password),admin_code:adminCode})});return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
- if(path==='auth/admin/login'&&method==='POST'){let b=await body(request),[a]=await db(env,`administrators?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!a)return fail('Wrong email or password.',401);if(!a.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',a.password_hash))return fail('Wrong email or password.',401);return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
+ if(path==='auth/admin/login'&&method==='POST'){let b=await body(request),[a]=await db(env,`administrators?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!a)return fail('Wrong email or password.',401);if(!a.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',a.password_hash))return fail('Wrong email or password.',401);return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,admin_code:a.admin_code,name:a.name,email:a.email,phone:a.phone,address:a.address,active:a.active,created_at:a.created_at},role:'admin'});}
  if(path==='auth/shop/login'&&method==='POST'){let b=await body(request),[store]=await db(env,`stores?shop_code=eq.${encodeURIComponent(b.storeId||'')}&select=id,status,name,admin_id,category`);if(!store)return fail('Wrong Shop ID.',401);if(!await enforceEntitlement(env,store.admin_id))store.status='read_only';if(store.status==='inactive')return fail('This shop is deactivated. Contact the administrator.',403);let [st]=await db(env,`staff?store_id=eq.${store.id}&user_id=eq.${encodeURIComponent(b.userId||'')}&select=*`), fp=request.headers.get('cf-connecting-ip')+'|'+request.headers.get('user-agent');if(st){if(!st.active)return fail('This user account is deactivated. Contact your shop administrator.',403);if(!await check(b.password||'',st.password_hash))return fail('Wrong user ID or password.',401);await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:st.id,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'staff',actor_id:st.id,action:'staff login',entity_type:'session',entity_id:st.id,metadata:{user_id:st.user_id,staff_name:st.full_name,user_agent:request.headers.get('user-agent'),ip:request.headers.get('cf-connecting-ip')}})});return json({token:await token({id:st.id,role:'staff',storeId:store.id,permissions:normalizePermissions(st.permissions||{}),readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:st.id,name:st.full_name},store:{id:store.id,name:store.name,category:store.category||'General Store'},role:'staff',readOnly:store.status==='read_only'})}let [admin]=await db(env,`administrators?id=eq.${store.admin_id}&email=eq.${encodeURIComponent((b.userId||'').toLowerCase())}&select=*`);if(!admin)return fail('Wrong user ID or password.',401);if(!admin.active)return fail('Your administrator account is deactivated. Contact EMS support.',403);if(!await check(b.password||'',admin.password_hash))return fail('Wrong user ID or password.',401);let permissions=Object.fromEntries(PERMISSION_SECTIONS.map(x=>[x,PERMISSION_ACTIONS]));await db(env,'device_logins?on_conflict=store_id,device_fingerprint',{method:'POST',headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},body:JSON.stringify({store_id:store.id,staff_id:null,device_fingerprint:fp,user_agent:request.headers.get('user-agent')})});await db(env,'activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:store.id,actor_type:'admin',actor_id:admin.id,action:'administrator shop login',entity_type:'store',entity_id:store.id,metadata:{admin_email:admin.email,admin_name:admin.name,user_agent:request.headers.get('user-agent'),ip:request.headers.get('cf-connecting-ip')}})});let adminReturn={token:await token({id:admin.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name,email:admin.email},role:'admin'};return json({token:await token({id:admin.id,role:'staff',storeId:store.id,permissions,adminAccess:true,readOnly:store.status==='read_only',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:admin.id,name:admin.name},store:{id:store.id,name:store.name,category:store.category||'General Store'},role:'staff',adminAccess:true,readOnly:store.status==='read_only',adminReturn})}
  if(path==='auth/ems/register'&&method==='POST'){let owners=await db(env,'ems_owners?select=id&limit=1');if(owners.length)return fail('The EMS owner has already been initialized. Use EMS login.',403);let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!email||!b.password||b.password.length<12)return fail('Name, email, and a password of at least 12 characters are required.');let [o]=await db(env,'ems_owners',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name,email,password_hash:await hash(b.password)})});return json({token:await token({id:o.id,role:'owner',exp:Math.floor(Date.now()/1000)+14400},env.SESSION_SECRET),user:{id:o.id,name:o.name,email:o.email},role:'owner'});}
  if(path==='auth/ems/login'&&method==='POST'){let b=await body(request),[o]=await db(env,`ems_owners?email=eq.${encodeURIComponent((b.email||'').toLowerCase())}&select=*`);if(!o)return fail('Wrong EMS email or password.',401);if(!o.active)return fail('This EMS owner account is deactivated.',403);if(!await check(b.password||'',o.password_hash))return fail('Wrong EMS email or password.',401);return json({token:await token({id:o.id,role:'owner',exp:Math.floor(Date.now()/1000)+14400},env.SESSION_SECRET),user:{id:o.id,name:o.name,email:o.email},role:'owner'});}
@@ -281,8 +281,498 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='platform/contact-messages'&&method==='GET'){if(s.role!=='owner')return fail('Forbidden',403);return json(await db(env,'contact_messages?select=*&order=created_at.desc&limit=300'))}
  if(path==='platform/settings'){ if(s.role!=='owner')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,'platform_settings?setting_key=eq.branding&select=*');return json(x?.setting_value||{})}if(method==='PATCH'){let b=await body(request);let [x]=await db(env,'platform_settings?setting_key=eq.branding',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({setting_value:b,updated_by:s.id,updated_at:new Date().toISOString()})});return json(x)}}
  if(path.startsWith('platform/license/')){if(s.role!=='owner')return fail('Forbidden',403);let id=path.split('/')[2];if(method==='PATCH'){let b=await body(request),[l]=await db(env,`licenses?id=eq.${id}&select=*`);if(!l)return fail('License not found',404);if(!['active','rejected'].includes(b.status))return fail('Use active or rejected status.',400);let starts=null,expires=null,transactionType='new';if(b.status==='active'){let current=await currentEntitlement(env,l.admin_id),now=new Date();if(current?.current_license_id){let [old]=await db(env,`licenses?id=eq.${current.current_license_id}&select=plan_id,max_stores,connectx_enabled`);if(old?.plan_id===l.plan_id){transactionType='renewal';starts=current.expires_at&&new Date(current.expires_at)>now?new Date(current.expires_at):now}else if(l.max_stores>current.shop_limit||(!current.connectx_enabled&&l.connectx_enabled)){transactionType='upgrade';starts=now}else{transactionType='downgrade';starts=now}}else starts=now;expires=new Date(starts);expires.setMonth(expires.getMonth()+l.duration_months)}let [x]=await db(env,`licenses?id=eq.${id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:b.status,transaction_type:transactionType,starts_at:starts?.toISOString(),expires_at:expires?.toISOString(),reviewed_at:new Date().toISOString(),reviewed_by:null,review_note:b.reviewNote||null})});if(b.status==='active')await db(env,'rpc/apply_current_entitlement',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({p_license_id:id})});await db(env,'platform_activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({owner_id:s.id,action:b.status+' '+transactionType+' license',entity_type:'license',entity_id:id})});return json(x)}}
+
+ /* ══════════════════════════════════════════════════════════════════════
+    EMS OFFICIAL APP STORE (Platform Owner Publisher & Storefront Engine)
+    ══════════════════════════════════════════════════════════════════════ */
+ const DEFAULT_CONNECTX_UUID = '00000000-0000-0000-0000-000000000001';
+ const DEFAULT_CONNECTX_APP = {
+   id: DEFAULT_CONNECTX_UUID,
+   package_name: 'com.ems.connectx',
+   title: 'ConnectX SMS Gateway',
+   description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
+   version: '1.4.0',
+   version_code: 14,
+   icon_url: '/assets/android-chrome-192.png',
+   icon_r2_key: null,
+   apk_url: 'https://github.com/sa8650/ConnectX/releases/download/v1.4.0/ConnectX-v1.4.0.apk',
+   apk_r2_key: null,
+   r2_key: null,
+   apk_size_bytes: 8645200,
+   apk_filename: 'ConnectX-1.4.0.apk',
+   mandatory: false,
+   release_notes: '• Real-time SIM-based SMS dispatch for Sales, Due Reminders, Returns & Exchanges\n• Multi-SIM slot selection with carrier & phone identification\n• Background foreground service and persistent device heartbeat\n• Modern Light UI theme with pure white background & responsive controls\n• Integrated In-App Update system with mandatory version locking',
+   published: true,
+   created_at: new Date('2026-09-01T00:00:00Z').toISOString(),
+   updated_at: new Date().toISOString()
+ };
+
+ function getAppStorageBucket(e) {
+   return e.APP_STORAGE || e.APPS_BUCKET || e.VAULTIUM || e.MEDIA_BUCKET || null;
+ }
+
+ async function deleteR2KeysForApp(bucket, app) {
+   if (!bucket || !app) return;
+   const keysToDelete = new Set();
+   if (app.apk_r2_key) keysToDelete.add(app.apk_r2_key);
+   if (app.r2_key) keysToDelete.add(app.r2_key);
+   if (app.icon_r2_key) keysToDelete.add(app.icon_r2_key);
+
+   if (typeof app.apk_url === 'string' && app.apk_url.includes('/api/app-store/file/')) {
+     let extractedKey = decodeURIComponent(app.apk_url.split('/api/app-store/file/')[1] || '').trim();
+     if (extractedKey) keysToDelete.add(extractedKey);
+   }
+   if (typeof app.icon_url === 'string' && app.icon_url.includes('/api/app-store/file/')) {
+     let extractedKey = decodeURIComponent(app.icon_url.split('/api/app-store/file/')[1] || '').trim();
+     if (extractedKey) keysToDelete.add(extractedKey);
+   }
+
+   for (const k of keysToDelete) {
+     if (k && typeof k === 'string' && k.trim()) {
+       try { await bucket.delete(k.trim()); } catch (err) { console.error('R2 delete failed for key:', k, err); }
+     }
+   }
+
+   // Also list and delete all objects under app-store/{package_name}/ prefix
+   const pkg = String(app.package_name || '').trim();
+   if (pkg && typeof bucket.list === 'function') {
+     try {
+       const listed = await bucket.list({ prefix: `app-store/${pkg}/` });
+       if (listed && listed.objects) {
+         for (const obj of listed.objects) {
+           try { await bucket.delete(obj.key); } catch (e) {}
+         }
+       }
+     } catch (e) {}
+   }
+ }
+
+ async function ensureAppStoreSeed(e) {
+   try {
+     let existing = await db(e, 'app_store_apps?select=id&limit=1').catch(() => []);
+     if (!existing || existing.length === 0) {
+       let seedRecord = { ...DEFAULT_CONNECTX_APP };
+       delete seedRecord.id;
+       await db(e, 'app_store_apps', {
+         method: 'POST',
+         headers: { 'content-type': 'application/json' },
+         body: JSON.stringify(seedRecord)
+       }).catch(() => {});
+     }
+   } catch {}
+ }
+
+ const UUID_FORMAT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+ if (path === 'platform/app-store' && s.role === 'owner') {
+   await ensureAppStoreSeed(env);
+   if (method === 'GET') {
+     let rows = await db(env, 'app_store_apps?select=*&order=version_code.desc,created_at.desc').catch(() => []);
+     return json(rows || []);
+   }
+   if (method === 'POST') {
+     let b = await body(request);
+     let title = String(b.title || '').trim();
+     let pkg = String(b.package_name || b.packageName || '').trim();
+     if (!title || !pkg) return fail('App title and package name are required.', 400);
+     let version = String(b.version || '1.0.0').trim();
+     let versionCode = parseInt(b.version_code || b.versionCode || 1, 10);
+     let iconUrl = String(b.icon_url || b.iconUrl || '/assets/android-chrome-192.png').trim();
+     let iconR2Key = b.icon_r2_key || b.iconR2Key || null;
+     let apkUrl = String(b.apk_url || b.apkUrl || `/api/app-store/download/${encodeURIComponent(pkg)}`).trim();
+     let apkSize = parseInt(b.apk_size_bytes || b.apkSizeBytes || 0, 10);
+     let apkFilename = String(b.apk_filename || b.apkFilename || `${title.replace(/[^a-zA-Z0-9]/g, '')}-${version}.apk`).trim();
+     let apkR2Key = b.apk_r2_key || b.apkR2Key || b.r2_key || b.r2Key || null;
+     let mandatory = !!(b.mandatory === true || b.mandatory === 'true' || b.mandatory === 1);
+     let releaseNotes = String(b.release_notes || b.releaseNotes || '').trim();
+     let published = b.published !== false && b.published !== 'false' && b.published !== 0;
+
+     let record = {
+       package_name: pkg,
+       title,
+       description: String(b.description || '').trim(),
+       version,
+       version_code: versionCode,
+       icon_url: iconUrl,
+       icon_r2_key: iconR2Key,
+       apk_url: apkUrl,
+       apk_r2_key: apkR2Key,
+       r2_key: apkR2Key,
+       apk_size_bytes: apkSize,
+       apk_filename: apkFilename,
+       mandatory,
+       release_notes: releaseNotes,
+       published,
+       updated_at: new Date().toISOString()
+     };
+
+     // Check if this package name already exists to prevent duplicate conflicts
+     let existing = await db(env, `app_store_apps?package_name=eq.${encodeURIComponent(pkg)}&select=*`).catch(() => []);
+     let resultApp = null;
+     let bucket = getAppStorageBucket(env);
+
+     if (existing && existing.length > 0) {
+       let targetId = existing[0].id;
+       // Clean up previous R2 file if a new file key is being uploaded
+       if (bucket && existing[0].apk_r2_key && existing[0].apk_r2_key !== apkR2Key) {
+         try { await bucket.delete(existing[0].apk_r2_key); } catch {}
+       }
+       if (bucket && existing[0].icon_r2_key && existing[0].icon_r2_key !== iconR2Key) {
+         try { await bucket.delete(existing[0].icon_r2_key); } catch {}
+       }
+       let [updated] = await db(env, `app_store_apps?id=eq.${targetId}`, {
+         method: 'PATCH',
+         headers: { 'content-type': 'application/json' },
+         body: JSON.stringify(record)
+       });
+       resultApp = updated || { ...record, id: targetId };
+       await audit(env, s, 'update app', 'app_store', targetId, { title, package_name: pkg, version, version_code: versionCode, mandatory });
+     } else {
+       record.created_at = new Date().toISOString();
+       let [created] = await db(env, 'app_store_apps', {
+         method: 'POST',
+         headers: { 'content-type': 'application/json' },
+         body: JSON.stringify(record)
+       });
+       resultApp = created || record;
+       await audit(env, s, 'publish app', 'app_store', resultApp?.id || pkg, { title, package_name: pkg, version, version_code: versionCode, mandatory });
+     }
+
+     return json({ ok: true, app: resultApp }, 201);
+   }
+ }
+
+ if (path.startsWith('platform/app-store/') && s.role === 'owner') {
+   let subPath = path.replace('platform/app-store/', '');
+   if (subPath === 'upload' && method === 'POST') {
+     let form = await request.formData();
+     let file = form.get('file');
+     let uploadType = String(form.get('type') || 'apk');
+     let pkg = String(form.get('packageName') || form.get('package_name') || 'com.ems.app').trim();
+     let vCode = String(form.get('versionCode') || form.get('version_code') || '1').trim();
+     if (!file || typeof file === 'string') return fail('No file uploaded.', 400);
+
+     let bucket = getAppStorageBucket(env);
+     let r2Key = `app-store/${pkg}/${uploadType === 'icon' ? 'icons' : 'apk'}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+
+     if (uploadType === 'icon') {
+       let arrayBuf = await file.arrayBuffer();
+       let base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+       let mime = file.type || 'image/png';
+       let dataUri = `data:${mime};base64,${base64}`;
+
+       if (bucket) {
+         try {
+           await bucket.put(r2Key, arrayBuf, {
+             httpMetadata: { contentType: mime }
+           });
+           return json({
+             ok: true,
+             icon_r2_key: r2Key,
+             r2_key: r2Key,
+             filename: file.name,
+             size_bytes: file.size,
+             file_url: `/api/app-store/file/${encodeURIComponent(r2Key)}`,
+             stored_in_r2: true
+           });
+         } catch (e) {
+           console.error('R2 icon put failed:', e);
+         }
+       }
+
+       return json({
+         ok: true,
+         icon_r2_key: null,
+         r2_key: null,
+         filename: file.name,
+         size_bytes: file.size,
+         file_url: dataUri,
+         stored_in_r2: false
+       });
+     }
+
+     // APK Upload
+     if (bucket) {
+       try {
+         await bucket.put(r2Key, file.stream(), {
+           httpMetadata: { contentType: file.type || 'application/vnd.android.package-archive' }
+         });
+       } catch (e) {
+         console.error('R2 APK put failed:', e);
+       }
+     }
+     let fileUrl = bucket ? `/api/app-store/file/${encodeURIComponent(r2Key)}` : `/api/app-store/download/${encodeURIComponent(pkg)}`;
+     return json({
+       ok: true,
+       apk_r2_key: r2Key,
+       r2_key: r2Key,
+       filename: file.name,
+       size_bytes: file.size,
+       file_url: fileUrl,
+       stored_in_r2: !!bucket
+     });
+   }
+
+   let appId = subPath;
+   if (method === 'PATCH') {
+     let b = await body(request);
+     let patch = { updated_at: new Date().toISOString() };
+     if (b.title !== undefined) patch.title = String(b.title).trim();
+     if (b.description !== undefined) patch.description = String(b.description).trim();
+     if (b.package_name !== undefined || b.packageName !== undefined) patch.package_name = String(b.package_name || b.packageName).trim();
+     if (b.version !== undefined) patch.version = String(b.version).trim();
+     if (b.version_code !== undefined || b.versionCode !== undefined) patch.version_code = parseInt(b.version_code || b.versionCode, 10);
+     if (b.icon_url !== undefined || b.iconUrl !== undefined) patch.icon_url = String(b.icon_url || b.iconUrl).trim();
+     if (b.icon_r2_key !== undefined || b.iconR2Key !== undefined) patch.icon_r2_key = b.icon_r2_key || b.iconR2Key || null;
+     if (b.apk_url !== undefined || b.apkUrl !== undefined) patch.apk_url = String(b.apk_url || b.apkUrl).trim();
+     if (b.apk_size_bytes !== undefined || b.apkSizeBytes !== undefined) patch.apk_size_bytes = parseInt(b.apk_size_bytes || b.apkSizeBytes, 10);
+     if (b.apk_filename !== undefined || b.apkFilename !== undefined) patch.apk_filename = String(b.apk_filename || b.apkFilename).trim();
+     if (b.apk_r2_key !== undefined || b.apkR2Key !== undefined || b.r2_key !== undefined || b.r2Key !== undefined) {
+       patch.apk_r2_key = b.apk_r2_key || b.apkR2Key || b.r2_key || b.r2Key || null;
+       patch.r2_key = patch.apk_r2_key;
+     }
+     if (b.mandatory !== undefined) patch.mandatory = !!(b.mandatory === true || b.mandatory === 'true' || b.mandatory === 1);
+     if (b.release_notes !== undefined || b.releaseNotes !== undefined) patch.release_notes = String(b.release_notes || b.releaseNotes).trim();
+     if (b.published !== undefined) patch.published = !!(b.published === true || b.published === 'true' || b.published === 1);
+
+     let isUuid = UUID_FORMAT.test(appId);
+     let query = isUuid ? `app_store_apps?id=eq.${appId}` : `app_store_apps?package_name=eq.${encodeURIComponent(appId)}`;
+     let [updated] = await db(env, query, {
+       method: 'PATCH',
+       headers: { 'content-type': 'application/json' },
+       body: JSON.stringify(patch)
+     }).catch(() => []);
+     await audit(env, s, 'update app', 'app_store', appId, patch);
+     return json({ ok: true, app: updated });
+   }
+
+   if (method === 'DELETE') {
+     let isUuid = UUID_FORMAT.test(appId);
+     let query = isUuid ? `app_store_apps?id=eq.${appId}` : `app_store_apps?package_name=eq.${encodeURIComponent(appId)}`;
+     let appsToDelete = await db(env, `${query}&select=*`).catch(() => []);
+     if (!appsToDelete || appsToDelete.length === 0) {
+       appsToDelete = await db(env, `app_store_apps?package_name=eq.${encodeURIComponent(appId)}&select=*`).catch(() => []);
+     }
+
+     let bucket = getAppStorageBucket(env);
+
+     for (let app of appsToDelete) {
+       // 1. Delete all R2 storage objects associated with this application
+       await deleteR2KeysForApp(bucket, app);
+
+       // 2. Delete database record
+       if (app.id) {
+         await db(env, `app_store_apps?id=eq.${app.id}`, { method: 'DELETE' }).catch(() => {});
+       }
+     }
+
+     if (isUuid && (!appsToDelete || appsToDelete.length === 0)) {
+       await db(env, `app_store_apps?id=eq.${appId}`, { method: 'DELETE' }).catch(() => {});
+     }
+
+     await audit(env, s, 'delete app', 'app_store', appId, { count: appsToDelete.length });
+     return json({ ok: true, deleted: true, count: appsToDelete.length });
+   }
+ }
+
+ if (path === 'app-store/apps' && method === 'GET') {
+   await ensureAppStoreSeed(env);
+   let rows = await db(env, 'app_store_apps?select=*&order=version_code.desc,created_at.desc').catch(() => []);
+   let publishedRows = (rows || []).filter(r => r.published !== false && r.published !== 0 && r.published !== 'false' && r.published !== '0');
+   return json(publishedRows.length ? publishedRows : (rows || []));
+ }
+
+ if (path === 'app-store/check-update' && method === 'GET') {
+   await ensureAppStoreSeed(env);
+   let urlObj = new URL(request.url);
+   let pkg = (urlObj.searchParams.get('package') || 'com.ems.connectx').trim();
+   let rows = await db(env, 'app_store_apps?select=*').catch(() => []);
+   let matches = (rows || []).filter(a => {
+     let p = String(a.package_name || '').trim().toLowerCase();
+     let matchPkg = p === pkg.toLowerCase() || (pkg.toLowerCase() === 'com.ems.connectx' && (p === '' || p.includes('connectx') || String(a.title || '').toLowerCase().includes('connectx')));
+     let isPub = a.published !== false && a.published !== 0 && a.published !== 'false' && a.published !== '0';
+     return matchPkg && isPub;
+   });
+
+   matches.sort((a, b) => Number(b.version_code || 0) - Number(a.version_code || 0));
+   let target = matches[0] || (pkg.toLowerCase() === 'com.ems.connectx' ? DEFAULT_CONNECTX_APP : null);
+   if (!target) return fail('App not found in App Store.', 404);
+
+   let origin = urlObj.origin;
+   let dl = target.apk_url || `/api/app-store/download/${encodeURIComponent(target.package_name)}`;
+   if (dl.startsWith('/')) dl = `${origin}${dl}`;
+   let isMandatory = !!(target.mandatory === true || target.mandatory === 1 || target.mandatory === 'true');
+
+   return json({
+     ok: true,
+     hasUpdate: true,
+     title: target.title || 'ConnectX SMS Gateway',
+     description: target.description || '',
+     latestVersion: target.version || '1.4.0',
+     version: target.version || '1.4.0',
+     versionCode: Number(target.version_code || 14),
+     version_code: Number(target.version_code || 14),
+     mandatory: isMandatory,
+     downloadUrl: dl,
+     download_url: dl,
+     apk_filename: target.apk_filename || `${target.package_name || 'ConnectX'}-${target.version || '1.4.0'}.apk`,
+     apk_size_bytes: Number(target.apk_size_bytes || 8645200),
+     releaseNotes: target.release_notes || 'Official EMS App Store release.',
+     release_notes: target.release_notes || 'Official EMS App Store release.',
+     updated_at: target.updated_at || new Date().toISOString()
+   });
+ }
+
+ if (path.startsWith('app-store/download/')) {
+   let rawTarget = decodeURIComponent(path.replace('app-store/download/', '')).trim();
+   let isUuid = UUID_FORMAT.test(rawTarget);
+   let query = isUuid ? `app_store_apps?id=eq.${rawTarget}&select=*` : `app_store_apps?package_name=eq.${encodeURIComponent(rawTarget)}&select=*&order=version_code.desc&limit=1`;
+   let [app] = await db(env, query).catch(() => []);
+   if (!app && isUuid) {
+     [app] = await db(env, `app_store_apps?package_name=eq.${encodeURIComponent(rawTarget)}&select=*&order=version_code.desc&limit=1`).catch(() => []);
+   }
+   let target = app || (rawTarget === 'com.ems.connectx' || rawTarget.includes('connectx') ? DEFAULT_CONNECTX_APP : null);
+
+   let bucket = getAppStorageBucket(env);
+   let r2KeyToFetch = target?.apk_r2_key || target?.r2_key;
+   if (!r2KeyToFetch && target?.apk_url && target.apk_url.startsWith('/api/app-store/file/')) {
+     r2KeyToFetch = decodeURIComponent(target.apk_url.replace('/api/app-store/file/', ''));
+   }
+
+   // 1. Try reading directly from R2 Storage via key
+   if (r2KeyToFetch && bucket) {
+     try {
+       let obj = await bucket.get(r2KeyToFetch);
+       if (obj) {
+         let fn = target?.apk_filename || `${target?.package_name || 'app'}.apk`;
+         return new Response(obj.body, {
+           headers: {
+             'content-type': 'application/vnd.android.package-archive',
+             'content-disposition': `attachment; filename="${encodeURIComponent(fn)}"`,
+             'access-control-allow-origin': '*',
+             'cache-control': 'public, max-age=3600'
+           }
+         });
+       }
+     } catch (e) {
+       console.error('R2 download fetch failed:', e);
+     }
+   }
+
+   // 2. Try redirecting if apk_url is an external link
+   if (target?.apk_url && (target.apk_url.startsWith('http://') || target.apk_url.startsWith('https://'))) {
+     return Response.redirect(target.apk_url, 302);
+   }
+
+   // 3. Fallback for ConnectX to official GitHub releases binary
+   if (target?.package_name === 'com.ems.connectx' || rawTarget.includes('connectx')) {
+     return Response.redirect('https://github.com/sa8650/ConnectX/releases/download/v1.4.0/ConnectX-v1.4.0.apk', 302);
+   }
+
+   return fail('APK file not available on the server.', 404);
+ }
+
+ if (path.startsWith('app-store/file/')) {
+   let key = decodeURIComponent(path.replace('app-store/file/', ''));
+   let bucket = getAppStorageBucket(env);
+   if (!bucket) return fail('Storage not configured.', 503);
+   let obj = await bucket.get(key);
+   if (!obj) return fail('File not found in storage.', 404);
+   let isApk = key.endsWith('.apk');
+   let contentType = isApk ? 'application/vnd.android.package-archive' : (obj.httpMetadata?.contentType || 'application/octet-stream');
+   return new Response(obj.body, {
+     headers: {
+       'content-type': contentType,
+       'content-disposition': isApk ? `attachment; filename="${encodeURIComponent(key.split('/').pop())}"` : 'inline',
+       'access-control-allow-origin': '*',
+       'cache-control': 'public, max-age=86400'
+     }
+   });
+ }
  if(path==='admin/entitlement'){if(s.role!=='admin')return fail('Forbidden',403);let [entitlement,anyLic]=await Promise.all([enforceEntitlement(env,s.id),db(env,`licenses?admin_id=eq.${s.id}&select=id&limit=1`)]);return json({active:!!entitlement,hasActivatedLicense:anyLic.length>0,expiresAt:entitlement?.expires_at||null,shopLimit:entitlement?.shop_limit||0,truebill_enabled:!!entitlement?.truebill_enabled,vaultium_gb:Number(entitlement?.vaultium_gb||0),zudo_enabled:!!entitlement?.zudo_enabled,business_health_enabled:!!entitlement?.business_health_enabled,connectx_enabled:!!entitlement?.connectx_enabled})}
- if(path==='admin/profile'){if(s.role!=='admin')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,`administrators?id=eq.${s.id}&select=id,name,address,phone,email,created_at`);return json(x)}if(method==='PATCH'){let b=await body(request);if(b.password){if(b.password.length<10)return fail('Password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password}let [x]=await db(env,`administrators?id=eq.${s.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});return json({id:x.id,name:x.name,address:x.address,phone:x.phone,email:x.email})}}
+ if(path==='admin/profile'){if(s.role!=='admin')return fail('Forbidden',403);if(method==='GET'){let [x]=await db(env,`administrators?id=eq.${s.id}&select=id,admin_code,name,address,phone,email,active,created_at`);return json(x)}if(method==='PATCH'){let b=await body(request);if(b.password){if(b.password.length<10)return fail('Password must contain at least 10 characters.');b.password_hash=await hash(b.password);delete b.password}let [x]=await db(env,`administrators?id=eq.${s.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(b))});return json({id:x.id,admin_code:x.admin_code,name:x.name,address:x.address,phone:x.phone,email:x.email,active:x.active,created_at:x.created_at})}}
+ if(path==='admin/connectx/overview'&&method==='GET'){
+  if(s.role!=='admin')return fail('Forbidden',403);
+  let today=new Date().toISOString().slice(0,10);
+  let [stores,entitlement,devices,smsSettingsRows,emailUsage,smsUsage]=await Promise.all([
+    db(env,`stores?admin_id=eq.${s.id}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`),
+    currentEntitlement(env,s.id),
+    db(env,`connectx_devices?administrator_id=eq.${s.id}&select=*&order=last_seen.desc`).catch(()=>[]),
+    db(env,'connectx_shop_sms_settings?select=*').catch(()=>[]),
+    db(env,`connectx_messages?created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id,store_id`).catch(()=>[]),
+    db(env,`connectx_sms_messages?created_at=gte.${today}T00:00:00Z&select=id,store_id,status`).catch(()=>[])
+  ]);
+  let smsMap=Object.fromEntries(smsSettingsRows.map(x=>[x.store_id,x]));
+  let devByStore={};
+  for(let d of devices){
+    (devByStore[d.store_id]||=[]).push({
+      ...d,
+      online:(d.last_seen&&(Date.now()-new Date(d.last_seen).getTime())<3*60*1000)&&d.status!=='revoked'
+    });
+  }
+  let emailCountByStore={},smsCountByStore={};
+  for(let e of emailUsage)emailCountByStore[e.store_id]=(emailCountByStore[e.store_id]||0)+1;
+  for(let sm of smsUsage){
+    let c=(smsCountByStore[sm.store_id]||={sent:0,failed:0,pending:0});
+    if(sm.status==='sent')c.sent++;
+    else if(sm.status==='failed')c.failed++;
+    else if(sm.status==='queued'||sm.status==='sending')c.pending++;
+  }
+  let storeNames=Object.fromEntries(stores.map(x=>[x.id,x.name]));
+  return json({
+    entitlement,
+    devices:devices.map(d=>({
+      ...d,
+      shop_name:storeNames[d.store_id]||'General Shop',
+      online:(d.last_seen&&(Date.now()-new Date(d.last_seen).getTime())<3*60*1000)&&d.status!=='revoked'
+    })),
+    shops:stores.map(st=>({
+      id:st.id,
+      name:st.name,
+      shop_code:st.shop_code,
+      status:st.status,
+      category:st.category,
+      address:st.address,
+      phone:st.phone,
+      email:{
+        enabled:!!entitlement?.connectx_enabled,
+        dailyLimit:entitlement?.connectx_daily_limit||0,
+        usedToday:emailCountByStore[st.id]||0
+      },
+      sms:{
+        settings:smsMap[st.id]||{
+          store_id:st.id,enabled:true,gateway_mode:'connectx',
+          auto_sale:true,auto_payment:true,auto_due_reminder:false,
+          auto_return:true,auto_exchange:true,auto_refund:true
+        },
+        today:smsCountByStore[st.id]||{sent:0,failed:0,pending:0},
+        connected:(devByStore[st.id]||[]).some(d=>(d.status==='active'||d.status==='pending_test')&&d.status!=='revoked'),
+        devices:devByStore[st.id]||[]
+      }
+    }))
+  });
+ }
+ if(path.startsWith('admin/connectx/shop/')&&method==='PATCH'){
+  if(s.role!=='admin')return fail('Forbidden',403);
+  let storeId=path.split('/')[3];
+  let [st]=await db(env,`stores?id=eq.${storeId}&admin_id=eq.${s.id}&select=id`);
+  if(!st)return fail('Shop not found for this administrator.',404);
+  let b=await body(request);
+  if(b.smsSettings){
+    let patch={store_id:storeId,updated_at:new Date().toISOString()};
+    for(let k of ['enabled','auto_sale','auto_payment','auto_due_reminder','auto_return','auto_exchange','auto_refund']){
+      if(b.smsSettings[k]!==undefined)patch[k]=!!b.smsSettings[k];
+    }
+    if(b.smsSettings.gateway_mode)patch.gateway_mode=String(b.smsSettings.gateway_mode);
+    await db(env,'connectx_shop_sms_settings?on_conflict=store_id',{
+      method:'POST',
+      headers:{'content-type':'application/json',Prefer:'resolution=merge-duplicates,return=representation'},
+      body:JSON.stringify(patch)
+    });
+  }
+  await audit(env,s,'update ConnectX shop settings','connectx',storeId,{changes:Object.keys(b)});
+  return json({ok:true});
+ }
  if(path==='admin/connectx-usage'){if(s.role!=='admin')return fail('Forbidden',403);let stores=await db(env,`stores?admin_id=eq.${s.id}&select=id,name,shop_code`),today=new Date().toISOString().slice(0,10),out=[];for(let store of stores){let plan=await connectxPlan(env,store.id),used=await db(env,`connectx_messages?store_id=eq.${store.id}&created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id`);out.push({...store,enabled:!!plan,dailyLimit:plan?.connectx_daily_limit||0,usedToday:used.length,expiresAt:plan?.expires_at||null})}return json(out)}
  if(path==='admin/zudo-usage'&&method==='GET'){if(s.role!=='admin')return fail('Forbidden',403);let stores=await db(env,`stores?admin_id=eq.${s.id}&select=id,name,shop_code,status`),today=new Date().toISOString().slice(0,10),out=await Promise.all(stores.map(async store=>{let used=await db(env,`zudo_messages?store_id=eq.${store.id}&role=eq.user&created_at=gte.${today}T00:00:00Z&select=id`),plan=await zudoPlan(env,store.id),enabled=!!plan&&store.status==='active',dailyLimit=enabled?Number(plan.zudo_daily_limit||0):0;return {...store,enabled,dailyLimit,usedToday:used.length,remaining:Math.max(0,dailyLimit-used.length),expiresAt:enabled?plan.expires_at:null}}));return json(out)}
  if(path==='admin/devices'){if(s.role!=='admin')return fail('Forbidden',403);return json(await db(env,`device_logins?select=*,stores!inner(name),staff(full_name,user_id)&stores.admin_id=eq.${s.id}&order=last_seen_at.desc`));}
@@ -871,7 +1361,7 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  }
  if(path==='shop/settings'){if(!s.storeId)return fail('Shop access required.',403);if(method==='GET'){let [store]=await db(env,`stores?id=eq.${s.storeId}&select=name,shop_code,address,phone,phone2,email,website,low_stock_threshold,status,category`);return json(store)}if(method==='PATCH'){if(!allowed(s,'settings','edit')&&s.role!=='admin')return fail('Permission denied.',403);let b=await body(request),allowedKeys=['address','phone','phone2','email','website','low_stock_threshold','category'],patchData={};for(let k of allowedKeys){if(b[k]!==undefined)patchData[k]=b[k];}if(patchData.low_stock_threshold!==undefined)patchData.low_stock_threshold=Number(patchData.low_stock_threshold);let [updated]=await db(env,`stores?id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean(patchData))});await audit(env,s,'update store settings','settings',s.storeId,{fields:Object.keys(patchData)});return json(updated)}}
  if(path==='shop/audit-log'&&method==='POST'){if(!s.storeId)return fail('Shop access required.',403);let b=await body(request);await audit(env,s,b.action||'client action',b.entity_type||'system',b.entity_id||null,b.metadata||{});return json({ok:true})}
- if(path==='shop/activity-logs'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [logs,staffs,suppliers,customers,items,expenses,invoices,returnsList,exchangesList,storesList,adminsList]=await Promise.all([db(env,`activity_logs?store_id=eq.${s.storeId}&select=*&order=created_at.desc&limit=500`),db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`),db(env,`suppliers?store_id=eq.${s.storeId}&select=id,supplier_code,name`),db(env,`customers?store_id=eq.${s.storeId}&select=id,customer_code,name`),db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,sale_price`),db(env,`expenses?store_id=eq.${s.storeId}&select=id,expense_code,total,category`),db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number,kind,subtotal,paid_amount,total_due,payment_method`),db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,total_return_amount,refunded_amount,refund_method,invoice_id`).catch(()=>[]),db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,difference_amount,invoice_id`).catch(()=>[]),db(env,`stores?id=eq.${s.storeId}&select=id,name,admin_id,shop_code,category`).catch(()=>[]),db(env,`administrators?select=id,name,email,admin_code`).catch(()=>[])]);let currentStore=storesList[0]||{},adminMap=Object.fromEntries(adminsList.map(a=>[a.id,a])),storeAdmin=adminMap[currentStore.admin_id]||null,staffMap=Object.fromEntries(staffs.map(x=>[x.id,x])),supplierMap=Object.fromEntries(suppliers.map(x=>[x.id,x])),customerMap=Object.fromEntries(customers.map(x=>[x.id,x])),itemMap=Object.fromEntries(items.map(x=>[x.id,x])),expenseMap=Object.fromEntries(expenses.map(x=>[x.id,x])),invoiceMap=Object.fromEntries(invoices.map(x=>[x.id,x])),returnMap=Object.fromEntries(returnsList.map(x=>[x.id,x])),exchangeMap=Object.fromEntries(exchangesList.map(x=>[x.id,x]));let out=logs.map(x=>{let meta=typeof x.metadata==='string'?JSON.parse(x.metadata||'{}'):(x.metadata||{});let actor={userId:'SYSTEM',name:'System',role:'System',tone:'zinc'};if(x.actor_type==='admin'){let a=adminMap[x.actor_id]||storeAdmin;actor={userId:a?.admin_code?`ADMIN-${a.admin_code}`:'ADMIN',name:a?.name||'Administrator',role:'Administrator',email:a?.email||null,tone:'sky'}}else if(x.actor_type==='staff'){let st=staffMap[x.actor_id];actor={userId:st?.user_id||meta?.user_id||'STAFF',name:st?.full_name||meta?.staff_name||'Staff Member',role:'Staff',tone:'emerald'}}else if(x.actor_type==='owner'){actor={userId:'OWNER',name:'Platform Owner',role:'EMS Owner',tone:'violet'}};let ent=String(x.entity_type||'').toLowerCase(),act=String(x.action||'').toLowerCase(),where={module:'General',slug:'dashboard',icon:'grid',tone:'zinc'};if(ent.includes('sale invoice')||ent==='sales'||(act.includes('sale')&&!act.includes('return')&&!act.includes('exchange')))where={module:'Sales',slug:'sales',icon:'receipt',tone:'emerald'};else if(ent.includes('purchase invoice')||ent==='purchases'||ent==='purchase'||act.includes('purchase'))where={module:'Purchases',slug:'purchases',icon:'cart',tone:'amber'};else if(ent==='returns'||ent==='exchanges'||act.includes('return')||act.includes('exchange'))where={module:'Return & Exchange',slug:'returns-refunds',icon:'rotate-ccw',tone:'cyan'};else if(ent==='inventory'||act.includes('stock')||ent.includes('item'))where={module:'Inventory',slug:'inventory',icon:'package',tone:'sky'};else if(ent==='customer'||act.includes('customer'))where={module:'Customers',slug:'customers',icon:'users',tone:'violet'};else if(ent==='supplier'||act.includes('supplier'))where={module:'Suppliers',slug:'suppliers',icon:'truck',tone:'amber'};else if(ent==='expense'||act.includes('expense'))where={module:'Expense',slug:'expense',icon:'wallet',tone:'rose'};else if(act.includes('due')||ent.includes('due'))where={module:'Due Recover',slug:'due-recover',icon:'coins',tone:'sky'};else if(ent==='staff'||act.includes('staff account'))where={module:'Staff Manager',slug:'staff-manager',icon:'user-check',tone:'blue'};else if(ent==='attendance'||act.includes('attendance'))where={module:'Attendance',slug:'attendance',icon:'clock',tone:'indigo'};else if(ent==='staff_salary'||act.includes('salary'))where={module:'Salary',slug:'salary',icon:'banknote',tone:'emerald'};else if(ent==='connectx'||act.includes('connectx')||act.includes('email'))where={module:'ConnectX',slug:'connectx',icon:'mail',tone:'sky'};else if(ent==='zudo'||act.includes('zudo'))where={module:'Zudo AI',slug:'zudo',icon:'sparkles',tone:'purple'};else if(ent==='vaultium'||act.includes('vaultium')||act.includes('file'))where={module:'Vaultium',slug:'vaultium',icon:'file',tone:'teal'};else if(ent==='report'||act.includes('report')||act.includes('health'))where={module:'Report',slug:'report',icon:'chart',tone:'blue'};else if(ent==='store'||ent==='settings'||act.includes('setting'))where={module:'Settings',slug:'settings',icon:'settings',tone:'zinc'};else if(ent==='session'||act.includes('login')||act.includes('access'))where={module:'Access & Auth',slug:'dashboard',icon:'shield',tone:'emerald'};let inv=invoiceMap[x.entity_id],ret=returnMap[x.entity_id],exc=exchangeMap[x.entity_id],itm=itemMap[x.entity_id],cst=customerMap[x.entity_id],sup=supplierMap[x.entity_id],exp=expenseMap[x.entity_id],stf=staffMap[x.entity_id];let code=meta.invoice_number||meta.return_number||meta.exchange_number||meta.code||inv?.invoice_number||ret?.return_number||exc?.exchange_number||itm?.item_code||cst?.customer_code||sup?.supplier_code||exp?.expense_code||stf?.user_id||(x.entity_id?shortId(x.entity_id):'—');let name=meta.name||meta.description||meta.full_name||meta.category||itm?.description||cst?.name||sup?.name||exp?.category||stf?.full_name||'';let actionLabel=x.action,actionTone='zinc',summary='';if(act==='post'&&ent.includes('sale')){actionLabel='Sale Invoice Posted';actionTone='emerald';let tot=meta.total??inv?.subtotal,paid=meta.paid??meta.paid_amount??inv?.paid_amount;summary=`Posted sales invoice ${code}${tot!==undefined?` (Total: ৳ ${tot}${paid!==undefined?`, Paid: ৳ ${paid}`:''})`:''}`;}else if(act==='post'&&ent.includes('purchase')){actionLabel='Purchase Invoice Posted';actionTone='amber';let tot=meta.total??inv?.subtotal;summary=`Posted purchase invoice ${code}${tot!==undefined?` (Total: ৳ ${tot})`:''}`;}else if(act==='delete'&&ent.includes('invoice')){actionLabel='Invoice Deleted';actionTone='rose';summary=`Deleted invoice ${code}`;}else if(act.includes('return')){actionLabel='Sales Return & Refund';actionTone='cyan';let amt=meta.amount??ret?.total_return_amount;summary=`Processed return ${code} for invoice ${meta.invoice_number||'order'}${amt?` (Refund: ৳ ${amt})`:''}`;}else if(act.includes('exchange')){actionLabel='Sales Exchange';actionTone='cyan';let diff=meta.difference??exc?.difference_amount;summary=`Processed exchange ${code} for invoice ${meta.invoice_number||'order'}${diff!==undefined?` (Difference: ৳ ${diff})`:''}`;}else if(act.includes('recover due')){actionLabel='Due Recovered';actionTone='sky';let amt=meta.amount;summary=`Recovered due on ${code}${amt?` (Amount: ৳ ${amt}${meta.paymentMethod?' via '+meta.paymentMethod:''})`:''}`;}else if(act==='create'&&ent==='inventory'){actionLabel='Item Created';actionTone='emerald';summary=`Added inventory item ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='inventory'){actionLabel='Item Updated';actionTone='amber';summary=`Updated inventory item ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='inventory'){actionLabel='Item Deleted';actionTone='rose';summary=`Deleted inventory item ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='customer'){actionLabel='Customer Added';actionTone='emerald';summary=`Registered customer ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='customer'){actionLabel='Customer Updated';actionTone='amber';summary=`Updated customer ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='customer'){actionLabel='Customer Deleted';actionTone='rose';summary=`Deleted customer ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='supplier'){actionLabel='Supplier Added';actionTone='emerald';summary=`Registered supplier ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='supplier'){actionLabel='Supplier Updated';actionTone='amber';summary=`Updated supplier ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='supplier'){actionLabel='Supplier Deleted';actionTone='rose';summary=`Deleted supplier ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='expense'){actionLabel='Expense Recorded';actionTone='rose';let tot=meta.total??exp?.total;summary=`Recorded shop expense ${code}${tot?` (Total: ৳ ${tot})`:''}`;}else if(act==='update'&&ent==='expense'){actionLabel='Expense Updated';actionTone='amber';summary=`Updated shop expense ${code}`;}else if(act==='delete'&&ent==='expense'){actionLabel='Expense Deleted';actionTone='rose';summary=`Deleted shop expense ${code}`;}else if(act==='create'&&ent==='staff'){actionLabel='Staff Account Created';actionTone='emerald';summary=`Created staff account ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='staff'){actionLabel='Staff Account Updated';actionTone='amber';summary=`Updated staff account ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='staff'){actionLabel='Staff Account Deleted';actionTone='rose';summary=`Removed staff account ${code}`;}else if(act.includes('attendance')){actionLabel='Attendance Logged';actionTone='indigo';summary=`Recorded attendance for ${meta.staff_count||meta.count||'staff members'}${meta.date?` on ${meta.date}`:''}`;}else if(act==='create salary invoice'){actionLabel='Salary Issued';actionTone='blue';summary=`Created salary invoice ${code}${meta.staff_name?` for ${meta.staff_name}`:''}${meta.total?` (৳ ${meta.total})`:''}`;}else if(act==='delete salary invoice'){actionLabel='Salary Voided';actionTone='rose';summary=`Voided salary invoice ${code}`;}else if(act.includes('sms')||ent==='sms'){actionLabel=act.includes('delete')||act.includes('cancel')?'ConnectX SMS Cancelled':'ConnectX SMS Queued';actionTone=act.includes('delete')?'rose':'sky';summary=act.includes('delete')?`Cancelled queued SMS to ${meta.to_phone||'recipient'}`:`Queued ConnectX SMS to ${meta.recipient_name||meta.to_phone||'recipient'} (${meta.message_type||'SMS'})`;}else if(act.includes('email')||act.includes('connectx')){actionLabel=act.includes('hide')?'ConnectX Archived':'ConnectX Email Sent';actionTone=act.includes('hide')?'zinc':'sky';summary=act.includes('hide')?`Archived ConnectX email record`:`Dispatched business email to ${meta.to||'recipient'}${meta.documentType?` (${meta.documentType})`:''}`;}else if(act.includes('zudo')){actionLabel=act.includes('hide')?'Zudo Query Cleared':'Zudo AI Request';actionTone=act.includes('hide')?'zinc':'purple';summary=act.includes('hide')?`Archived Zudo AI conversation`:`Executed Zudo AI analytical query`;}else if(act.includes('vaultium')||act.includes('file')){actionLabel=act.includes('delete')?'Vaultium File Deleted':'Vaultium File Uploaded';actionTone=act.includes('delete')?'rose':'teal';summary=act.includes('delete')?`Deleted attachment from Vaultium: ${meta.filename||'file'}`:`Uploaded ${meta.count||1} file(s) to Vaultium${meta.filenames?': '+meta.filenames.join(', '):''}`;}else if(act.includes('health')||ent.includes('health')){actionLabel='AI Health Diagnostic';actionTone='blue';summary=`Generated AI Business Health diagnosis report${meta.score?` (Score: ${meta.score}/100)`:''}`;}else if(act==='staff login'){actionLabel='Staff Sign-In';actionTone='emerald';summary=`Staff member ${actor.name} (${actor.userId}) signed in to shop terminal`;}else if(act==='administrator shop login'){actionLabel='Admin Sign-In';actionTone='sky';summary=`Administrator ${actor.name} signed in to shop terminal`;}else if(act==='administrator shop access'){actionLabel='Admin Console Switch';actionTone='sky';summary=`Administrator switched into shop terminal from admin console`;}else if(ent==='store'||ent==='settings'||act.includes('setting')){actionLabel='Settings Updated';actionTone='zinc';summary=`Updated shop configuration${meta.fields?.length?` (${meta.fields.join(', ')})`:''}`;}else{actionLabel=x.action;summary=`${x.action} on ${x.entity_type||'record'} ${code}`;}return {id:x.id,created_at:x.created_at,actor,who:actor,where,what:{action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,label:actionLabel,tone:actionTone,code,name,summary,metadata:meta},action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,detail:code,summary,metadata:meta};});return json(out)}
+ if(path==='shop/activity-logs'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);let [logs,staffs,suppliers,customers,items,expenses,invoices,returnsList,exchangesList,storesList,adminsList]=await Promise.all([db(env,`activity_logs?store_id=eq.${s.storeId}&select=*&order=created_at.desc&limit=500`),db(env,`staff?store_id=eq.${s.storeId}&select=id,user_id,full_name`),db(env,`suppliers?store_id=eq.${s.storeId}&select=id,supplier_code,name`),db(env,`customers?store_id=eq.${s.storeId}&select=id,customer_code,name`),db(env,`inventory_items?store_id=eq.${s.storeId}&select=id,item_code,description,sale_price`),db(env,`expenses?store_id=eq.${s.storeId}&select=id,expense_code,total,details`).catch(()=>[]),db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number,kind,subtotal,paid_amount,total_due,payment_method`),db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number,total_return_amount,refunded_amount,refund_method,invoice_id`).catch(()=>[]),db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number,difference_amount,invoice_id`).catch(()=>[]),db(env,`stores?id=eq.${s.storeId}&select=id,name,admin_id,shop_code,category`).catch(()=>[]),db(env,`administrators?select=id,name,email,admin_code`).catch(()=>[])]);let currentStore=storesList[0]||{},adminMap=Object.fromEntries(adminsList.map(a=>[a.id,a])),storeAdmin=adminMap[currentStore.admin_id]||null,staffMap=Object.fromEntries(staffs.map(x=>[x.id,x])),supplierMap=Object.fromEntries(suppliers.map(x=>[x.id,x])),customerMap=Object.fromEntries(customers.map(x=>[x.id,x])),itemMap=Object.fromEntries(items.map(x=>[x.id,x])),expenseMap=Object.fromEntries(expenses.map(x=>[x.id,x])),invoiceMap=Object.fromEntries(invoices.map(x=>[x.id,x])),returnMap=Object.fromEntries(returnsList.map(x=>[x.id,x])),exchangeMap=Object.fromEntries(exchangesList.map(x=>[x.id,x]));let out=logs.map(x=>{let meta=typeof x.metadata==='string'?JSON.parse(x.metadata||'{}'):(x.metadata||{});let actor={userId:'SYSTEM',name:'System',role:'System',tone:'zinc'};if(x.actor_type==='admin'){let a=adminMap[x.actor_id]||storeAdmin;actor={userId:a?.admin_code?`ADMIN-${a.admin_code}`:'ADMIN',name:a?.name||'Administrator',role:'Administrator',email:a?.email||null,tone:'sky'}}else if(x.actor_type==='staff'){let st=staffMap[x.actor_id];actor={userId:st?.user_id||meta?.user_id||'STAFF',name:st?.full_name||meta?.staff_name||'Staff Member',role:'Staff',tone:'emerald'}}else if(x.actor_type==='owner'){actor={userId:'OWNER',name:'Platform Owner',role:'EMS Owner',tone:'violet'}};let ent=String(x.entity_type||'').toLowerCase(),act=String(x.action||'').toLowerCase(),where={module:'General',slug:'dashboard',icon:'grid',tone:'zinc'};if(ent.includes('sale invoice')||ent==='sales'||(act.includes('sale')&&!act.includes('return')&&!act.includes('exchange')))where={module:'Sales',slug:'sales',icon:'receipt',tone:'emerald'};else if(ent.includes('purchase invoice')||ent==='purchases'||ent==='purchase'||act.includes('purchase'))where={module:'Purchases',slug:'purchases',icon:'cart',tone:'amber'};else if(ent==='returns'||ent==='exchanges'||act.includes('return')||act.includes('exchange'))where={module:'Return & Exchange',slug:'returns-refunds',icon:'rotate-ccw',tone:'cyan'};else if(ent==='inventory'||act.includes('stock')||ent.includes('item'))where={module:'Inventory',slug:'inventory',icon:'package',tone:'sky'};else if(ent==='customer'||act.includes('customer'))where={module:'Customers',slug:'customers',icon:'users',tone:'violet'};else if(ent==='supplier'||act.includes('supplier'))where={module:'Suppliers',slug:'suppliers',icon:'truck',tone:'amber'};else if(ent==='expense'||act.includes('expense'))where={module:'Expense',slug:'expense',icon:'wallet',tone:'rose'};else if(act.includes('due')||ent.includes('due'))where={module:'Due Recover',slug:'due-recover',icon:'coins',tone:'sky'};else if(ent==='staff'||act.includes('staff account'))where={module:'Staff Manager',slug:'staff-manager',icon:'user-check',tone:'blue'};else if(ent==='attendance'||act.includes('attendance'))where={module:'Attendance',slug:'attendance',icon:'clock',tone:'indigo'};else if(ent==='staff_salary'||act.includes('salary'))where={module:'Salary',slug:'salary',icon:'banknote',tone:'emerald'};else if(ent==='connectx'||act.includes('connectx')||act.includes('email'))where={module:'ConnectX',slug:'connectx',icon:'mail',tone:'sky'};else if(ent==='zudo'||act.includes('zudo'))where={module:'Zudo AI',slug:'zudo',icon:'sparkles',tone:'purple'};else if(ent==='vaultium'||act.includes('vaultium')||act.includes('file'))where={module:'Vaultium',slug:'vaultium',icon:'file',tone:'teal'};else if(ent==='report'||act.includes('report')||act.includes('health'))where={module:'Report',slug:'report',icon:'chart',tone:'blue'};else if(ent==='store'||ent==='settings'||act.includes('setting'))where={module:'Settings',slug:'settings',icon:'settings',tone:'zinc'};else if(ent==='session'||act.includes('login')||act.includes('access'))where={module:'Access & Auth',slug:'dashboard',icon:'shield',tone:'emerald'};let inv=invoiceMap[x.entity_id],ret=returnMap[x.entity_id],exc=exchangeMap[x.entity_id],itm=itemMap[x.entity_id],cst=customerMap[x.entity_id],sup=supplierMap[x.entity_id],exp=expenseMap[x.entity_id],stf=staffMap[x.entity_id];let code=meta.invoice_number||meta.return_number||meta.exchange_number||meta.code||inv?.invoice_number||ret?.return_number||exc?.exchange_number||itm?.item_code||cst?.customer_code||sup?.supplier_code||exp?.expense_code||stf?.user_id||(x.entity_id?shortId(x.entity_id):'—');let name=meta.name||meta.description||meta.full_name||meta.category||itm?.description||cst?.name||sup?.name||exp?.details||stf?.full_name||'';let actionLabel=x.action,actionTone='zinc',summary='';if(act==='post'&&ent.includes('sale')){actionLabel='Sale Invoice Posted';actionTone='emerald';let tot=meta.total??inv?.subtotal,paid=meta.paid??meta.paid_amount??inv?.paid_amount;summary=`Posted sales invoice ${code}${tot!==undefined?` (Total: ৳ ${tot}${paid!==undefined?`, Paid: ৳ ${paid}`:''})`:''}`;}else if(act==='post'&&ent.includes('purchase')){actionLabel='Purchase Invoice Posted';actionTone='amber';let tot=meta.total??inv?.subtotal;summary=`Posted purchase invoice ${code}${tot!==undefined?` (Total: ৳ ${tot})`:''}`;}else if(act==='delete'&&ent.includes('invoice')){actionLabel='Invoice Deleted';actionTone='rose';summary=`Deleted invoice ${code}`;}else if(act.includes('return')){actionLabel='Sales Return & Refund';actionTone='cyan';let amt=meta.amount??ret?.total_return_amount;summary=`Processed return ${code} for invoice ${meta.invoice_number||'order'}${amt?` (Refund: ৳ ${amt})`:''}`;}else if(act.includes('exchange')){actionLabel='Sales Exchange';actionTone='cyan';let diff=meta.difference??exc?.difference_amount;summary=`Processed exchange ${code} for invoice ${meta.invoice_number||'order'}${diff!==undefined?` (Difference: ৳ ${diff})`:''}`;}else if(act.includes('recover due')){actionLabel='Due Recovered';actionTone='sky';let amt=meta.amount;summary=`Recovered due on ${code}${amt?` (Amount: ৳ ${amt}${meta.paymentMethod?' via '+meta.paymentMethod:''})`:''}`;}else if(act==='create'&&ent==='inventory'){actionLabel='Item Created';actionTone='emerald';summary=`Added inventory item ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='inventory'){actionLabel='Item Updated';actionTone='amber';summary=`Updated inventory item ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='inventory'){actionLabel='Item Deleted';actionTone='rose';summary=`Deleted inventory item ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='customer'){actionLabel='Customer Added';actionTone='emerald';summary=`Registered customer ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='customer'){actionLabel='Customer Updated';actionTone='amber';summary=`Updated customer ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='customer'){actionLabel='Customer Deleted';actionTone='rose';summary=`Deleted customer ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='supplier'){actionLabel='Supplier Added';actionTone='emerald';summary=`Registered supplier ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='supplier'){actionLabel='Supplier Updated';actionTone='amber';summary=`Updated supplier ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='supplier'){actionLabel='Supplier Deleted';actionTone='rose';summary=`Deleted supplier ${code}${name?` (${name})`:''}`;}else if(act==='create'&&ent==='expense'){actionLabel='Expense Recorded';actionTone='rose';let tot=meta.total??exp?.total;summary=`Recorded shop expense ${code}${tot?` (Total: ৳ ${tot})`:''}`;}else if(act==='update'&&ent==='expense'){actionLabel='Expense Updated';actionTone='amber';summary=`Updated shop expense ${code}`;}else if(act==='delete'&&ent==='expense'){actionLabel='Expense Deleted';actionTone='rose';summary=`Deleted shop expense ${code}`;}else if(act==='create'&&ent==='staff'){actionLabel='Staff Account Created';actionTone='emerald';summary=`Created staff account ${code}${name?` (${name})`:''}`;}else if(act==='update'&&ent==='staff'){actionLabel='Staff Account Updated';actionTone='amber';summary=`Updated staff account ${code}${name?` (${name})`:''}`;}else if(act==='delete'&&ent==='staff'){actionLabel='Staff Account Deleted';actionTone='rose';summary=`Removed staff account ${code}`;}else if(act.includes('attendance')){actionLabel='Attendance Logged';actionTone='indigo';summary=`Recorded attendance for ${meta.staff_count||meta.count||'staff members'}${meta.date?` on ${meta.date}`:''}`;}else if(act==='create salary invoice'){actionLabel='Salary Issued';actionTone='blue';summary=`Created salary invoice ${code}${meta.staff_name?` for ${meta.staff_name}`:''}${meta.total?` (৳ ${meta.total})`:''}`;}else if(act==='delete salary invoice'){actionLabel='Salary Voided';actionTone='rose';summary=`Voided salary invoice ${code}`;}else if(act.includes('sms')||ent==='sms'){actionLabel=act.includes('delete')||act.includes('cancel')?'ConnectX SMS Cancelled':'ConnectX SMS Queued';actionTone=act.includes('delete')?'rose':'sky';summary=act.includes('delete')?`Cancelled queued SMS to ${meta.to_phone||'recipient'}`:`Queued ConnectX SMS to ${meta.recipient_name||meta.to_phone||'recipient'} (${meta.message_type||'SMS'})`;}else if(act.includes('email')||act.includes('connectx')){actionLabel=act.includes('hide')?'ConnectX Archived':'ConnectX Email Sent';actionTone=act.includes('hide')?'zinc':'sky';summary=act.includes('hide')?`Archived ConnectX email record`:`Dispatched business email to ${meta.to||'recipient'}${meta.documentType?` (${meta.documentType})`:''}`;}else if(act.includes('zudo')){actionLabel=act.includes('hide')?'Zudo Query Cleared':'Zudo AI Request';actionTone=act.includes('hide')?'zinc':'purple';summary=act.includes('hide')?`Archived Zudo AI conversation`:`Executed Zudo AI analytical query`;}else if(act.includes('vaultium')||act.includes('file')){actionLabel=act.includes('delete')?'Vaultium File Deleted':'Vaultium File Uploaded';actionTone=act.includes('delete')?'rose':'teal';summary=act.includes('delete')?`Deleted attachment from Vaultium: ${meta.filename||'file'}`:`Uploaded ${meta.count||1} file(s) to Vaultium${meta.filenames?': '+meta.filenames.join(', '):''}`;}else if(act.includes('health')||ent.includes('health')){actionLabel='AI Health Diagnostic';actionTone='blue';summary=`Generated AI Business Health diagnosis report${meta.score?` (Score: ${meta.score}/100)`:''}`;}else if(act==='staff login'){actionLabel='Staff Sign-In';actionTone='emerald';summary=`Staff member ${actor.name} (${actor.userId}) signed in to shop terminal`;}else if(act==='administrator shop login'){actionLabel='Admin Sign-In';actionTone='sky';summary=`Administrator ${actor.name} signed in to shop terminal`;}else if(act==='administrator shop access'){actionLabel='Admin Console Switch';actionTone='sky';summary=`Administrator switched into shop terminal from admin console`;}else if(ent==='store'||ent==='settings'||act.includes('setting')){actionLabel='Settings Updated';actionTone='zinc';summary=`Updated shop configuration${meta.fields?.length?` (${meta.fields.join(', ')})`:''}`;}else{actionLabel=x.action;summary=`${x.action} on ${x.entity_type||'record'} ${code}`;}return {id:x.id,created_at:x.created_at,actor,who:actor,where,what:{action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,label:actionLabel,tone:actionTone,code,name,summary,metadata:meta},action:x.action,entity_type:x.entity_type,entity_id:x.entity_id,detail:code,summary,metadata:meta};});return json(out)}
  if(path==='addons/coupon'&&s.role==='admin'&&method==='GET'){let code=(new URL(request.url).searchParams.get('code')||'').trim().toUpperCase();if(!code)return fail('Enter a coupon code.',400);let [c]=await db(env,`addon_coupons?code=eq.${encodeURIComponent(code)}&active=is.true&select=*`);if(!c)return fail('Invalid or inactive coupon code.',404);return json({code:c.code,percent_off:Number(c.percent_off||0)})}
  if(path==='addons'&&s.role==='admin'){
   if(method==='GET'){let [settings,purchases,entitlement,payinfo]=await Promise.all([db(env,'addon_settings?select=*&order=addon_key'),db(env,`addon_purchases?admin_id=eq.${s.id}&select=*&order=created_at.desc`),currentEntitlement(env,s.id),db(env,'addon_checkout_settings?select=payment_info')]);return json({settings,purchases,entitlement,payment_info:(payinfo[0]||{}).payment_info||''})}
@@ -1138,9 +1628,29 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path.match(/^connectx\/sms\/messages\/[^/]+$/)&&method==='DELETE'){if(!s.storeId||(!allowed(s,'connectx','delete')&&s.role!=='admin'&&!s.adminAccess))return fail('Permission denied.',403);let id=path.split('/')[3];let [x]=await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);if(!x)return fail('SMS record not found.',404);await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}`,{method:'DELETE'});await audit(env,s,'cancel ConnectX SMS','connectx',id,{to_phone:x.to_phone,recipient_name:x.recipient_name,status:x.status});return json({ok:true})}
  if(path==='connectx/sms/queue'&&method==='GET'){if(!s.storeId)return fail('Shop access required.',403);return json(await db(env,`connectx_sms_messages?store_id=eq.${s.storeId}&status=eq.queued&select=*&order=created_at.asc&limit=50`))}
  if(path.match(/^connectx\/sms\/status\/[^/]+$/)&&method==='PATCH'){if(!s.storeId)return fail('Shop access required.',403);let id=path.split('/')[3];let b=await body(request),allowedStatus=['queued','sending','sent','failed'];if(b.status&&!allowedStatus.includes(b.status))return fail('Invalid SMS status',400);let patch={};if(b.status)patch.status=b.status;if(b.device_id)patch.device_id=b.device_id;if(b.attempts!==undefined)patch.attempts=Number(b.attempts);if(b.error_message!==undefined)patch.error_message=b.error_message;if(b.status==='sent')patch.sent_at=new Date().toISOString();let [upd]=await db(env,`connectx_sms_messages?id=eq.${id}&store_id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(patch)});return json(upd||{ok:true})}
- if(path==='connectx/sms/messages'&&method==='GET'){if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);let qs=new URL(request.url).searchParams,st=qs.get('status'),rec=qs.get('recipient_type'),filter=`store_id=eq.${s.storeId}`;if(st)filter+=`&status=eq.${encodeURIComponent(st)}`;if(rec)filter+=`&recipient_type=eq.${encodeURIComponent(rec)}`;return json(await db(env,`connectx_sms_messages?${filter}&select=*&order=created_at.desc&limit=250`))}
+ if(path==='connectx/sms/messages'&&method==='GET'){
+  if(!s.storeId||!allowed(s,'connectx','view'))return fail('Permission denied.',403);
+  let qs=new URL(request.url).searchParams,st=qs.get('status'),rec=qs.get('recipient_type'),filter=`store_id=eq.${s.storeId}`;
+  if(st)filter+=`&status=eq.${encodeURIComponent(st)}`;
+  if(rec)filter+=`&recipient_type=eq.${encodeURIComponent(rec)}`;
+  let [msgs,invoices,returns,exchanges]=await Promise.all([
+    db(env,`connectx_sms_messages?${filter}&select=*&order=created_at.desc&limit=250`),
+    db(env,`invoices?store_id=eq.${s.storeId}&select=id,invoice_number,kind`).catch(()=>[]),
+    db(env,`returns?store_id=eq.${s.storeId}&select=id,return_number`).catch(()=>[]),
+    db(env,`exchanges?store_id=eq.${s.storeId}&select=id,exchange_number`).catch(()=>[])
+  ]);
+  let invMap=Object.fromEntries(invoices.map(x=>[x.id,x.invoice_number]));
+  let retMap=Object.fromEntries(returns.map(x=>[x.id,x.return_number]));
+  let excMap=Object.fromEntries(exchanges.map(x=>[x.id,x.exchange_number]));
+  return json(msgs.map(m=>({
+    ...m,
+    invoice_number:invMap[m.invoice_id]||retMap[m.invoice_id]||excMap[m.invoice_id]||null
+  })));
+ }
  if(path==='connectx/sms/send'&&method==='POST'){
   if(!s.storeId||(!allowedAddon(s,'connectx','send')&&!allowed(s,'connectx','add')&&s.role!=='admin'&&!s.adminAccess))return fail('Permission denied.',403);
+  let [smsSettings]=await db(env,`connectx_shop_sms_settings?store_id=eq.${s.storeId}&select=enabled`).catch(()=>[]);
+  if(smsSettings&&smsSettings.enabled===false)return fail('SMS Gateway is disabled for this shop by the administrator.',403);
   let b=await body(request),toPhone=String(b.toPhone||b.to||'').trim(),cleanDigits=toPhone.replace(/[^0-9+]/g,'');
   if(!cleanDigits||cleanDigits.length<6)return fail('Valid recipient phone number is required.',400);
   let msgBody=String(b.messageBody||b.message||'').trim();

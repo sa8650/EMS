@@ -154,6 +154,20 @@ function publicDevice(d) {
   };
 }
 
+function publicAdmin(a) {
+  if (!a) return null;
+  return {
+    id: a.id,
+    admin_code: a.admin_code || null,
+    name: a.name || '',
+    email: a.email || '',
+    phone: a.phone || '',
+    address: a.address || '',
+    active: a.active !== false,
+    created_at: a.created_at || null
+  };
+}
+
 function onlineOf(lastSeen) {
   if (!lastSeen) return false;
   return (Date.now() - new Date(lastSeen).getTime()) < 3 * 60 * 1000;
@@ -181,12 +195,13 @@ export async function connectxSmsRoutes(ctx) {
   /* ---- Administrator: shops for ConnectX app ---- */
   if (path === 'connectx/gateway/shops' && method === 'GET') {
     if (s.role !== 'admin') return fail('Administrator sign-in required.', 403);
+    let [admin] = await db(env, `administrators?id=eq.${s.id}&select=id,admin_code,name,email,phone,address,created_at,active`).catch(() => []);
     let stores = await db(env, `stores?admin_id=eq.${s.id}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`);
     let devices = await db(env, `connectx_devices?administrator_id=eq.${s.id}&status=neq.revoked&select=id,store_id,device_name,phone_number,sim_carrier,status,is_primary,last_seen`).catch(() => []);
     let byStore = {};
     for (let d of devices) (byStore[d.store_id] ||= []).push(publicDevice(d));
     return json({
-      administrator: { id: s.id, email: s.email || null },
+      administrator: publicAdmin(admin || { id: s.id, email: s.email }),
       shops: stores.map(st => ({
         id: st.id,
         name: st.name,
@@ -208,7 +223,7 @@ export async function connectxSmsRoutes(ctx) {
     if (!storeId) return fail('Shop is required.', 400);
     let [store] = await db(env, `stores?id=eq.${storeId}&admin_id=eq.${s.id}&select=id,name,address,phone,admin_id,status`);
     if (!store) return fail('Shop not found for this administrator.', 404);
-    let [admin] = await db(env, `administrators?id=eq.${s.id}&select=id,name,email`);
+    let [admin] = await db(env, `administrators?id=eq.${s.id}&select=id,admin_code,name,email,phone,address,created_at,active`);
     let existing = await db(env, `connectx_devices?store_id=eq.${storeId}&status=neq.revoked&select=id`);
     let isPrimary = existing.length === 0 || !!b.isPrimary;
     if (isPrimary) {
@@ -254,7 +269,7 @@ export async function connectxSmsRoutes(ctx) {
       device: publicDevice(device),
       deviceToken,
       shop: { id: store.id, name: store.name, address: store.address, phone: store.phone },
-      administrator: { id: admin?.id, name: admin?.name, email: admin?.email }
+      administrator: publicAdmin(admin)
     }, 201);
   }
 
@@ -323,11 +338,11 @@ export async function connectxSmsRoutes(ctx) {
 
   if (path.match(/^connectx\/devices\/[^/]+\/primary$/) && method === 'POST') {
     let id = path.split('/')[2];
-    if (!s.storeId) return fail('Shop access required.', 403);
+    let filter = s.storeId ? `id=eq.${id}&store_id=eq.${s.storeId}` : `id=eq.${id}&administrator_id=eq.${s.id}`;
     if (s.role !== 'admin' && !s.adminAccess && !allowed(s, 'settings', 'edit')) return fail('Permission denied.', 403);
-    let [d] = await db(env, `connectx_devices?id=eq.${id}&store_id=eq.${s.storeId}&select=*`);
+    let [d] = await db(env, `connectx_devices?${filter}&select=*`);
     if (!d || d.status === 'revoked') return fail('Device not found.', 404);
-    await db(env, `connectx_devices?store_id=eq.${s.storeId}&is_primary=eq.true`, {
+    await db(env, `connectx_devices?store_id=eq.${d.store_id}&is_primary=eq.true`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ is_primary: false })
     }).catch(() => {});
@@ -335,6 +350,7 @@ export async function connectxSmsRoutes(ctx) {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ is_primary: true })
     });
+    await audit(env, s, 'set primary ConnectX device', 'connectx', id, { device_name: d.device_name, store_id: d.store_id });
     return json({ ok: true });
   }
 
@@ -353,12 +369,12 @@ export async function connectxSmsRoutes(ctx) {
     await touchDevice(env, device.id, patch);
     let settings = await smsSettingsFor(env, device.store_id);
     let [store] = await db(env, `stores?id=eq.${device.store_id}&select=id,name,address,phone`);
-    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,name,email`);
+    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,admin_code,name,email,phone,address,created_at,active`);
     return json({
       ok: true,
       device: publicDevice({ ...device, ...patch, last_seen: new Date().toISOString() }),
       shop: store,
-      administrator: admin,
+      administrator: publicAdmin(admin),
       smsEnabled: !!settings.enabled
     });
   }
@@ -398,6 +414,30 @@ export async function connectxSmsRoutes(ctx) {
       body: JSON.stringify({ status: 'revoked', is_primary: false })
     });
     return json({ ok: true });
+  }
+
+  if (path === 'connectx/gateway/cancel' && method === 'POST') {
+    let b = await body(request);
+    let id = b.jobId || b.id;
+    if (!id) return fail('jobId is required.', 400);
+    let [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&select=*`);
+    if (!job) return fail('SMS job not found for this shop.', 404);
+    if (job.status === 'sent') return fail('Cannot cancel an already sent SMS.', 400);
+    await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}`, {
+      method: 'DELETE'
+    });
+    return json({ ok: true, cancelled: true });
+  }
+
+  if (path.match(/^connectx\/gateway\/jobs\/[^/]+$/) && method === 'DELETE') {
+    let id = path.split('/')[3];
+    let [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&select=*`);
+    if (!job) return fail('SMS job not found for this shop.', 404);
+    if (job.status === 'sent') return fail('Cannot cancel an already sent SMS.', 400);
+    await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}`, {
+      method: 'DELETE'
+    });
+    return json({ ok: true, cancelled: true });
   }
 
   if (path === 'connectx/gateway/claim' && method === 'POST') {
@@ -476,7 +516,7 @@ export async function connectxSmsRoutes(ctx) {
     let last = await db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&select=created_at,sent_at,status&order=created_at.desc&limit=1`);
     await touchDevice(env, device.id);
     let [store] = await db(env, `stores?id=eq.${device.store_id}&select=id,name,address,phone`);
-    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,name,email`);
+    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,admin_code,name,email,phone,address,created_at,active`);
     return json({
       sent: jobs.filter(j => j.status === 'sent').length,
       failed: jobs.filter(j => j.status === 'failed').length,
@@ -484,7 +524,7 @@ export async function connectxSmsRoutes(ctx) {
       lastActivity: last[0]?.sent_at || last[0]?.created_at || null,
       device: publicDevice(device),
       shop: store,
-      administrator: admin
+      administrator: publicAdmin(admin)
     });
   }
 
@@ -493,15 +533,29 @@ export async function connectxSmsRoutes(ctx) {
     let range = qs.get('range') || 'today';
     let days = range === '30d' || range === '30' ? 30 : range === '7d' || range === '7' ? 7 : 1;
     let since = new Date(Date.now() - days * 86400000).toISOString();
-    let rows = await db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&created_at=gte.${since}&select=id,to_phone,recipient_name,message_type,event_type,status,error_message,message_body,created_at,sent_at,invoice_id&order=created_at.desc&limit=250`);
-    return json({ shop_id: device.store_id, items: rows });
+    let [rows, invoices, returns, exchanges] = await Promise.all([
+      db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&created_at=gte.${since}&select=id,to_phone,recipient_name,message_type,event_type,status,error_message,message_body,created_at,sent_at,invoice_id&order=created_at.desc&limit=250`),
+      db(env, `invoices?store_id=eq.${device.store_id}&select=id,invoice_number`).catch(() => []),
+      db(env, `returns?store_id=eq.${device.store_id}&select=id,return_number`).catch(() => []),
+      db(env, `exchanges?store_id=eq.${device.store_id}&select=id,exchange_number`).catch(() => [])
+    ]);
+    let invMap = Object.fromEntries(invoices.map(x => [x.id, x.invoice_number]));
+    let retMap = Object.fromEntries(returns.map(x => [x.id, x.return_number]));
+    let excMap = Object.fromEntries(exchanges.map(x => [x.id, x.exchange_number]));
+    return json({
+      shop_id: device.store_id,
+      items: rows.map(r => ({
+        ...r,
+        invoice_number: invMap[r.invoice_id] || retMap[r.invoice_id] || excMap[r.invoice_id] || null
+      }))
+    });
   }
 
   if (path === 'connectx/gateway/me' && method === 'GET') {
     let [store] = await db(env, `stores?id=eq.${device.store_id}&select=id,name,address,phone,shop_code`);
-    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,name,email`);
+    let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,admin_code,name,email,phone,address,created_at,active`);
     let shops = await db(env, `connectx_devices?administrator_id=eq.${device.administrator_id}&status=neq.revoked&select=store_id,status,device_name`);
-    return json({ device: publicDevice(device), shop: store, administrator: admin, connectedStoreIds: [...new Set(shops.map(x => x.store_id))] });
+    return json({ device: publicDevice(device), shop: store, administrator: publicAdmin(admin), connectedStoreIds: [...new Set(shops.map(x => x.store_id))] });
   }
 
   return fail('Unknown ConnectX gateway endpoint.', 404);

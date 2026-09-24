@@ -1,5 +1,0 @@
-node_modules/
-.dev.vars
-.wrangler/
-.cache/
-.sudo_as_admin_successful
