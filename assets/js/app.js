@@ -39,7 +39,7 @@ function getVerifyToken(){
   return null;
 }
 async function verificationPage(token){
-  const shell = (inner)=>`<header class="sitehead"><a class="wordmark" href="/"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=contact">Contact</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main class="verifyPage">${inner}</main><footer class="sitefoot"><div class="wordmark"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><span>© ${new Date().getFullYear()} DoxTox. All rights reserved.</span><span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></span></footer><div class="authlayer" id="authlayer" hidden></div>`;
+  const shell = (inner)=>`<header class="sitehead"><a class="wordmark" href="/"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=app-store">App Store</a><a href="/?page=contact">Contact</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main class="verifyPage">${inner}</main><footer class="sitefoot"><div class="wordmark"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><span>© ${new Date().getFullYear()} DoxTox. All rights reserved.</span><span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></span></footer><div class="authlayer" id="authlayer" hidden></div>`;
   const wire = ()=>{
     const a=$('#adminLogin'); if(a)a.onclick=()=>showAuth('admin');
     const s=$('#shopLogin'); if(s)s.onclick=()=>showAuth('shop');
@@ -75,16 +75,37 @@ async function verificationPage(token){
     wire();
   }
 }
+function publicAppStoreCards(apps){
+  if(!apps.length)return `<div class="publicStoreEmpty"><h2>No apps published yet</h2><p>The EMS owner has not published an installable app. Please check back later.</p></div>`;
+  return apps.map(item=>{
+    const available=item.download_available===true;
+    const size=item.apk_size_bytes>0?`${(item.apk_size_bytes/MB2).toFixed(1)} MB`:'Size not provided';
+    const icon=item.icon_url||'/assets/android-chrome-192.png';
+    return `<article class="publicStoreCard">
+      <div class="publicStoreCardTop"><img src="${esc(icon)}" alt="" onerror="this.src='/assets/android-chrome-192.png'"/><div><span class="publicStoreBadge">EMS APPLICATION</span><h2>${esc(item.title)}</h2><span class="publicStorePackage">${esc(item.package_name)}</span></div></div>
+      <p class="publicStoreDesc">${esc(item.description||'Official EMS companion app.')}</p>
+      <div class="publicStoreFacts"><span>Version <b>v${esc(item.version)} · Build ${esc(item.version_code)}</b></span><span>APK size <b>${size}</b></span></div>
+      ${item.release_notes?`<details class="publicStoreNotes"><summary>What’s new in this release</summary><p>${esc(item.release_notes)}</p></details>`:''}
+      ${available?`<a class="publicStoreDownload" href="${esc(item.download_url)}" download="${esc(item.apk_filename||item.package_name+'.apk')}">${lucide('download')} Download APK</a>`:
+        `<div class="publicStoreUnavailable" role="status">APK not available yet. The EMS owner needs to upload a signed release before you can download it.</div>`}
+    </article>`;
+  }).join('');
+}
+
 async function publicPage(page){
   const brand=()=>api('public/branding').catch(()=>({product_name:'EMS V1',powered_by:'DoxTox',website_name:'EMS V1'}));
-  const chrome=(inner,logoB)=>{const b=logoB;return `<header class="sitehead"><a class="wordmark" href="/"><b data-brand-name>${esc(b.product_name||'EMS V1')}</b><small>powered by <span data-powered-by>${esc(b.powered_by||'DoxTox')}</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=contact">Contact</a><button class="secondary" id="publicAdmin">Administrator login</button><button id="publicShop">Shop login</button><button class="emslogin" id="publicEms">EMS login</button></nav></header><main class="publicPage">${inner}</main><footer><div class="wordmark"><b data-brand-name>${esc(b.product_name||'EMS V1')}</b><small>powered by <span data-powered-by>${esc(b.powered_by||'DoxTox')}</span></small></div><span>© ${new Date().getFullYear()} ${esc(b.powered_by||'DoxTox')}. All rights reserved.</span><span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></span></footer><div class="authlayer" id="authlayer" hidden></div>`};
+  const chrome=(inner,logoB)=>{const b=logoB;return `<header class="sitehead"><a class="wordmark" href="/"><b data-brand-name>${esc(b.product_name||'EMS V1')}</b><small>powered by <span data-powered-by>${esc(b.powered_by||'DoxTox')}</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="/#features">Features</a><a href="/#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=app-store">App Store</a><a href="/?page=contact">Contact</a><button class="secondary" id="publicAdmin">Administrator login</button><button id="publicShop">Shop login</button><button class="emslogin" id="publicEms">EMS login</button></nav></header><main class="publicPage">${inner}</main><footer><div class="wordmark"><b data-brand-name>${esc(b.product_name||'EMS V1')}</b><small>powered by <span data-powered-by>${esc(b.powered_by||'DoxTox')}</span></small></div><span>© ${new Date().getFullYear()} ${esc(b.powered_by||'DoxTox')}. All rights reserved.</span><span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></span></footer><div class="authlayer" id="authlayer" hidden></div>`};
   const wire=()=>{const a=$('#publicAdmin');if(a)a.onclick=()=>showAuth('admin');const s=$('#publicShop');if(s)s.onclick=()=>showAuth('shop');const e=$('#publicEms');if(e)e.onclick=()=>showEmsLogin();};
   const b=await brand();
   app.innerHTML=chrome('<p class="muted" style="text-align:center;padding:60px 0">Loading…</p>',b);
   wire();
   let root=$('.publicPage');
   try{
-    if(page==='blog'){
+    if(page==='app-store'){
+      const apps=await api('app-store/apps');
+      document.title=`App Store · ${b.website_name||'EMS V1'}`;
+      root.innerHTML=`<section class="publicStoreHero"><span class="eyebrow">OFFICIAL EMS DOWNLOADS</span><h1>EMS App Store</h1><p>Explore companion apps and download published Android releases. No EMS account is required.</p></section><section class="publicStoreGrid" aria-label="Published EMS apps">${publicAppStoreCards(apps)}</section>`;
+    }else if(page==='blog'){
       let posts=await api('public/blogs');
       root.innerHTML=`<section class="publicHero blogHero"><p class="eyebrow">EMS INSIGHTS</p><h1>${esc(b.website_name||'EMS V1')} Insights</h1><p>Product updates, retail operations advice, and business insights from ${esc(b.powered_by||'DoxTox')}.</p></section><section class="blogGrid">${posts.length?posts.map(x=>`<article><div class="blogCover" ${x.cover_image_url?`style="background-image:url('${esc(x.cover_image_url)}')"`:''}></div><small>${new Date(x.published_at).toLocaleDateString()}</small><h2>${esc(x.title)}</h2><p>${esc(x.excerpt||'Read the latest update.')}</p><a href="/?page=blog-post&id=${x.id}">Read article →</a></article>`).join(''):'<p class="muted">No published articles yet.</p>'}</section>`;
     }else if(page==='blog-post'){
@@ -102,7 +123,7 @@ async function publicPage(page){
   }catch(e){root.innerHTML=`<section class="publicHero"><h1>Page unavailable</h1><p>${esc(e.message)}</p></section>`}
 }
 
-function login(){let verifyToken=getVerifyToken(),publicRoute=new URLSearchParams(location.search).get('page');if(verifyToken)return verificationPage(verifyToken);if(publicRoute)return publicPage(publicRoute);app.innerHTML=`<header class="sitehead"><a class="wordmark" href="#top"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main id="top" class="website"><section class="hero"><div><p class="eyebrow">MULTI-SHOP MANAGEMENT, MADE SIMPLE</p><h1>Run every part of your shop with clarity.</h1><p class="lead">EMS V1 gives owners and staff one secure place for inventory, purchases, sales, expenses, customers, and store operations.</p><div class="heroactions"><button id="heroStart">Create administrator account</button><button class="secondary" id="heroShop">Shop staff login</button></div><div class="trust"><span>✓ Custom secure credentials</span><span>✓ Cloud-based access</span><span>✓ BDT pricing</span></div></div><div class="heroart"><div class="screen"><div class="screenbar"><i></i><i></i><i></i></div><p>Today at a glance</p><div class="artcards"><b>৳ 24,860<small>Sales today</small></b><b>18<small>Low-stock items</small></b></div><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>Sales performance</span></div></div></section><section class="logos"><span>Built for retail shops</span><span>Grocery &amp; general stores</span><span>Pharmacy &amp; cosmetics</span><span>Electronics &amp; wholesale</span></section><section id="features" class="section"><p class="eyebrow">ONE SYSTEM, EVERYDAY OPERATIONS</p><h2>Everything a growing shop needs</h2><p class="sectionlead">Designed for shop owners who need accurate records, controlled staff access, and practical decisions—not complicated software.</p><div class="featuregrid"><article><div class="featureicon">${lucide('store')}</div><h3>Multi-store control</h3><p>Create and manage multiple stores from one administrator account. Track license status, activation, and connected devices per shop.</p></article><article><div class="featureicon">${lucide('receipt')}</div><h3>Sales &amp; purchase invoices</h3><p>Prepare invoices that calculate tax, discount, paid amount, and due automatically — with full payment and transaction details.</p></article><article><div class="featureicon">${lucide('package')}</div><h3>Live inventory</h3><p>Stock updates instantly when purchases or sales are posted. Low-stock indicators help you replenish before items run out.</p></article><article><div class="featureicon">${lucide('users')}</div><h3>Customers &amp; suppliers</h3><p>Keep contact details organized and quickly select a customer or supplier with a smart search when creating invoices.</p></article><article><div class="featureicon">${lucide('wallet')}</div><h3>Expense tracking</h3><p>Record shop expenses with paid and due amounts, so you always know exactly where your money is going.</p></article><article><div class="featureicon">${lucide('coins')}</div><h3>Due recovery</h3><p>Track outstanding dues on sales, purchases, and expenses — and record recoveries the moment customers pay.</p></article><article><div class="featureicon">${lucide('user-check')}</div><h3>Staff permissions</h3><p>Create individual staff accounts and control who can view, add, edit, or delete in each operational area.</p></article><article><div class="featureicon">${lucide('chart')}</div><h3>Business reports</h3><p>Get summary, sales, purchase, and expense reports with clear totals and profit figures for any date range.</p></article><article><div class="featureicon">${lucide('shield')}</div><h3>Traceable activity</h3><p>Record operational activity, device logins, attendance, and system errors for stronger accountability.</p></article><article class="premium"><div class="featureicon">${lucide('mail')}</div><em class="featuretag">Premium</em><h3>ConnectX</h3><p>Send professional business emails to customers and suppliers directly through your shop — with invoice attachments.</p></article><article class="premium"><div class="featureicon">${lucide('sparkles')}</div><em class="featuretag">Premium</em><h3>Zudo AI</h3><p>A read-only AI assistant that answers questions about your sales, purchases, inventory, customers, and dues.</p></article><article class="premium"><div class="featureicon">${lucide('activity')}</div><em class="featuretag">Premium</em><h3>AI Business Health</h3><p>Generate a business-health report with a score, risk findings, and practical AI recommendations for any period.</p></article><article class="premium"><div class="featureicon">${lucide('qr')}</div><em class="featuretag">Premium</em><h3>TrueBill</h3><p>Put a scannable QR code on every invoice so customers can verify authenticity with one scan.</p></article><article class="premium"><div class="featureicon">${lucide('msg')}</div><em class="featuretag">Premium</em><h3>HelpDesk</h3><p>A built-in messenger that connects you directly with EMS support for fast help whenever you need it.</p></article></div></section><section class="stats section"><div class="statsgrid"><div class="stat"><b>All-in-one</b><span>Inventory, sales, purchases, expenses, customers &amp; staff in one place</span></div><div class="stat"><b>Multi-shop</b><span>Manage every store from a single administrator account</span></div><div class="stat"><b>Real-time</b><span>Stock and totals update the moment you post a transaction</span></div><div class="stat"><b>Secure</b><span>Custom credentials, device tracking and full activity logs</span></div></div></section>
+function login(){let verifyToken=getVerifyToken(),publicRoute=new URLSearchParams(location.search).get('page');if(verifyToken)return verificationPage(verifyToken);if(publicRoute)return publicPage(publicRoute);app.innerHTML=`<header class="sitehead"><a class="wordmark" href="#top"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></a><button class="appBurger siteBurger" type="button" aria-label="Open navigation menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="18" y2="18"/></svg></button><nav><a href="#features">Features</a><a href="#pricing">Pricing</a><a href="/?page=about">About</a><a href="/?page=blog">Blog</a><a href="/?page=app-store">App Store</a><button class="secondary" id="adminLogin">Administrator login</button><button id="shopLogin">Shop login</button><button class="emslogin" id="emsLogin">EMS login</button></nav></header><main id="top" class="website"><section class="hero"><div><p class="eyebrow">MULTI-SHOP MANAGEMENT, MADE SIMPLE</p><h1>Run every part of your shop with clarity.</h1><p class="lead">EMS V1 gives owners and staff one secure place for inventory, purchases, sales, expenses, customers, and store operations.</p><div class="heroactions"><button id="heroStart">Create administrator account</button><button class="secondary" id="heroShop">Shop staff login</button></div><div class="trust"><span>✓ Custom secure credentials</span><span>✓ Cloud-based access</span><span>✓ BDT pricing</span></div></div><div class="heroart"><div class="screen"><div class="screenbar"><i></i><i></i><i></i></div><p>Today at a glance</p><div class="artcards"><b>৳ 24,860<small>Sales today</small></b><b>18<small>Low-stock items</small></b></div><div class="bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>Sales performance</span></div></div></section><section class="logos"><span>Built for retail shops</span><span>Grocery &amp; general stores</span><span>Pharmacy &amp; cosmetics</span><span>Electronics &amp; wholesale</span></section><section id="features" class="section"><p class="eyebrow">ONE SYSTEM, EVERYDAY OPERATIONS</p><h2>Everything a growing shop needs</h2><p class="sectionlead">Designed for shop owners who need accurate records, controlled staff access, and practical decisions—not complicated software.</p><div class="featuregrid"><article><div class="featureicon">${lucide('store')}</div><h3>Multi-store control</h3><p>Create and manage multiple stores from one administrator account. Track license status, activation, and connected devices per shop.</p></article><article><div class="featureicon">${lucide('receipt')}</div><h3>Sales &amp; purchase invoices</h3><p>Prepare invoices that calculate tax, discount, paid amount, and due automatically — with full payment and transaction details.</p></article><article><div class="featureicon">${lucide('package')}</div><h3>Live inventory</h3><p>Stock updates instantly when purchases or sales are posted. Low-stock indicators help you replenish before items run out.</p></article><article><div class="featureicon">${lucide('users')}</div><h3>Customers &amp; suppliers</h3><p>Keep contact details organized and quickly select a customer or supplier with a smart search when creating invoices.</p></article><article><div class="featureicon">${lucide('wallet')}</div><h3>Expense tracking</h3><p>Record shop expenses with paid and due amounts, so you always know exactly where your money is going.</p></article><article><div class="featureicon">${lucide('coins')}</div><h3>Due recovery</h3><p>Track outstanding dues on sales, purchases, and expenses — and record recoveries the moment customers pay.</p></article><article><div class="featureicon">${lucide('user-check')}</div><h3>Staff permissions</h3><p>Create individual staff accounts and control who can view, add, edit, or delete in each operational area.</p></article><article><div class="featureicon">${lucide('chart')}</div><h3>Business reports</h3><p>Get summary, sales, purchase, and expense reports with clear totals and profit figures for any date range.</p></article><article><div class="featureicon">${lucide('shield')}</div><h3>Traceable activity</h3><p>Record operational activity, device logins, attendance, and system errors for stronger accountability.</p></article><article class="premium"><div class="featureicon">${lucide('mail')}</div><em class="featuretag">Premium</em><h3>ConnectX</h3><p>Send professional business emails to customers and suppliers directly through your shop — with invoice attachments.</p></article><article class="premium"><div class="featureicon">${lucide('sparkles')}</div><em class="featuretag">Premium</em><h3>Zudo AI</h3><p>A read-only AI assistant that answers questions about your sales, purchases, inventory, customers, and dues.</p></article><article class="premium"><div class="featureicon">${lucide('activity')}</div><em class="featuretag">Premium</em><h3>AI Business Health</h3><p>Generate a business-health report with a score, risk findings, and practical AI recommendations for any period.</p></article><article class="premium"><div class="featureicon">${lucide('qr')}</div><em class="featuretag">Premium</em><h3>TrueBill</h3><p>Put a scannable QR code on every invoice so customers can verify authenticity with one scan.</p></article><article class="premium"><div class="featureicon">${lucide('msg')}</div><em class="featuretag">Premium</em><h3>HelpDesk</h3><p>A built-in messenger that connects you directly with EMS support for fast help whenever you need it.</p></article></div></section><section class="stats section"><div class="statsgrid"><div class="stat"><b>All-in-one</b><span>Inventory, sales, purchases, expenses, customers &amp; staff in one place</span></div><div class="stat"><b>Multi-shop</b><span>Manage every store from a single administrator account</span></div><div class="stat"><b>Real-time</b><span>Stock and totals update the moment you post a transaction</span></div><div class="stat"><b>Secure</b><span>Custom credentials, device tracking and full activity logs</span></div></div></section>
 <section class="section why"><p class="eyebrow">WHY EMS V1</p><h2>Built to run a real shop, not just record it</h2><p class="sectionlead">Every tool is designed around how retail businesses actually work — from the counter to the back office.</p><div class="whygrid"><div class="whycol"><h3>For shop owners</h3><ul><li>One dashboard for sales, stock, dues and expenses</li><li>Know your profit and outstanding dues at a glance</li><li>License-based multi-store control with staff limits</li><li>Approve or restrict staff actions per module</li></ul></div><div class="whycol"><h3>For staff</h3><ul><li>Fast invoice entry with smart customer &amp; item search</li><li>Clear permissions — see and do only what you should</li><li>Attendance and activity tracking built in</li><li>Works on any device with an internet connection</li></ul></div><div class="whycol"><h3>For your customers</h3><ul><li>Professional invoices with tax, discount and due</li><li>Scan-to-verify TrueBill QR codes for trust</li><li>Instant records of every transaction</li><li>Fast due recovery with clear payment history</li></ul></div></div></section>
 <section class="workflow"><div><p class="eyebrow">A CLEAR WORKFLOW</p><h2>From setup to sale in four steps</h2><ol><li><b>1</b><div><strong>Create your administrator account</strong><span>Set up your business profile with your own custom credentials.</span></div></li><li><b>2</b><div><strong>Add and activate a store</strong><span>Submit your license payment information for manual verification.</span></div></li><li><b>3</b><div><strong>Add staff, products, and contacts</strong><span>Control what each staff member can access.</span></div></li><li><b>4</b><div><strong>Record purchases and sales</strong><span>Let EMS update stock and financial totals as you work.</span></div></li></ol></div><aside><small>EMS V1 PROMISE</small><h3>Business records that stay organized.</h3><p>Use a single cloud-based workspace for daily shop operations, with access from approved devices.</p><button id="workflowAdmin">Get started as administrator</button></aside></section><section id="pricing" class="section pricing"><p class="eyebrow">STRAIGHTFORWARD PRICING</p><h2>Choose your license period</h2><p class="sectionlead">One store license per selected period. Submit bKash or Nagad payment details after creating a store; each claim is manually verified before activation.</p><div id="publicPricing" class="planGrid"><p class="muted">Loading current EMS license plans…</p></div><p class="fineprint">Payment methods: bKash and Nagad. A transaction ID is required. Payments are subject to manual verification.</p></section><section class="cta"><div><h2>Ready to bring your shop operations together?</h2><p>Create an administrator account and set up your first store.</p></div><button id="ctaStart">Get started</button></section><section class="faq section"><p class="eyebrow">FREQUENTLY ASKED QUESTIONS</p><h2>Before you begin</h2><details><summary>Does EMS use Google, Facebook, or third-party login?</summary><p>No. Administrators and shop staff use custom EMS credentials stored through the application’s secure backend.</p></details><details><summary>When does a store become active?</summary><p>A store is activated after a license payment claim is manually checked and approved.</p></details><details><summary>Can I have different staff access levels?</summary><p>Yes. Staff permissions can be assigned per module for viewing, adding, editing, and deleting records.</p></details><details><summary>What payment methods do you accept?</summary><p>License payments are accepted via bKash and Nagad. Each payment is manually verified before activation.</p></details><details><summary>Can I manage more than one shop?</summary><p>Yes. One administrator account can create and manage multiple shops, depending on the license plan you choose.</p></details><details><summary>What are the premium add-ons?</summary><p>Premium add-ons are optional paid services — ConnectX email, Zudo AI assistant, AI Business Health reports, TrueBill invoice verification, and HelpDesk support chat.</p></details><details><summary>How is inventory tracked?</summary><p>Stock levels update automatically when you post purchases or sales, and low-stock alerts help you reorder before items run out.</p></details><details><summary>Can I verify an invoice is genuine?</summary><p>Yes. TrueBill puts a scannable QR code on invoices, so customers can instantly verify authenticity on our website.</p></details></section></main><footer><div class="wordmark"><b data-brand-name>EMS V1</b><small>powered by <span data-powered-by>DoxTox</span></small></div><span>© ${new Date().getFullYear()} DoxTox. All rights reserved.</span><a href="/?page=contact">Contact</a> · <a href="/?page=terms">Terms & Conditions</a></footer><div class="authlayer" id="authlayer" hidden></div>`;let open=m=>showAuth(m);['adminLogin','workflowAdmin','heroStart','ctaStart'].forEach(id=>$('#'+id).onclick=()=>open('admin'));['shopLogin','heroShop'].forEach(id=>$('#'+id).onclick=()=>open('shop'));$('#emsLogin').onclick=()=>showEmsLogin();document.querySelectorAll('[data-plan]').forEach(x=>x.onclick=()=>open('admin'));api('public/branding').then(b=>{document.title=(b.website_name||'EMS V1')+' | DoxTox';document.querySelectorAll('[data-brand-name]').forEach(x=>x.textContent=b.product_name||'EMS V1');document.querySelectorAll('[data-powered-by]').forEach(x=>x.textContent=b.powered_by||'DoxTox')}).catch(()=>{});api('public/license-plans').then(plans=>{let box=$('#publicPricing');box.innerHTML=plans.length?plans.map((p,i)=>planCardHtml(p,{featured:i===1,attr:'data-public-plan'})).join(''):'<p class="muted">No license plans are currently published.</p>';document.querySelectorAll('[data-public-plan]').forEach(x=>x.onclick=()=>open('admin'))}).catch(()=>{$('#publicPricing').innerHTML='<p class="muted">License plans are temporarily unavailable.</p>'})}
 function forgotPassword(type){
@@ -261,7 +282,7 @@ const OB_NAV=[
   {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
-  {h:'Services',items:[['connectx','ConnectX','mail'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
+  {h:'Services',items:[['connectx','ConnectX','mail'],['sim-carriers','SIM balance','smartphone'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
   {h:'System',items:[['factory-reset','Factory reset','refresh']]}
 ];
 const OB_LABEL=Object.fromEntries(OB_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -353,7 +374,7 @@ const OB_SKEL={
   administrators:()=>SKEL.kpis(4)+SKEL.table(6,6),shops:()=>SKEL.toolbar()+SKEL.table(6,7),
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
   blogs:()=>SKEL.toolbar()+SKEL.table(4,5),'contact-messages':()=>SKEL.toolbar()+SKEL.table(5,5),
-  connectx:()=>SKEL.panel(SKEL.table(4,5)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
+  connectx:()=>SKEL.panel(SKEL.table(4,5)),'sim-carriers':()=>SKEL.toolbar()+SKEL.panel(SKEL.table(4,6)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
   truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),
   helpdesk:()=>SKEL.grid('300px minmax(0,1fr)',SKEL.list(5),SKEL.panel(SKEL.msgs(4))),
   addons:()=>SKEL.toolbar()+SKEL.table(5,5),'factory-reset':()=>SKEL.panel(SKEL.form(4)),
@@ -458,9 +479,11 @@ async function ownerPage(p){
   document.querySelectorAll('[data-owner-page]').forEach(x=>x.classList.toggle('on',x.dataset.ownerPage===p));
   const t=$('#obTopTitle');if(t)t.textContent=OB_LABEL[p]||p;
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
-  try{let d=await api('platform/overview');
-    if(p==='overview')return ownerOverview(d);
+  try{
     if(p==='app-store')return await ownerAppStore();
+    if(p==='sim-carriers')return await ownerSimCarriers();
+    let d=await api('platform/overview');
+    if(p==='overview')return ownerOverview(d);
     if(p==='licenses')return ownerLicenses(d);
     if(p==='plans')return ownerPlans();
     if(p==='administrators')return ownerAdmins(d);
@@ -518,10 +541,10 @@ const APP_PRESETS = [
     title: 'ConnectX SMS Gateway',
     package_name: 'com.ems.connectx',
     description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
-    version: '1.3.0',
-    version_code: 13,
+    version: '1.5.1',
+    version_code: 16,
     icon_url: '/assets/android-chrome-192.png',
-    release_notes: '• Real-time SIM-based SMS dispatch for Sales, Due Reminders, Returns & Exchanges\n• Multi-SIM slot selection with carrier & phone identification\n• Background foreground service and persistent device heartbeat\n• Modern Light UI theme with pure white background & responsive controls\n• Integrated In-App Update system with mandatory version locking'
+    release_notes: '• SIM Balance only: one manual query on the selected sending SIM\n• Owner-managed carrier balance codes and response patterns; no SMS-quota request\n• Safer formatted balance parsing and more reliable carrier settings\n• Hardened gateway restart, scheduling, and device backup rules'
   },
   {
     title: 'EMS Mobile POS Terminal',
@@ -582,24 +605,20 @@ function getOwnerAppIconHtml(app, size = 48) {
 }
 
 async function ownerAppStore(){
-  let apps = [];
-  try {
-    apps = await api('platform/app-store');
-  } catch(e) {
-    apps = [];
-  }
+  const apps = await api('platform/app-store');
 
   const totalApps = apps.length;
-  const publishedApps = apps.filter(x => x.published).length;
-  const mandatoryApps = apps.filter(x => x.mandatory).length;
+  const publishedApps = apps.filter(x => x.published && x.download_available).length;
+  const mandatoryApps = apps.filter(x => x.mandatory && x.published && x.download_available).length;
+  const connectxRelease = apps.find(x => x.package_name === 'com.ems.connectx' && x.published && x.download_available);
 
   $('#page').innerHTML = `
     ${obHead('app-store','Central store controller for all official EMS mobile, desktop, and gateway apps.','<button class="ob-btn ob-btn-primary" id="addNewAppBtn">'+lucide('plus')+' Add New App</button>')}
     <div class="ob-grid ob-kpis">
       ${obKpi('package','violet','Total Applications',totalApps,`${publishedApps} published / live`)}
-      ${obKpi('download','emerald','Published Apps',publishedApps,'Active in Admin App Store')}
+      ${obKpi('download','emerald','Downloadable Apps',publishedApps,'Available in the public store')}
       ${obKpi('shield','amber','Mandatory Updates',mandatoryApps,mandatoryApps>0?'Enforced version lock':'No mandatory locks')}
-      ${obKpi('smartphone','sky','Official Gateway','ConnectX','Active SMS Engine')}
+      ${obKpi('smartphone','sky','ConnectX Release',connectxRelease?'Available':'Not published',connectxRelease?'Downloadable APK ready':'Upload a signed APK')}
     </div>
 
     <section class="ob-panel" style="margin-top:18px;">
@@ -609,6 +628,7 @@ async function ownerAppStore(){
           <p class="ob-desc">Publish new builds, manage release notes, upload APKs to Cloudflare R2, and configure mandatory updates for installed client apps.</p>
         </div>
         <div style="display:flex;gap:8px;align-items:center;">
+          <a class="ob-btn ob-btn-soft ob-btn-sm" href="/?page=app-store" target="_blank" rel="noopener">View public store</a>
           <button class="ob-btn ob-btn-soft ob-btn-sm" id="refreshAppStoreBtn">${lucide('refresh')} Refresh</button>
         </div>
       </div>
@@ -616,7 +636,7 @@ async function ownerAppStore(){
       ${apps.length ? `
         <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:16px;padding:16px 0;">
           ${apps.map(app => {
-            const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+            const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : 'Not provided';
             return `
               <div class="ob-card" style="padding:18px;display:flex;flex-direction:column;justify-content:space-between;background:var(--ob-card);border:1px solid var(--ob-line);border-radius:14px;position:relative;">
                 <div>
@@ -629,7 +649,7 @@ async function ownerAppStore(){
                       </div>
                     </div>
                     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
-                      ${app.published ? obBadge('Published','emerald') : obBadge('Draft / Hidden','zinc')}
+                      ${app.published ? (app.download_available ? obBadge('Published','emerald') : obBadge('APK missing','amber')) : obBadge('Draft / Hidden','zinc')}
                       ${app.mandatory ? obBadge('Mandatory Lock','rose') : ''}
                     </div>
                   </div>
@@ -640,7 +660,7 @@ async function ownerAppStore(){
                     <div><span>Latest Version</span><b>v${esc(app.version)} (Code: ${app.version_code})</b></div>
                     <div><span>File Size</span><b>${sizeMb}</b></div>
                     <div><span>APK Filename</span><b><code>${esc(app.apk_filename || (app.package_name+'.apk'))}</code></b></div>
-                    <div><span>Storage</span><b>${app.r2_key ? obBadge('Cloudflare R2','sky') : obBadge('Direct / Hosted','zinc')}</b></div>
+                    <div><span>Storage</span><b>${app.apk_r2_key||app.r2_key ? obBadge('Cloudflare R2','sky') : obBadge('Direct / Hosted','zinc')}</b></div>
                   </div>
 
                   ${app.release_notes ? `
@@ -656,9 +676,8 @@ async function ownerAppStore(){
                     ${lucide('settings')} Update App
                   </button>
                   <div style="display:flex;gap:6px;">
-                    <a href="${esc(app.apk_url || '/api/app-store/download/'+encodeURIComponent(app.package_name))}" class="ob-btn ob-btn-ghost ob-btn-sm" download title="Download APK" target="_blank">
-                      ${lucide('download')}
-                    </a>
+                    ${app.published&&app.download_available?`<a href="/api/app-store/download/${encodeURIComponent(app.package_name)}" class="ob-btn ob-btn-ghost ob-btn-sm" download title="Download APK">${lucide('download')}</a>`:
+                      '<span class="ob-sub" title="Publish a real APK to make downloads public">Not downloadable</span>'}
                     <button type="button" class="ob-icobtn ob-danger" data-app-delete="${app.id || app.package_name}" title="Delete App">
                       ${lucide('x')}
                     </button>
@@ -668,7 +687,7 @@ async function ownerAppStore(){
             `;
           }).join('')}
         </div>
-      ` : obEmpty('No applications published yet. Click "Add New App" to publish your first EMS app.')}
+      ` : obEmpty('No applications yet. Upload a real signed APK before publishing one.')}
     </section>
   `;
 
@@ -746,6 +765,9 @@ function appModal(app = null) {
           <input name="version_code" id="appFieldCode" type="number" required min="1" step="1" value="${esc(app?.version_code || 1)}" placeholder="e.g. 13">
         </label>
       </div>
+      <p style="margin:2px 0 12px;padding:10px 12px;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:8px;color:var(--ob-muted);font-size:12px;line-height:1.45;">
+        <strong>Check the actual APK first:</strong> its package, version name and build code must match these fields. Renaming an APK or changing these numbers here does not rebuild it; ConnectX refuses a mismatched update.
+      </p>
 
       <div class="ob-grid2" style="align-items:flex-end;">
         <div>
@@ -770,8 +792,14 @@ function appModal(app = null) {
         </label>
         <label>Upload New APK File
           <input type="file" id="appApkFile" accept=".apk,application/vnd.android.package-archive">
+          <small style="display:block;margin-top:4px;color:var(--ob-muted);">Upload a release-signed APK using the installed app’s signing key. Android cannot install <code>app-release-unsigned.apk</code>, even if you rename it.</small>
         </label>
       </div>
+
+      <label>APK Download Filename (optional)
+        <input name="apk_filename" id="appFieldApkFilename" value="${esc(app?.apk_filename || '')}" placeholder="e.g. ConnectX-v1.5.1-build16.apk" maxlength="180">
+        <small style="display:block;margin-top:4px;color:var(--ob-muted);">For EMS R2 downloads only. Renames the file people receive; does not change the APK, package, build code, or signature.</small>
+      </label>
 
       <div id="uploadProgressBox" style="display:none;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:8px;padding:10px 12px;margin:8px 0;">
         <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;">
@@ -795,7 +823,7 @@ function appModal(app = null) {
         <label class="ob-toggle" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:10px;">
           <div>
             <b style="font-size:13px;color:var(--ob-text);display:block;">Published in App Store</b>
-            <small style="font-size:11px;color:var(--ob-muted);">Visible in Administrator App Store.</small>
+            <small style="font-size:11px;color:var(--ob-muted);">Visible to everyone once a real APK is available.</small>
           </div>
           <input type="checkbox" name="published" ${app ? (app.published ? 'checked' : '') : 'checked'}>
         </label>
@@ -869,6 +897,16 @@ function appModal(app = null) {
   modal.querySelector('#bumpMinorBtn')?.addEventListener('click', () => bumpVersion('minor'));
   modal.querySelector('#bumpMajorBtn')?.addEventListener('click', () => bumpVersion('major'));
 
+  // Adopt the newly selected APK's name unless the owner explicitly types a
+  // custom download name. A custom name is sent after uploading, not lost.
+  const filenameInput = modal.querySelector('#appFieldApkFilename');
+  let customFilename = false;
+  filenameInput.addEventListener('input', () => { customFilename = true; });
+  modal.querySelector('#appApkFile').addEventListener('change', e => {
+    const file = e.target.files?.[0];
+    if (file && !customFilename) filenameInput.value = file.name;
+  });
+
   let uploadedIconR2Key = app?.icon_r2_key || null;
   const iconInput = modal.querySelector('#appIconFile');
   iconInput.onchange = async () => {
@@ -899,11 +937,12 @@ function appModal(app = null) {
       uploadedIconR2Key = data.icon_r2_key || data.r2_key || null;
       if (data.file_url) {
         iconUrlInput.value = data.file_url;
-        if (iconImg) iconImg.src = data.file_url;
+        // Keep the local FileReader preview until the new app is published.
       }
       toast('✓ App icon uploaded.');
     } catch(err) {
-      toast('Icon saved locally: ' + err.message);
+      iconUrlInput.value = app?.icon_url || '/assets/android-chrome-192.png';
+      toast('Icon upload failed: ' + err.message);
     }
   };
 
@@ -915,24 +954,31 @@ function appModal(app = null) {
 
     try {
       const form = e.target;
-      const title = form.title.value.trim();
-      const packageName = form.package_name.value.trim();
-      const description = form.description.value.trim();
-      const version = form.version.value.trim();
-      const versionCode = parseInt(form.version_code.value, 10);
-      let iconUrl = form.icon_url.value.trim() || '/assets/android-chrome-192.png';
+      const field = name => form.elements.namedItem(name);
+      const title = field('title').value.trim();
+      const packageName = field('package_name').value.trim();
+      const description = field('description').value.trim();
+      const version = field('version').value.trim();
+      const versionCode = parseInt(field('version_code').value, 10);
+      let iconUrl = field('icon_url').value.trim() || '/assets/android-chrome-192.png';
       let iconR2Key = uploadedIconR2Key;
-      let apkUrl = form.apk_url.value.trim();
-      const mandatory = form.mandatory.checked;
-      const published = form.published.checked;
-      const releaseNotes = form.release_notes.value.trim();
+      let apkUrl = field('apk_url').value.trim();
+      const mandatory = field('mandatory').checked;
+      const published = field('published').checked;
+      const releaseNotes = field('release_notes').value.trim();
 
       let apkR2Key = app?.apk_r2_key || app?.r2_key || null;
       let r2Key = apkR2Key;
       let apkSizeBytes = app?.apk_size_bytes || 0;
-      let apkFilename = app?.apk_filename || `${title.replace(/[^a-zA-Z0-9]/g, '')}-${version}.apk`;
-
       const apkFile = modal.querySelector('#appApkFile').files?.[0];
+      let apkFilename = field('apk_filename').value.trim() || apkFile?.name || app?.apk_filename || `${title.replace(/[^a-zA-Z0-9]/g, '')}-${version}.apk`;
+      if (apkFilename.length > 180 || !/^[\p{L}\p{N}][\p{L}\p{N} ._()-]*\.apk$/iu.test(apkFilename) || apkFilename.includes('..'))
+        throw new Error('Enter a safe filename ending in .apk (no slashes or special control characters).');
+
+      if (!apkFile && /^https:\/\//i.test(apkUrl) && apkUrl !== app?.apk_url) {
+        apkR2Key = null; // Explicitly switch from a previously uploaded R2 APK to an external one.
+        r2Key = null;
+      }
       if (apkFile) {
         modal.querySelector('#uploadProgressBox').style.display = 'block';
         modal.querySelector('#uploadProgressBar').style.width = '60%';
@@ -958,12 +1004,8 @@ function appModal(app = null) {
         apkR2Key = upData.apk_r2_key || upData.r2_key || null;
         r2Key = apkR2Key;
         apkSizeBytes = upData.size_bytes || apkFile.size;
-        apkFilename = upData.filename || apkFile.name;
+        apkFilename = field('apk_filename').value.trim() || upData.filename || apkFile.name;
         apkUrl = upData.file_url || `/api/app-store/download/${encodeURIComponent(packageName)}`;
-      }
-
-      if (!apkUrl) {
-        apkUrl = `/api/app-store/download/${encodeURIComponent(packageName)}`;
       }
 
       const payload = {
@@ -975,8 +1017,8 @@ function appModal(app = null) {
         icon_url: iconUrl,
         icon_r2_key: iconR2Key || app?.icon_r2_key || null,
         apk_url: apkUrl,
-        apk_r2_key: apkR2Key || app?.apk_r2_key || app?.r2_key || null,
-        r2_key: apkR2Key || app?.apk_r2_key || app?.r2_key || null,
+        apk_r2_key: apkR2Key,
+        r2_key: r2Key,
         apk_size_bytes: apkSizeBytes,
         apk_filename: apkFilename,
         mandatory,
@@ -1006,6 +1048,62 @@ function appModal(app = null) {
       btn.disabled = false;
       btn.textContent = isEdit ? 'Publish Update' : 'Publish App';
     }
+  };
+}
+
+/* Owner-only catalog. No USSD code is shipped by ConnectX. */
+async function ownerSimCarriers(){
+  const rows=await api('platform/sim-carriers');
+  $('#page').innerHTML=`
+    ${obHead('sim-carriers','Configure verified SIM balance USSD codes for ConnectX.',
+      `<button class="ob-btn ob-btn-primary" id="addSimCarrier">${lucide('plus')} Add carrier</button>`)}
+    <section class="ob-panel" style="padding:18px;">
+      <div class="ob-panel-head"><div><h3>SIM balance carriers</h3>
+        <p class="ob-desc">Only active carriers are matched to registered ConnectX devices. No USSD code is built into the APK; calls occur only when a phone user taps Refresh.</p></div></div>
+      <p class="ob-desc" style="margin:8px 0 18px;">Balance USSD codes must be verified with the operator and may incur charges or change services. Use the MCC/MNC from the SIM (including leading zeros). Keep unverified rows inactive; a missing or failed result displays “Balance unavailable.”</p>
+      ${rows.length ? `<div class="ob-tw"><table><thead><tr><th>Carrier</th><th>MCC/MNC</th><th>Identifier</th><th>Balance code</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        ${rows.map(c=>`<tr><td><b>${esc(c.carrier_name)}</b></td><td><code>${esc(c.mcc_mnc||'—')}</code></td><td>${esc(c.carrier_identifier||'—')}</td><td><code>${esc(c.balance_ussd_code||'—')}</code></td><td>${c.active?obBadge('Active','emerald'):obBadge('Inactive','zinc')}</td><td><button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-carrier-edit="${esc(c.id)}">Edit</button> <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-carrier-delete="${esc(c.id)}">Delete</button></td></tr>`).join('')}
+        </tbody></table></div>`:obEmpty('No carriers configured. Add one with a verified balance USSD code; ConnectX will show “Balance unavailable” until then.')}
+    </section>`;
+  $('#addSimCarrier').onclick=()=>ownerSimCarrierModal(null);
+  document.querySelectorAll('[data-carrier-edit]').forEach(button=>button.onclick=()=>{
+    ownerSimCarrierModal(rows.find(c=>c.id===button.dataset.carrierEdit));
+  });
+  document.querySelectorAll('[data-carrier-delete]').forEach(button=>button.onclick=async()=>{
+    const c=rows.find(row=>row.id===button.dataset.carrierDelete);
+    if(!c||!confirm(`Remove ${c.carrier_name} from the ConnectX carrier catalog?`))return;
+    try{await api('platform/sim-carriers/'+encodeURIComponent(c.id),{method:'DELETE'});toast('Carrier removed.');ownerSimCarriers()}
+    catch(err){toast(err.message)}
+  });
+}
+
+function ownerSimCarrierModal(carrier){
+  const editing=!!carrier;
+  const modal=obModal(editing?`Edit ${esc(carrier.carrier_name)}`:'Add SIM carrier',`
+    <form id="simCarrierForm" class="ob-form">
+      <div class="ob-grid2"><label>Carrier name *<input name="carrier_name" required maxlength="100" value="${esc(carrier?.carrier_name||'')}" placeholder="e.g. Your carrier's official name"></label>
+        <label>MCC/MNC (preferred)<input name="mcc_mnc" inputmode="numeric" pattern="[0-9]{5,6}" maxlength="6" value="${esc(carrier?.mcc_mnc||'')}" placeholder="5–6 digits from the SIM"></label></div>
+      <label>Carrier identifier (if MCC/MNC is unavailable)<input name="carrier_identifier" maxlength="100" value="${esc(carrier?.carrier_identifier||'')}" placeholder="Exact carrier name shown by Android"></label>
+      <label>Balance USSD code<input name="balance_ussd_code" value="${esc(carrier?.balance_ussd_code||'')}" placeholder="Verified carrier-provided *...# code"></label>
+      <p class="ob-desc">Optional: capture group 1 must contain the balance number. Use a pattern only if the carrier reply lacks a clear “Balance” label. Test it on actual replies; unparseable results stay unavailable. No response text is sent to EMS.</p>
+      <label>Balance response pattern (optional)<input name="balance_pattern" maxlength="160" value="${esc(carrier?.balance_pattern||'')}" placeholder="Balance: ([0-9.]+)"></label>
+      <label class="ob-toggle" style="display:flex;gap:10px;align-items:center;"><input name="active" type="checkbox" ${carrier?.active?'checked':''}><span>Active — allow ConnectX to request this verified balance</span></label>
+      <div class="ob-form-actions"><button type="button" class="ob-btn ob-btn-ghost" id="cancelCarrier">Cancel</button><button type="submit" class="ob-btn ob-btn-primary" id="saveCarrier">${editing?'Save carrier':'Add carrier'}</button></div>
+    </form>`,'ob-modal-lg');
+  modal.querySelector('#cancelCarrier').onclick=()=>modal.remove();
+  modal.querySelector('#simCarrierForm').onsubmit=async event=>{
+    event.preventDefault();
+    const submit=modal.querySelector('#saveCarrier');submit.disabled=true;
+    const f=event.target.elements;
+    const payload={carrier_name:f.namedItem('carrier_name').value.trim(),mcc_mnc:f.namedItem('mcc_mnc').value.trim()||null,
+      carrier_identifier:f.namedItem('carrier_identifier').value.trim(),
+      balance_ussd_code:f.namedItem('balance_ussd_code').value.trim(),
+      balance_pattern:f.namedItem('balance_pattern').value.trim(),
+      active:f.namedItem('active').checked};
+    try{await api('platform/sim-carriers'+(editing?'/'+encodeURIComponent(carrier.id):''),
+      {method:editing?'PATCH':'POST',body:JSON.stringify(payload)});
+      modal.remove();toast(editing?'Carrier updated.':'Carrier added.');ownerSimCarriers();}
+    catch(err){toast(err.message);submit.disabled=false}
   };
 }
 
@@ -2340,58 +2438,37 @@ function getAdminAppIconHtml(app, size = 64) {
 }
 
 function handleAdminAppDownload(app) {
-  if (!app) return;
-  toast(`✓ Starting download: ${app.apk_filename || (app.title + '.apk')}…`);
-  const dlUrl = `/api/app-store/download/${encodeURIComponent(app.package_name || app.id)}`;
+  if (!app?.download_available) {
+    toast('APK unavailable. Ask the EMS owner to upload a signed release.');
+    return;
+  }
   const link = document.createElement('a');
-  link.href = dlUrl;
-  link.download = app.apk_filename || `${app.package_name || 'app'}.apk`;
+  link.href = `/api/app-store/download/${encodeURIComponent(app.package_name)}`;
+  link.download = app.apk_filename || `${app.package_name}.apk`;
   link.target = '_blank';
-  document.body.appendChild(link);
+  link.rel = 'noopener';
+  document.body.append(link);
   link.click();
-  setTimeout(() => link.remove(), 2000);
+  link.remove();
 }
 
 async function adminAppStore(){
-  let apps = [];
-  try {
-    apps = await api('app-store/apps');
-  } catch(e) {
-    apps = [];
-  }
+  const apps = await api('app-store/apps');
 
-  if (!apps || !apps.length) {
-    apps = [{
-      id: '00000000-0000-0000-0000-000000000001',
-      package_name: 'com.ems.connectx',
-      title: 'ConnectX SMS Gateway',
-      description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
-      version: '1.4.0',
-      version_code: 14,
-      icon_url: '/assets/android-chrome-192.png',
-      apk_url: 'https://github.com/sa8650/ConnectX/releases/download/v1.4.0/ConnectX-v1.4.0.apk',
-      apk_size_bytes: 8645200,
-      apk_filename: 'ConnectX-1.4.0.apk',
-      mandatory: false,
-      release_notes: '• Real-time SIM-based SMS dispatch for Sales, Due Reminders, Returns & Exchanges\n• Multi-SIM slot selection with carrier & phone identification\n• Background foreground service and persistent device heartbeat\n• Modern Light UI theme with pure white background & responsive controls\n• Integrated In-App Update system with mandatory version locking',
-      published: true,
-      updated_at: new Date().toISOString()
-    }];
-  }
+  const cxApp = apps.find(a => a.package_name === 'com.ems.connectx');
 
-  const cxApp = apps.find(a => a.package_name === 'com.ems.connectx') || apps[0];
 
   $('#page').innerHTML = `
-    ${admHead('Apps & Store', 'Official App Store', '<span class="adm-badge adm-t-sky">'+lucide('shield')+' Verified EMS Ecosystem</span>')}
+    ${admHead('Apps & Store', 'Official App Store', '<span class="adm-badge adm-t-sky">'+lucide('shield')+' EMS App Store</span>')}
 
-    <section class="adm-card" style="padding:24px;border-radius:20px;margin-bottom:22px;background:linear-gradient(135deg, rgba(35,131,226,0.08) 0%, rgba(35,131,226,0.02) 100%), #FFFFFF;border:1px solid rgba(35,131,226,0.22);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;position:relative;overflow:hidden;">
+    ${cxApp ? `<section class="adm-card" style="padding:24px;border-radius:20px;margin-bottom:22px;background:linear-gradient(135deg, rgba(35,131,226,0.08) 0%, rgba(35,131,226,0.02) 100%), #FFFFFF;border:1px solid rgba(35,131,226,0.22);display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px;position:relative;overflow:hidden;">
       <div style="position:absolute;right:-20px;bottom:-20px;width:140px;height:140px;background:radial-gradient(circle, rgba(35,131,226,0.12) 0%, transparent 70%);pointer-events:none;"></div>
       
       <div style="display:flex;align-items:center;gap:20px;max-width:680px;">
         ${getAdminAppIconHtml(cxApp, 72)}
         <div>
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-            <span class="adm-badge adm-t-emerald" style="font-size:10.5px;">Official Verified Gateway</span>
+            <span class="adm-badge adm-t-emerald" style="font-size:10.5px;">EMS Gateway</span>
             <span class="adm-badge adm-t-sky" style="font-size:10.5px;">v${esc(cxApp.version)}</span>
           </div>
           <h2 style="font-size:20px;font-weight:800;color:var(--adm-text);margin:0 0 4px 0;">${esc(cxApp.title)}</h2>
@@ -2402,19 +2479,19 @@ async function adminAppStore(){
       </div>
 
       <div style="display:flex;flex-direction:column;gap:8px;min-width:190px;">
-        <button type="button" class="adm-btn adm-btn-primary" id="cxHeroDownloadBtn" style="padding:10px 18px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;">
-          ${lucide('download')} Download APK (v${esc(cxApp.version)})
+        <button type="button" class="adm-btn adm-btn-primary" id="cxHeroDownloadBtn" ${cxApp.download_available?'':'disabled'} style="padding:10px 18px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:8px;">
+          ${lucide('download')} ${cxApp.download_available?`Download APK (v${esc(cxApp.version)})`:'APK not available yet'}
         </button>
         <button type="button" class="adm-btn adm-btn-soft adm-btn-sm" id="cxHeroDetailsBtn">
           ${lucide('file')} View Release Notes & Specs
         </button>
       </div>
-    </section>
+    </section>` : ''}
 
     <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;">
       <div>
         <h3 style="font-size:16px;font-weight:700;margin:0 0 2px 0;">All Applications (${apps.length})</h3>
-        <p class="adm-desc" style="margin:0;">Official Android APK packages and companion tools certified for EMS V1.</p>
+        <p class="adm-desc" style="margin:0;">Published Android apps. <a href="/?page=app-store" target="_blank" rel="noopener">Open public App Store</a></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
         <input type="text" id="appSearchInput" class="adm-search" placeholder="Search applications…" style="width:220px;">
@@ -2445,10 +2522,10 @@ async function adminAppStore(){
 
 function renderAdminAppCards(apps) {
   if (!apps.length) {
-    return admEmpty('No applications match your search query.');
+    return admEmpty('No published apps yet, or no apps match this search.');
   }
   return apps.map(app => {
-    const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+    const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : 'Not provided';
     const updatedDate = app.updated_at ? new Date(app.updated_at).toLocaleDateString() : 'Recent';
 
     return `
@@ -2471,14 +2548,14 @@ function renderAdminAppCards(apps) {
 
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;">
             <span class="shp-tag shp-t-sky" style="font-size:10.5px;">Android 8.0+</span>
-            <span class="shp-tag shp-t-emerald" style="font-size:10.5px;">Verified Safe</span>
+            <span class="shp-tag shp-t-emerald" style="font-size:10.5px;">EMS release</span>
             ${app.mandatory ? `<span class="shp-tag shp-t-rose" style="font-size:10.5px;">Mandatory Update</span>` : ''}
           </div>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--adm-line);margin-top:auto;">
-          <button type="button" class="adm-btn adm-btn-primary adm-btn-sm" data-admin-app-download="${app.id || app.package_name}" style="flex:1;text-align:center;justify-content:center;font-weight:700;">
-            ${lucide('download')} Download APK
+          <button type="button" class="adm-btn adm-btn-primary adm-btn-sm" data-admin-app-download="${app.id || app.package_name}" ${app.download_available?'':'disabled'} style="flex:1;text-align:center;justify-content:center;font-weight:700;">
+            ${lucide('download')} ${app.download_available?'Download APK':'APK unavailable'}
           </button>
           <button type="button" class="adm-btn adm-btn-soft adm-btn-sm" data-admin-app-details="${app.id || app.package_name}" title="View Details">
             ${lucide('file')} Details
@@ -2506,7 +2583,7 @@ function bindAdminAppActions(apps) {
 }
 
 function adminAppDetailsModal(app) {
-  const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : '8.2 MB';
+  const sizeMb = app.apk_size_bytes ? (app.apk_size_bytes / (1024*1024)).toFixed(1) + ' MB' : 'Not provided';
   const updatedDate = app.updated_at ? new Date(app.updated_at).toLocaleString() : 'Recent';
 
   const modal = admModal(
@@ -2548,12 +2625,12 @@ function adminAppDetailsModal(app) {
       ` : ''}
 
       <div style="background:rgba(35,131,226,0.06);border:1px solid rgba(35,131,226,0.2);border-radius:10px;padding:12px;font-size:12px;color:var(--adm-text);line-height:1.45;">
-        <b>Installation Note:</b> If your Android device shows "Install unknown apps", enable permission for your browser or file manager. Release builds are signed with EMS Official Release Keys for seamless automatic in-app updates.
+        <b>Installation Note:</b> If your Android device shows "Install unknown apps", enable permission for your browser or file manager. To update an installed app, the owner must upload an APK signed with the same signing certificate.
       </div>
 
       <div class="adm-form-actions" style="margin-top:4px;">
-        <button type="button" class="adm-btn adm-btn-primary" id="modalDownloadBtn" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:700;">
-          ${lucide('download')} Download APK (${sizeMb})
+        <button type="button" class="adm-btn adm-btn-primary" id="modalDownloadBtn" ${app.download_available?'':'disabled'} style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:700;">
+          ${lucide('download')} ${app.download_available?`Download APK (${sizeMb})`:'APK not available yet'}
         </button>
       </div>
     </div>

@@ -597,6 +597,35 @@ footer a { color: #d4e1ee; text-decoration: none; }
 .blogHero h1 { font-size: 34px; margin: 6px 0 10px; }
 .blogHero p { max-width: 560px; margin: 0 auto; color: var(--muted); }
 
+/* Public App Store — no sign-in, with honest binary availability. */
+.publicStoreHero { max-width: 740px; margin: 0 auto 38px; text-align: center; }
+.publicStoreHero .eyebrow { color: #047857; letter-spacing: .16em; }
+.publicStoreHero h1 { font-size: clamp(2rem, 6vw, 3.5rem); color: #102a43; margin: 8px 0 12px; }
+.publicStoreHero p { color: #536980; font-size: 16px; line-height: 1.6; }
+.publicStoreGrid { max-width: 1120px; margin: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 20px; }
+.publicStoreCard { background: #fff; border: 1px solid #dbe7f0; border-radius: 20px; box-shadow: 0 12px 34px #0e2e4a0d; padding: 24px; display: flex; flex-direction: column; min-height: 355px; }
+.publicStoreCardTop { display: flex; align-items: center; gap: 15px; }
+.publicStoreCardTop img { width: 64px; height: 64px; border-radius: 16px; object-fit: cover; border: 1px solid #e0e8f1; background: #f5f8fc; flex: none; }
+.publicStoreBadge { display: block; color: #047857; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.publicStoreCard h2 { margin: 5px 0; color: #102a43; font-size: 18px; line-height: 1.3; }
+.publicStorePackage { font-size: 12px; color: #64748b; overflow-wrap: anywhere; }
+.publicStoreDesc { font-size: 14px; color: #475569; line-height: 1.6; flex: 1; }
+.publicStoreFacts { border-top: 1px solid #e7edf3; border-bottom: 1px solid #e7edf3; padding: 12px 0; display: flex; flex-wrap: wrap; gap: 12px 24px; }
+.publicStoreFacts span { display: flex; flex-direction: column; gap: 2px; color: #64748b; font-size: 11px; }
+.publicStoreFacts b { color: #102a43; font-size: 13px; }
+.publicStoreNotes { margin: 14px 0 4px; color: #475569; font-size: 13px; }
+.publicStoreNotes summary { cursor: pointer; color: #075985; font-weight: 750; }
+.publicStoreNotes p { white-space: pre-line; line-height: 1.5; }
+.publicStoreDownload, .publicStoreUnavailable { margin-top: 18px; border-radius: 11px; padding: 12px 16px; min-height: 46px; font-weight: 750; font-size: 14px; text-align: center; }
+.publicStoreDownload { display: inline-flex; align-items: center; justify-content: center; gap: 9px; background: #087655; color: #fff; text-decoration: none; }
+.publicStoreDownload:hover, .publicStoreDownload:focus-visible { background: #065f46; color: #fff; }
+.publicStoreDownload svg { width: 18px; height: 18px; }
+.publicStoreUnavailable { background: #fff7ed; color: #92400e; border: 1px solid #fed7aa; line-height: 1.5; font-weight: 600; }
+.publicStoreEmpty { grid-column: 1/-1; text-align: center; border: 1px dashed #cbd5e1; padding: 65px 20px; border-radius: 18px; background: #fff; }
+.publicStoreEmpty h2 { color: #102a43; }
+.publicStoreEmpty p { color: #64748b; }
+@media(max-width: 600px) { .publicPage { padding: 42px 18px; } .publicStoreCard { min-height: 0; padding: 20px; } }
+
 /* ═══════════════════════════════════════════════════════════════════════
    AUTH MODAL & TOAST NOTIFICATION
    ═══════════════════════════════════════════════════════════════════════ */

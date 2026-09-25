@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "npx wrangler pages dev . --compatibility-date=2026-05-03",
-    "deploy": "wrangler pages deploy . --project-name=ems-v1"
+    "deploy": "wrangler pages deploy . --project-name=ems-v1",
+    "test": "node --test test/*.test.js"
   },
   "devDependencies": {
     "wrangler": "^4.86.0"

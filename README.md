@@ -7,7 +7,7 @@ salaries from a simple dashboard.
 
 It is a static single-page app served by **Cloudflare Pages**, powered by a
 **Cloudflare Pages Functions API** (`functions/api/[[path]].js`) and a
-**Supabase PostgreSQL** database.f
+**Supabase PostgreSQL** database.
 
 > This repository contains **only the EMS application**. It is fully standalone —
 > the site root (`/`) is the EMS landing page and app.
@@ -16,7 +16,10 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 > Console guide (pages, workflow and a full explanation of how its Agent Bento
 > Grid CSS/theme system works) · [`admin.md`](admin.md) — the Administrator
 > Panel guide and its Agent Bento Grid CSS/theme documentation ·
-> [`ADDONS.md`](ADDONS.md) — Premium Add-Ons user guide.
+> [`ADDONS.md`](ADDONS.md) — Premium Add-Ons user guide ·
+> [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) — public App Store, release upload,
+> update checks, and deployment checklist · [`SIM_BALANCE_SETUP.md`](SIM_BALANCE_SETUP.md)
+> — owner-managed carrier USSD catalog, Android permissions, and setup.
 
 ---
 
@@ -62,6 +65,9 @@ Supabase PostgreSQL
   Owner Console, the Administrator Panel or the Shop Panel.
 - **All data access goes through the API.** The browser never talks to Supabase
   directly and never sees the service-role key.
+- **The App Store is public.** `/?page=app-store` and the read-only published
+  app/download API require no login. Publishing and APK uploads require the
+  EMS owner session; Vaultium documents remain private.
 - **Everything is a license/permission decision.** The API checks the session's
   role (owner / admin / staff), the store's license state, the staff member's
   permission sections and the shop's purchased add-ons before doing anything.
