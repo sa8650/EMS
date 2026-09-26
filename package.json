@@ -9,6 +9,7 @@
     "test": "node --test test/*.test.js"
   },
   "devDependencies": {
+    "better-sqlite3": "^12.11.1",
     "wrangler": "^4.86.0"
   }
 }

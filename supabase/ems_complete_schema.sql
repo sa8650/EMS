@@ -1007,11 +1007,12 @@ create index if not exists idx_app_store_pub on public.app_store_apps(published,
 
 -- ----------------------------------------------------------- RLS / SECURITY
 -- --------------------------------------------------- EMS PUBLIC API CREDENTIALS
--- External apps (incl. the ConnectX Android gateway) authenticate against
--- /api/v1 with these keys. Only a SHA-256 hash of each key is stored.
+-- Platform service credentials issued by the EMS owner (Owner Console →
+-- EMS API). The ConnectX central service authenticates against /api/v1
+-- with one of these keys. Only a SHA-256 hash of each key is stored.
 create table if not exists public.api_keys (
   id            uuid primary key default gen_random_uuid(),
-  admin_id      uuid not null references public.administrators(id) on delete cascade,
+  owner_id      uuid references public.ems_owners(id) on delete set null,
   store_id      uuid references public.stores(id) on delete cascade,
   name          text not null,
   key_prefix    text not null,
@@ -1023,7 +1024,7 @@ create table if not exists public.api_keys (
   created_at    timestamptz not null default now(),
   revoked_at    timestamptz
 );
-create index if not exists idx_api_keys_admin on public.api_keys(admin_id, status);
+create index if not exists idx_api_keys_status on public.api_keys(status);
 create index if not exists idx_api_keys_hash  on public.api_keys(key_hash);
 create index if not exists idx_api_keys_store on public.api_keys(store_id);
 

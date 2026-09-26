@@ -59,6 +59,7 @@ the app detects `role === "owner"` and boots the console.
 | | Blogs | Publish/edit/delete public blog posts |
 | | Contact messages | Messages submitted from the public contact form |
 | **Services** | ConnectX | Platform email service: sender identity, limits, test send, logs |
+| | EMS API | Platform API credentials for the ConnectX SMS service & other integrations: create/revoke keys, scopes, show-once secrets |
 | | Zudo AI | Central AI model + daily limits, Business AI Health controls, logs |
 | | TrueBill | Invoice QR verification: price/day, validity range, scan log |
 | | Vaultium | Cloudflare R2 storage: usage per shop, setup instructions |
@@ -162,6 +163,20 @@ cover images; and the contact-form inbox.
 
 **ConnectX** — platform sender identity, per-day limits, a real test send,
 and delivery logs.
+
+**EMS API** — platform service credentials for the EMS Public API (`/api/v1`).
+The owner creates, edits, revokes and deletes API keys here (up to 25 active);
+each key carries granular scopes (`read`, `write`, or per-resource such as
+`sms:read` / `sms:write`), an optional single-shop lock (default: platform-wide,
+covering every shop) and an optional expiry. The plaintext key (`emsk_…`) is
+shown **once** in a copy modal — EMS keeps only a SHA-256 hash. This is where
+the **ConnectX central SMS service** gets its credential (`sms:read` +
+`sms:write`); it then claims queued SMS fleet-wide through `/api/v1/sms/claim`.
+KPIs show active/online/SMS-capable keys; a quick-reference panel lists the base
+URL, auth header and endpoint map. Administrators never see this page — their
+ConnectX page only shows an aggregate gateway online/offline status. All
+create/update/revoke/delete actions are written to the platform activity log.
+Full contract: [`API.md`](API.md).
 
 **Zudo AI** — provider readiness cards (Workers AI / Gemini / Groq / Cerebras),
 central model picker, global daily request limit, enable/disable, Business

@@ -2,8 +2,9 @@
 -- Cloudflare D1 (SQLite) version of 045_public_api_credentials.sql
 --
 -- EMS Public API credentials + retirement of the ConnectX Android
--- device-token connection. External apps (including the ConnectX Android
--- app) now connect only through /api/v1/* with an API key.
+-- device-token connection. API keys are platform service credentials
+-- issued ONLY by the EMS owner (Owner Console → EMS API); the ConnectX
+-- central service uses one to read/write the EMS SMS queue via /api/v1/*.
 --
 -- Apply with:
 --   npx wrangler d1 execute ems-d1 --remote --file=supabase/d1/migration_public_api_credentials.sql
@@ -11,7 +12,7 @@
 
 CREATE TABLE IF NOT EXISTS api_keys (
   id            TEXT PRIMARY KEY,
-  admin_id      TEXT NOT NULL REFERENCES administrators(id) ON DELETE CASCADE,
+  owner_id      TEXT REFERENCES ems_owners(id) ON DELETE SET NULL,
   store_id      TEXT REFERENCES stores(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   key_prefix    TEXT NOT NULL,
@@ -24,7 +25,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   revoked_at    TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_api_keys_admin ON api_keys(admin_id, status);
+CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash  ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_store ON api_keys(store_id);
 

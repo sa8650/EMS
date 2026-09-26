@@ -1,10 +1,18 @@
 /* =====================================================================
-   EMS Public API (v1) + API credential management
+   EMS Public API (v1) + platform API credential management
    ---------------------------------------------------------------------
-   External applications (the ConnectX Android app, POS terminals, custom
-   integrations, …) NEVER talk to the database. They authenticate against
-   this HTTP layer with an EMS API key and only see whitelisted fields.
+   Service-to-service integration surface between EMS and external
+   services — first of all the ConnectX central service, which needs
+   read/write access to the EMS SMS queue to automate SMS dispatch.
+   (Email never needs ConnectX: EMS sends email itself via Brevo.)
 
+   External services NEVER talk to the database. They authenticate
+   against this HTTP layer with an EMS API key and only see whitelisted
+   fields.
+
+   · Ownership   : API keys are PLATFORM credentials, created and revoked
+                   ONLY by the EMS owner (Owner Console → EMS API).
+                   Administrators never see or manage keys.
    · Auth        : "Authorization: Bearer emsk_…"  (or "X-API-Key: emsk_…")
    · Keys        : shown ONCE at creation; only a SHA-256 hash is stored.
    · Permissions : granular scopes — global `read` / `write`, or
@@ -12,10 +20,9 @@
    · Portability : every query goes through db() (Supabase ⇄ D1 ⇄ any
                    future dedicated server). The /api/v1 contract is the
                    stable integration surface — swapping the database or
-                   host never breaks external apps.
+                   host never breaks external services.
 
-   Managed from the Administrator console → API Access
-   (session routes: admin/api-keys…). Documented in API.md.
+   Owner session routes: platform/api-keys… . Documented in API.md.
    ===================================================================== */
 import { db } from './db.js';
 import { smsSettingsFor, enqueueSmsJob } from './connectx_sms.js';
@@ -84,11 +91,6 @@ const publicShop = s => s ? ({
   address: s.address || null, phone: s.phone || null, status: s.status
 }) : null;
 
-const publicAdminRow = a => a ? ({
-  id: a.id, admin_code: a.admin_code || null, name: a.name || '', email: a.email || '',
-  phone: a.phone || '', address: a.address || '', active: a.active !== false, created_at: a.created_at || null
-}) : null;
-
 /* D1's compatibility driver returns all table columns even with select=…;
    whitelist what an external client may read rather than returning raw rows. */
 function publicEmail(row, detail = false) {
@@ -155,9 +157,6 @@ async function authenticate(env, request) {
   if (key.status !== 'active') return { error: vfail('This API key has been revoked.', 401, 'revoked_key') };
   if (key.expires_at && new Date(key.expires_at) <= new Date()) return { error: vfail('This API key has expired.', 401, 'expired_key') };
 
-  const [admin] = await db(env, `administrators?id=eq.${key.admin_id}&select=id,admin_code,name,email,phone,address,active,created_at`).catch(() => []);
-  if (!admin || admin.active === false) return { error: vfail('The administrator account for this API key is inactive.', 403, 'admin_inactive') };
-
   key.scopes = parseScopes(key.scopes);
 
   /* heartbeat: throttled last_used_at update (also powers "online" in the console) */
@@ -168,19 +167,30 @@ async function authenticate(env, request) {
       body: JSON.stringify({ last_used_at: new Date().toISOString() })
     }).catch(() => {});
   }
-  return { key, admin };
+  return { key };
 }
 
-/* Resolve which shop the request targets. A key bound to a shop is locked
-   to that shop; an administrator-wide key passes ?shop_id= or X-Shop-Id. */
+/* Resolve which shop the request targets. Keys are platform credentials:
+   a key optionally locked to a shop is limited to that shop; otherwise the
+   service passes ?shop_id= (or X-Shop-Id) to select any EMS shop. */
 async function resolveShop(env, key, request) {
   const qs = new URL(request.url).searchParams;
-  const requested = key.store_id || qs.get('shop_id') || qs.get('store_id') || request.headers.get('x-shop-id') || '';
-  if (!requested) return { error: vfail('This API key is administrator-wide: pass ?shop_id=… (or X-Shop-Id header) to select a shop.', 400, 'shop_required') };
-  const [store] = await db(env, `stores?id=eq.${requested}&admin_id=eq.${key.admin_id}&select=id,name,address,phone,shop_code,status,category`).catch(() => []);
-  if (!store) return { error: vfail('Shop not found for this API key.', 404, 'shop_not_found') };
+  const requested = qs.get('shop_id') || qs.get('store_id') || request.headers.get('x-shop-id') || key.store_id || '';
+  if (!requested) return { error: vfail('Pass ?shop_id=… (or the X-Shop-Id header) to select a shop.', 400, 'shop_required') };
+  if (key.store_id && requested !== key.store_id) return { error: vfail('This API key is locked to another shop.', 403, 'shop_locked') };
+  const [store] = await db(env, `stores?id=eq.${requested}&select=id,name,address,phone,shop_code,status,category,admin_id`).catch(() => []);
+  if (!store) return { error: vfail('Shop not found.', 404, 'shop_not_found') };
   if (store.status === 'inactive') return { error: vfail('This shop is inactive.', 403, 'shop_inactive') };
   return { store };
+}
+
+/* Shop is optional for fleet-level SMS endpoints: the ConnectX central
+   service may operate across every EMS shop with one credential. */
+async function resolveShopOptional(env, key, request) {
+  const qs = new URL(request.url).searchParams;
+  const requested = qs.get('shop_id') || qs.get('store_id') || request.headers.get('x-shop-id') || key.store_id || '';
+  if (!requested) return { store: null };
+  return resolveShop(env, key, request);
 }
 
 const limitOf = (request, def = 100, max = 500) => {
@@ -210,7 +220,7 @@ export async function publicApiRoutes({ env, request, path, method }) {
 
   const auth = await authenticate(env, request);
   if (auth.error) return auth.error;
-  const { key, admin } = auth;
+  const { key } = auth;
   const deny = (resource, verb) => vfail(`This API key does not have the "${resource}:${verb}" (or global "${verb}") scope.`, 403, 'insufficient_scope');
 
   /* ---- identity / connection ---- */
@@ -219,33 +229,32 @@ export async function publicApiRoutes({ env, request, path, method }) {
   }
 
   if (sub === 'me' && method === 'GET') {
-    const stores = await db(env, `stores?admin_id=eq.${key.admin_id}${key.store_id ? `&id=eq.${key.store_id}` : ''}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`);
+    const stores = await db(env, `stores?${key.store_id ? `id=eq.${key.store_id}&` : ''}select=id,status`);
     return vjson({
       key: publicKeyRow(key),
-      administrator: publicAdminRow(admin),
-      shops: stores.map(publicShop)
+      platform: 'EMS',
+      shops_total: stores.length,
+      shops_active: stores.filter(s => s.status === 'active').length
     });
   }
 
-  /* heartbeat for gateway-style clients (ConnectX app): connection state + shop summary */
+  /* heartbeat for the ConnectX central service: connection state (+ shop summary when one is selected) */
   if (sub === 'heartbeat' && method === 'POST') {
-    const shop = await resolveShop(env, key, request);
+    const shop = await resolveShopOptional(env, key, request);
     if (shop.error) return shop.error;
-    const settings = await smsSettingsFor(env, shop.store.id);
-    return vjson({
-      ok: true,
-      shop: publicShop(shop.store),
-      administrator: publicAdminRow(admin),
-      smsEnabled: !!settings.enabled,
-      scopes: key.scopes,
-      server_time: new Date().toISOString()
-    });
+    const out = { ok: true, scopes: key.scopes, server_time: new Date().toISOString() };
+    if (shop.store) {
+      const settings = await smsSettingsFor(env, shop.store.id);
+      out.shop = publicShop(shop.store);
+      out.smsEnabled = !!settings.enabled;
+    }
+    return vjson(out);
   }
 
   /* ---- shops ---- */
   if (sub === 'shops' && method === 'GET') {
     if (!hasScope(key.scopes, 'shops', 'read')) return deny('shops', 'read');
-    const stores = await db(env, `stores?admin_id=eq.${key.admin_id}${key.store_id ? `&id=eq.${key.store_id}` : ''}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`);
+    const stores = await db(env, `stores?${key.store_id ? `id=eq.${key.store_id}&` : ''}select=id,name,address,phone,shop_code,status,category&order=created_at.desc&limit=${limitOf(request, 200)}`);
     return vjson({ items: stores.map(publicShop) });
   }
   if (sub.match(/^shops\/[^/]+$/) && method === 'GET') {
@@ -253,7 +262,7 @@ export async function publicApiRoutes({ env, request, path, method }) {
     const id = sub.split('/')[1];
     if (!UUID_RE.test(id)) return vfail('Invalid shop ID.', 400);
     if (key.store_id && key.store_id !== id) return vfail('This API key is locked to another shop.', 403);
-    const [store] = await db(env, `stores?id=eq.${id}&admin_id=eq.${key.admin_id}&select=id,name,address,phone,shop_code,status,category`);
+    const [store] = await db(env, `stores?id=eq.${id}&select=id,name,address,phone,shop_code,status,category`);
     if (!store) return vfail('Shop not found.', 404);
     return vjson(publicShop(store));
   }
@@ -375,42 +384,45 @@ export async function publicApiRoutes({ env, request, path, method }) {
 
   if (sub === 'sms/queue' && method === 'GET') {
     if (!hasScope(key.scopes, 'sms', 'read')) return deny('sms', 'read');
-    const shop = await resolveShop(env, key, request);
+    const shop = await resolveShopOptional(env, key, request);
     if (shop.error) return shop.error;
-    const rows = await db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&status=eq.queued&select=*&order=created_at.asc&limit=${limitOf(request, 50, 100)}`);
-    return vjson({ shop_id: shop.store.id, items: rows.map(publicSms) });
+    const filter = shop.store ? `store_id=eq.${shop.store.id}&` : '';
+    const rows = await db(env, `connectx_sms_messages?${filter}status=eq.queued&select=*&order=created_at.asc&limit=${limitOf(request, 50, 100)}`);
+    return vjson({ shop_id: shop.store?.id || null, items: rows.map(r => ({ ...publicSms(r), shop_id: r.store_id })) });
   }
 
   if (sub === 'sms/messages' && method === 'GET') {
     if (!hasScope(key.scopes, 'sms', 'read')) return deny('sms', 'read');
-    const shop = await resolveShop(env, key, request);
+    const shop = await resolveShopOptional(env, key, request);
     if (shop.error) return shop.error;
     const qs = new URL(request.url).searchParams;
     const range = qs.get('range') || 'today';
     const days = range === '30d' || range === '30' ? 30 : range === '7d' || range === '7' ? 7 : 1;
     const since = range === 'today' ? dayStart(request) : new Date(Date.now() - days * 86400000).toISOString();
     if (!since) return vfail('Invalid UTC offset.', 400);
-    const rows = await db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&created_at=gte.${since}&select=*&order=created_at.desc&limit=250`);
-    return vjson({ shop_id: shop.store.id, items: rows.map(publicSms) });
+    const filter = shop.store ? `store_id=eq.${shop.store.id}&` : '';
+    const rows = await db(env, `connectx_sms_messages?${filter}created_at=gte.${since}&select=*&order=created_at.desc&limit=250`);
+    return vjson({ shop_id: shop.store?.id || null, items: rows.map(r => ({ ...publicSms(r), shop_id: r.store_id })) });
   }
 
   if (sub === 'sms/stats' && method === 'GET') {
     if (!hasScope(key.scopes, 'sms', 'read')) return deny('sms', 'read');
-    const shop = await resolveShop(env, key, request);
+    const shop = await resolveShopOptional(env, key, request);
     if (shop.error) return shop.error;
     const today = dayStart(request);
     if (!today) return vfail('Invalid UTC offset.', 400);
+    const filter = shop.store ? `store_id=eq.${shop.store.id}&` : '';
     const [jobs, last] = await Promise.all([
-      db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&created_at=gte.${today}&select=id,status,sent_at,created_at`),
-      db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&select=created_at,sent_at,status&order=created_at.desc&limit=1`)
+      db(env, `connectx_sms_messages?${filter}created_at=gte.${today}&select=id,status,sent_at,created_at`),
+      db(env, `connectx_sms_messages?${filter}select=created_at,sent_at,status&order=created_at.desc&limit=1`)
     ]);
     return vjson({
-      shop_id: shop.store.id,
+      shop_id: shop.store?.id || null,
       sent: jobs.filter(j => j.status === 'sent').length,
       failed: jobs.filter(j => j.status === 'failed').length,
       pending: jobs.filter(j => j.status === 'queued' || j.status === 'sending').length,
       lastActivity: last[0]?.sent_at || last[0]?.created_at || null,
-      shop: publicShop(shop.store)
+      shop: shop.store ? publicShop(shop.store) : null
     });
   }
 
@@ -426,25 +438,26 @@ export async function publicApiRoutes({ env, request, path, method }) {
   /* ---- SMS: gateway dispatch (write) — how the ConnectX app sends ---- */
   if (sub === 'sms/claim' && method === 'POST') {
     if (!hasScope(key.scopes, 'sms', 'write')) return deny('sms', 'write');
-    const shop = await resolveShop(env, key, request);
+    const shop = await resolveShopOptional(env, key, request);
     if (shop.error) return shop.error;
+    const filter = shop.store ? `store_id=eq.${shop.store.id}&` : '';
     const b = await readBody(request);
     const limit = Math.min(20, Math.max(1, Number(b.limit || 8)));
     const stale = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-    /* release jobs stuck in "sending" (a client crashed mid-dispatch) */
-    const sending = await db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&status=eq.sending&select=id,claimed_at`).catch(() => []);
+    /* release jobs stuck in "sending" (a gateway crashed mid-dispatch) */
+    const sending = await db(env, `connectx_sms_messages?${filter}status=eq.sending&select=id,claimed_at&limit=100`).catch(() => []);
     for (const j of sending) {
       if (!j.claimed_at || j.claimed_at < stale) {
-        await db(env, `connectx_sms_messages?id=eq.${j.id}&store_id=eq.${shop.store.id}&status=eq.sending`, {
+        await db(env, `connectx_sms_messages?id=eq.${j.id}&status=eq.sending`, {
           method: 'PATCH', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ status: 'queued', claimed_at: null })
         }).catch(() => {});
       }
     }
-    const queued = await db(env, `connectx_sms_messages?store_id=eq.${shop.store.id}&status=eq.queued&select=*&order=created_at.asc&limit=${limit}`);
+    const queued = await db(env, `connectx_sms_messages?${filter}status=eq.queued&select=*&order=created_at.asc&limit=${limit}`);
     const claimed = [];
     for (const job of queued) {
-      const upd = await db(env, `connectx_sms_messages?id=eq.${job.id}&store_id=eq.${shop.store.id}&status=eq.queued`, {
+      const upd = await db(env, `connectx_sms_messages?id=eq.${job.id}&status=eq.queued`, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           status: 'sending', device_id: key.id, claimed_at: new Date().toISOString(),
@@ -453,7 +466,7 @@ export async function publicApiRoutes({ env, request, path, method }) {
       }).catch(() => null);
       /* a conditional PATCH that updated zero rows returns [] — never dispatch unclaimed jobs */
       if (Array.isArray(upd) && upd.length > 0) {
-        claimed.push({ ...publicSms(job), shop_id: shop.store.id, attempts: Number(job.attempts || 0) + 1, phone_number: job.to_phone, message: job.message_body });
+        claimed.push({ ...publicSms(job), shop_id: job.store_id, attempts: Number(job.attempts || 0) + 1, phone_number: job.to_phone, message: job.message_body });
       }
     }
     return vjson({ jobs: claimed });
@@ -461,38 +474,36 @@ export async function publicApiRoutes({ env, request, path, method }) {
 
   if (sub === 'sms/report' && method === 'POST') {
     if (!hasScope(key.scopes, 'sms', 'write')) return deny('sms', 'write');
-    const shop = await resolveShop(env, key, request);
-    if (shop.error) return shop.error;
     const b = await readBody(request);
     const id = b.jobId || b.id;
     if (!id || !UUID_RE.test(String(id))) return vfail('jobId is required.', 400);
     const status = b.status === 'sent' ? 'sent' : 'failed';
-    const [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${shop.store.id}&select=*`);
-    if (!job) return vfail('SMS job not found for this shop.', 404);
+    const [job] = await db(env, `connectx_sms_messages?id=eq.${id}&select=*`);
+    if (!job) return vfail('SMS job not found.', 404);
+    if (key.store_id && job.store_id !== key.store_id) return vfail('This API key is locked to another shop.', 403, 'shop_locked');
     if (job.device_id && job.device_id !== key.id && job.status === 'sent') return vjson({ ok: true, duplicate: true });
     const patch = {
       status, device_id: key.id,
       error_message: status === 'failed' ? String(b.error || 'SMS could not be sent').slice(0, 400) : null
     };
     if (status === 'sent') patch.sent_at = new Date().toISOString();
-    await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${shop.store.id}`, {
+    await db(env, `connectx_sms_messages?id=eq.${id}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
     });
-    return vjson({ ok: true, status });
+    return vjson({ ok: true, status, shop_id: job.store_id });
   }
 
   if ((sub === 'sms/cancel' && method === 'POST') || (sub.match(/^sms\/jobs\/[^/]+$/) && method === 'DELETE')) {
     if (!hasScope(key.scopes, 'sms', 'write')) return deny('sms', 'write');
-    const shop = await resolveShop(env, key, request);
-    if (shop.error) return shop.error;
     let id;
     if (method === 'DELETE') id = sub.split('/')[2];
     else { const b = await readBody(request); id = b.jobId || b.id; }
     if (!id || !UUID_RE.test(String(id))) return vfail('jobId is required.', 400);
-    const [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${shop.store.id}&select=*`);
-    if (!job) return vfail('SMS job not found for this shop.', 404);
+    const [job] = await db(env, `connectx_sms_messages?id=eq.${id}&select=*`);
+    if (!job) return vfail('SMS job not found.', 404);
+    if (key.store_id && job.store_id !== key.store_id) return vfail('This API key is locked to another shop.', 403, 'shop_locked');
     if (job.status !== 'queued') return vfail('SMS is no longer queued. Refresh history before retrying.', 409);
-    const removed = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${shop.store.id}&status=eq.queued`, { method: 'DELETE' });
+    const removed = await db(env, `connectx_sms_messages?id=eq.${id}&status=eq.queued`, { method: 'DELETE' });
     if (!removed.length) return vfail('SMS was already claimed. Refresh history.', 409);
     return vjson({ ok: true, cancelled: true });
   }
@@ -518,7 +529,7 @@ export async function publicApiRoutes({ env, request, path, method }) {
     if (usedToday.length >= maxDaily) return vfail(`This shop has reached its daily ConnectX SMS limit (${maxDaily}/day).`, 429);
 
     const result = await enqueueSmsJob(env, {
-      storeId: shop.store.id, userId: key.admin_id, phone,
+      storeId: shop.store.id, userId: null, phone,
       name: String(b.recipientName || b.recipient_name || '').trim() || null,
       recipientType: ['customer', 'supplier', 'staff', 'manual'].includes(b.recipientType) ? b.recipientType : 'manual',
       invoiceId: UUID_RE.test(String(b.invoiceId || '')) ? b.invoiceId : null,
@@ -535,28 +546,40 @@ export async function publicApiRoutes({ env, request, path, method }) {
 }
 
 /* =====================================================================
-   ADMIN CONSOLE ROUTES — EMS session (role: admin) manages credentials
+   OWNER CONSOLE ROUTES — the EMS owner (platform) creates, manages and
+   revokes API credentials. Administrators have NO access to these.
+   Session routes under: platform/api-keys…
    ===================================================================== */
-const MAX_KEYS_PER_ADMIN = 25;
+const MAX_ACTIVE_KEYS = 25;
 
-export async function apiKeyAdminRoutes(ctx) {
-  const { env, request, path, method, s, json, fail, body, audit } = ctx;
-  if (!path.startsWith('admin/api-keys')) return null;
-  if (!s || s.role !== 'admin') return fail('Forbidden', 403);
+async function ownerLog(env, s, action, id, metadata = {}) {
+  try {
+    await db(env, 'platform_activity_logs', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ owner_id: s.id, action, entity_type: 'api_key', entity_id: id || null, metadata })
+    });
+  } catch (e) { console.error('api_key owner log failed:', e); }
+}
 
-  if (path === 'admin/api-keys' && method === 'GET') {
+export async function apiKeyOwnerRoutes(ctx) {
+  const { env, request, path, method, s, json, fail, body } = ctx;
+  if (!path.startsWith('platform/api-keys')) return null;
+  if (!s || s.role !== 'owner') return fail('Forbidden', 403);
+
+  if (path === 'platform/api-keys' && method === 'GET') {
     const [rows, stores] = await Promise.all([
-      db(env, `api_keys?admin_id=eq.${s.id}&select=*&order=created_at.desc`).catch(() => []),
-      db(env, `stores?admin_id=eq.${s.id}&select=id,name,shop_code`)
+      db(env, 'api_keys?select=*&order=created_at.desc').catch(() => []),
+      db(env, 'stores?select=id,name,shop_code&order=name.asc').catch(() => [])
     ]);
     const names = Object.fromEntries(stores.map(x => [x.id, x.name]));
     return json({
       scopes: VALID_SCOPES,
+      stores,
       items: rows.map(k => ({ ...publicKeyRow(k), shop_name: k.store_id ? (names[k.store_id] || 'Unknown shop') : null }))
     });
   }
 
-  if (path === 'admin/api-keys' && method === 'POST') {
+  if (path === 'platform/api-keys' && method === 'POST') {
     const b = await body(request);
     const name = String(b.name || '').trim();
     if (!name || name.length > 80) return fail('Credential name is required (max 80 characters).');
@@ -566,12 +589,12 @@ export async function apiKeyAdminRoutes(ctx) {
 
     let storeId = null;
     if (b.storeId) {
-      const [store] = await db(env, `stores?id=eq.${b.storeId}&admin_id=eq.${s.id}&select=id`);
-      if (!store) return fail('Selected shop not found for this administrator.', 404);
+      const [store] = await db(env, `stores?id=eq.${b.storeId}&select=id`);
+      if (!store) return fail('Selected shop not found.', 404);
       storeId = store.id;
     }
-    const existing = await db(env, `api_keys?admin_id=eq.${s.id}&status=eq.active&select=id`).catch(() => []);
-    if (existing.length >= MAX_KEYS_PER_ADMIN) return fail(`Maximum of ${MAX_KEYS_PER_ADMIN} active API keys reached. Revoke unused keys first.`, 409);
+    const existing = await db(env, 'api_keys?status=eq.active&select=id').catch(() => []);
+    if (existing.length >= MAX_ACTIVE_KEYS) return fail(`Maximum of ${MAX_ACTIVE_KEYS} active API keys reached. Revoke unused keys first.`, 409);
 
     let expiresAt = null;
     if (b.expiresInDays !== undefined && b.expiresInDays !== null && b.expiresInDays !== '') {
@@ -585,28 +608,28 @@ export async function apiKeyAdminRoutes(ctx) {
     const [row] = await db(env, 'api_keys', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        admin_id: s.id, store_id: storeId, name, key_prefix: prefix, key_hash: keyHash,
+        owner_id: s.id, store_id: storeId, name, key_prefix: prefix, key_hash: keyHash,
         scopes, status: 'active', expires_at: expiresAt, created_at: new Date().toISOString()
       })
     });
-    await audit(env, s, 'create API key', 'api_key', row.id, { name, scopes, store_id: storeId, expires_at: expiresAt });
+    await ownerLog(env, s, 'create API key', row.id, { name, scopes, store_id: storeId, expires_at: expiresAt });
     /* the plaintext key is returned exactly once and never stored */
     return json({ apiKey: key, key: publicKeyRow(row) }, 201);
   }
 
-  const m = path.match(/^admin\/api-keys\/([^/]+)(?:\/(revoke))?$/);
+  const m = path.match(/^platform\/api-keys\/([^/]+)(?:\/(revoke))?$/);
   if (!m) return fail('Unknown API credential endpoint.', 404);
   const id = m[1];
-  const [row] = await db(env, `api_keys?id=eq.${id}&admin_id=eq.${s.id}&select=*`).catch(() => []);
+  const [row] = await db(env, `api_keys?id=eq.${id}&select=*`).catch(() => []);
   if (!row) return fail('API key not found.', 404);
 
   if (m[2] === 'revoke' && method === 'POST') {
     if (row.status === 'revoked') return json({ ok: true, key: publicKeyRow(row) });
-    const [upd] = await db(env, `api_keys?id=eq.${id}&admin_id=eq.${s.id}`, {
+    const [upd] = await db(env, `api_keys?id=eq.${id}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ status: 'revoked', revoked_at: new Date().toISOString() })
     });
-    await audit(env, s, 'revoke API key', 'api_key', id, { name: row.name });
+    await ownerLog(env, s, 'revoke API key', id, { name: row.name });
     return json({ ok: true, key: publicKeyRow(upd || { ...row, status: 'revoked' }) });
   }
 
@@ -625,18 +648,35 @@ export async function apiKeyAdminRoutes(ctx) {
       patch.scopes = scopes;
     }
     if (!Object.keys(patch).length) return fail('Nothing to update.');
-    const [upd] = await db(env, `api_keys?id=eq.${id}&admin_id=eq.${s.id}`, {
+    const [upd] = await db(env, `api_keys?id=eq.${id}`, {
       method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
     });
-    await audit(env, s, 'update API key', 'api_key', id, { changed: Object.keys(patch) });
+    await ownerLog(env, s, 'update API key', id, { changed: Object.keys(patch) });
     return json(publicKeyRow(upd || row));
   }
 
   if (!m[2] && method === 'DELETE') {
-    await db(env, `api_keys?id=eq.${id}&admin_id=eq.${s.id}`, { method: 'DELETE' });
-    await audit(env, s, 'delete API key', 'api_key', id, { name: row.name });
+    await db(env, `api_keys?id=eq.${id}`, { method: 'DELETE' });
+    await ownerLog(env, s, 'delete API key', id, { name: row.name });
     return json({ ok: true });
   }
 
   return fail('Unknown API credential endpoint.', 404);
+}
+
+/* Aggregate, non-secret gateway status shared with administrator views:
+   admins see WHETHER the ConnectX SMS service is connected — never the keys. */
+export async function gatewayStatus(env) {
+  const rows = await db(env, 'api_keys?status=eq.active&select=id,scopes,last_used_at,store_id,expires_at').catch(() => []);
+  const now = Date.now();
+  const live = rows.filter(k => !k.expires_at || new Date(k.expires_at) > new Date());
+  const sms = live.filter(k => { const sc = parseScopes(k.scopes); return sc.includes('write') || sc.includes('sms:write'); });
+  const lastSeen = sms.reduce((a, k) => (k.last_used_at && (!a || k.last_used_at > a)) ? k.last_used_at : a, null);
+  return {
+    configured: sms.length > 0,
+    online: sms.some(k => k.last_used_at && (now - new Date(k.last_used_at).getTime()) < 3 * 60 * 1000),
+    lastSeen,
+    lockedStoreIds: sms.filter(k => k.store_id).map(k => k.store_id),
+    hasGlobal: sms.some(k => !k.store_id)
+  };
 }

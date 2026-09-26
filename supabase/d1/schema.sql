@@ -811,11 +811,12 @@ CREATE INDEX IF NOT EXISTS idx_app_store_pub ON app_store_apps(published, create
 CREATE INDEX IF NOT EXISTS idx_app_store_pub_version ON app_store_apps(published, version_code DESC);
 
 -- --------------------------------------------------- EMS PUBLIC API CREDENTIALS
--- External apps (incl. the ConnectX Android gateway) authenticate against
--- /api/v1 with these keys. Only a SHA-256 hash of each key is stored.
+-- Platform service credentials issued by the EMS owner (Owner Console →
+-- EMS API). The ConnectX central service authenticates against /api/v1
+-- with one of these keys. Only a SHA-256 hash of each key is stored.
 CREATE TABLE IF NOT EXISTS api_keys (
   id            TEXT PRIMARY KEY,
-  admin_id      TEXT NOT NULL REFERENCES administrators(id) ON DELETE CASCADE,
+  owner_id      TEXT REFERENCES ems_owners(id) ON DELETE SET NULL,
   store_id      TEXT REFERENCES stores(id) ON DELETE CASCADE,
   name          TEXT NOT NULL,
   key_prefix    TEXT NOT NULL,
@@ -827,7 +828,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   revoked_at    TEXT
 );
-CREATE INDEX IF NOT EXISTS idx_api_keys_admin ON api_keys(admin_id, status);
+CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash  ON api_keys(key_hash);
 CREATE INDEX IF NOT EXISTS idx_api_keys_store ON api_keys(store_id);
 
