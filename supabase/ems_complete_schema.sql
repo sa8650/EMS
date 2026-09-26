@@ -1006,6 +1006,28 @@ create index if not exists idx_app_store_pkg on public.app_store_apps(package_na
 create index if not exists idx_app_store_pub on public.app_store_apps(published, version_code desc, created_at desc);
 
 -- ----------------------------------------------------------- RLS / SECURITY
+-- --------------------------------------------------- EMS PUBLIC API CREDENTIALS
+-- Platform service credentials issued by the EMS owner (Owner Console →
+-- EMS API). The ConnectX central service authenticates against /api/v1
+-- with one of these keys. Only a SHA-256 hash of each key is stored.
+create table if not exists public.api_keys (
+  id            uuid primary key default gen_random_uuid(),
+  owner_id      uuid references public.ems_owners(id) on delete set null,
+  store_id      uuid references public.stores(id) on delete cascade,
+  name          text not null,
+  key_prefix    text not null,
+  key_hash      text not null unique,
+  scopes        jsonb not null default '["read"]',
+  status        text not null default 'active' check (status in ('active','revoked')),
+  expires_at    timestamptz,
+  last_used_at  timestamptz,
+  created_at    timestamptz not null default now(),
+  revoked_at    timestamptz
+);
+create index if not exists idx_api_keys_status on public.api_keys(status);
+create index if not exists idx_api_keys_hash  on public.api_keys(key_hash);
+create index if not exists idx_api_keys_store on public.api_keys(store_id);
+
 do $$
 declare t text;
 begin
@@ -1018,10 +1040,12 @@ begin
     'business_health_settings','business_health_reports',
     'public_pages','blog_posts','contact_messages','truebill_scans',
     'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files',
-    'returns','return_items','inventory_stock_movements','exchanges','exchange_items','app_store_apps']
+    'returns','return_items','inventory_stock_movements','exchanges','exchange_items','app_store_apps','api_keys']
   loop
     execute format('revoke all on table public.%I from anon, authenticated', t);
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
+-- Make every new table visible to PostgREST immediately.
+notify pgrst, 'reload schema';
 -- End of EMS V1 complete standalone schema.

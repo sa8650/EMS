@@ -427,24 +427,6 @@ CREATE TABLE IF NOT EXISTS connectx_sms_messages (
 CREATE INDEX IF NOT EXISTS idx_cx_sms_store_created ON connectx_sms_messages(store_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cx_sms_store_status ON connectx_sms_messages(store_id, status);
 
--- -------------------------------------------------------------- CONNECTX SIM CARRIERS
--- EMS owner-managed carrier USSD catalog for ConnectX; no USSD codes are seeded.
--- Apply to an existing Cloudflare D1 database before deploying the new API.
-CREATE TABLE IF NOT EXISTS connectx_sim_carriers (
-  id                   TEXT PRIMARY KEY,
-  carrier_name         TEXT NOT NULL,
-  mcc_mnc              TEXT UNIQUE CHECK (mcc_mnc IS NULL OR
-    (length(mcc_mnc) IN (5, 6) AND mcc_mnc NOT GLOB '*[^0-9]*')),
-  carrier_identifier   TEXT NOT NULL DEFAULT '',
-  balance_ussd_code    TEXT NOT NULL DEFAULT '',
-  balance_pattern      TEXT NOT NULL DEFAULT '',
-  active               INTEGER NOT NULL DEFAULT 0,
-  created_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  updated_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-  CHECK (mcc_mnc IS NOT NULL OR length(trim(carrier_identifier)) > 0)
-);
-CREATE INDEX IF NOT EXISTS idx_connectx_sim_carriers_active ON connectx_sim_carriers(active, mcc_mnc);
-
 -- -------------------------------------------------------------- ZUDO
 CREATE TABLE IF NOT EXISTS zudo_settings (
   id                  INTEGER PRIMARY KEY CHECK (id = 1),
@@ -809,6 +791,28 @@ CREATE TABLE IF NOT EXISTS app_store_apps (
 CREATE INDEX IF NOT EXISTS idx_app_store_pkg ON app_store_apps(package_name);
 CREATE INDEX IF NOT EXISTS idx_app_store_pub ON app_store_apps(published, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_store_pub_version ON app_store_apps(published, version_code DESC);
+
+-- --------------------------------------------------- EMS PUBLIC API CREDENTIALS
+-- Platform service credentials issued by the EMS owner (Owner Console →
+-- EMS API). The ConnectX central service authenticates against /api/v1
+-- with one of these keys. Only a SHA-256 hash of each key is stored.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id            TEXT PRIMARY KEY,
+  owner_id      TEXT REFERENCES ems_owners(id) ON DELETE SET NULL,
+  store_id      TEXT REFERENCES stores(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  key_prefix    TEXT NOT NULL,
+  key_hash      TEXT NOT NULL UNIQUE,
+  scopes        TEXT NOT NULL DEFAULT '["read"]',
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+  expires_at    TEXT,
+  last_used_at  TEXT,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  revoked_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_status ON api_keys(status);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash  ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_store ON api_keys(store_id);
 
 INSERT INTO zudo_settings(id, updated_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING;
 INSERT INTO business_health_settings(id, updated_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING;

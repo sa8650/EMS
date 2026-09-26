@@ -1,9 +1,9 @@
 /* Cloudflare Pages Function: custom auth + tenant-enforced EMS API */
 import {db,dbConfigured} from '../_lib/db.js';
 import {connectxSmsRoutes,enqueueAutoSms} from '../_lib/connectx_sms.js';
-import {simCarrierRoutes} from '../_lib/connectx_sim_carriers.js';
 import {publicAppStoreRoutes} from '../_lib/app_store.js';
 import {ownerAppStoreRoutes} from '../_lib/app_store_admin.js';
+import {publicApiRoutes,apiKeyOwnerRoutes,gatewayStatus} from '../_lib/public_api.js';
 const enc = new TextEncoder(), dec = new TextDecoder();
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json','cache-control':'no-store'}});
 const fail=(message,status=400)=>json({error:message},status);
@@ -158,6 +158,8 @@ function allowedAddon(s,section,verb){if(s.role==='admin'||s.adminAccess)return 
 function publicStaff(r){delete r.password_hash;return r}
 export async function onRequest(context){const {request,env,params}=context, path=(params.path||[]).join('/'), method=request.method;try{
  {let missing=['SESSION_SECRET'].filter(k=>!env[k]);if(!dbConfigured(env))missing.push(String(env.DB_DRIVER||'').toLowerCase()==='d1'?'DB (D1 binding)':'SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or set DB_DRIVER=d1 with a D1 binding named DB)');if(missing.length)return fail('Server configuration is incomplete: missing '+missing.join(', ')+'.',500);}
+ /* ---- EMS Public API v1: API-key authenticated surface for external apps (ConnectX Android app, integrations). No EMS session, no direct DB access. See API.md. ---- */
+ if(path==='v1'||path.startsWith('v1/'))return await publicApiRoutes({env,request,path,method});
  const publicStoreResponse=await publicAppStoreRoutes({env,request,path,method});
  if(publicStoreResponse)return publicStoreResponse;
  if(path==='auth/admin/register'&&method==='POST'){let b=await body(request),email=(b.email||'').trim().toLowerCase();if(!b.name||!b.phone||!email||!b.password||b.password.length<10)return fail('Name, phone, valid email and a 10-character password are required.');let exists=await db(env,`administrators?email=eq.${encodeURIComponent(email)}&select=id`);if(exists.length)return fail('That email is already registered.',409);let adminCode;for(let i=0;i<12;i++){adminCode=String(crypto.getRandomValues(new Uint32Array(1))[0]%9000+1000);let used=await db(env,`administrators?admin_code=eq.${adminCode}&select=id`);if(!used.length)break;adminCode=null}if(!adminCode)throw Error('Could not reserve an Administrator ID. Please retry.');let [a]=await db(env,'administrators',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:b.name.trim(),address:b.address||null,phone:b.phone.trim(),email,password_hash:await hash(b.password),admin_code:adminCode})});return json({token:await token({id:a.id,role:'admin',exp:Math.floor(Date.now()/1000)+28800},env.SESSION_SECRET),user:{id:a.id,name:a.name,email:a.email},role:'admin'});}
@@ -266,9 +268,9 @@ export async function onRequest(context){const {request,env,params}=context, pat
   else return fail('Account not found.',404);
   return json({ok:true});
  }
-let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign in.',401);if(s.role==='staff'&&!s.adminAccess){let [currentStaff]=await db(env,`staff?id=eq.${s.id}&store_id=eq.${s.storeId}&select=active,permissions`);if(!currentStaff||!currentStaff.active)return fail('This user account is deactivated. Contact your shop administrator.',403);s.permissions=normalizePermissions(currentStaff.permissions||{})}if(s.storeId&&s.role!=='connectx_device'){let [sessionStore]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id,status`);if(sessionStore){const ent=await enforceEntitlement(env,sessionStore.admin_id);s.readOnly=s.readOnly||sessionStore.status==='read_only'||!ent;s.licenseExpired=!ent}}
- {let carrier=await simCarrierRoutes({env,request,path,method,session:s,audit});if(carrier)return carrier;}
- {let cx=await connectxSmsRoutes({env,request,path,method,s,json,fail,body,token,audit,allowed});if(cx)return cx;}
+let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign in.',401);if(s.role==='connectx_device')return fail('ConnectX device tokens have been retired. Connect through the EMS Public API (/api/v1) with an API key — see API.md.',401);if(s.role==='staff'&&!s.adminAccess){let [currentStaff]=await db(env,`staff?id=eq.${s.id}&store_id=eq.${s.storeId}&select=active,permissions`);if(!currentStaff||!currentStaff.active)return fail('This user account is deactivated. Contact your shop administrator.',403);s.permissions=normalizePermissions(currentStaff.permissions||{})}if(s.storeId){let [sessionStore]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id,status`);if(sessionStore){const ent=await enforceEntitlement(env,sessionStore.admin_id);s.readOnly=s.readOnly||sessionStore.status==='read_only'||!ent;s.licenseExpired=!ent}}
+ {let cx=await connectxSmsRoutes({env,request,path,method,s,json,fail,body,audit,allowed});if(cx)return cx;}
+ {let ak=await apiKeyOwnerRoutes({env,request,path,method,s,json,fail,body});if(ak)return ak;}
  if(path==='me')return json(s);
  if(path==='platform/overview'){if(s.role!=='owner')return fail('Forbidden',403);let [admins,stores,licenses]=await Promise.all([db(env,'administrators?select=id,admin_code,name,email,phone,active,created_at&order=created_at.desc'),db(env,'stores?select=id,name,shop_code,status,admin_id,created_at,administrators(name,email,admin_code)&order=created_at.desc'),db(env,'licenses?select=*,administrators:administrators!licenses_admin_id_fkey(name,email,admin_code),stores(name,shop_code)&order=created_at.desc')]);return json({admins,stores,licenses});}
  if(path.startsWith('platform/administrator/')){if(s.role!=='owner')return fail('Forbidden',403);let id=path.split('/')[2];if(method==='PATCH'){let b=await body(request);let [x]=await db(env,`administrators?id=eq.${id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(clean({active:b.active}))});await db(env,'platform_activity_logs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({owner_id:s.id,action:b.active?'activate administrator':'deactivate administrator',entity_type:'administrator',entity_id:id})});return json({id:x.id,name:x.name,email:x.email,active:x.active})}}
@@ -299,22 +301,17 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
  if(path==='admin/connectx/overview'&&method==='GET'){
   if(s.role!=='admin')return fail('Forbidden',403);
   let today=new Date().toISOString().slice(0,10);
-  let [stores,entitlement,devices,smsSettingsRows,emailUsage,smsUsage]=await Promise.all([
+  /* API credentials are platform-level (EMS owner ↔ ConnectX central service).
+     Administrators only receive an aggregate gateway status — never key data. */
+  let [stores,entitlement,gateway,smsSettingsRows,emailUsage,smsUsage]=await Promise.all([
     db(env,`stores?admin_id=eq.${s.id}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`),
     currentEntitlement(env,s.id),
-    db(env,`connectx_devices?administrator_id=eq.${s.id}&select=*&order=last_seen.desc`).catch(()=>[]),
+    gatewayStatus(env),
     db(env,'connectx_shop_sms_settings?select=*').catch(()=>[]),
     db(env,`connectx_messages?created_at=gte.${today}T00:00:00Z&status=eq.sent&select=id,store_id`).catch(()=>[]),
     db(env,`connectx_sms_messages?created_at=gte.${today}T00:00:00Z&select=id,store_id,status`).catch(()=>[])
   ]);
   let smsMap=Object.fromEntries(smsSettingsRows.map(x=>[x.store_id,x]));
-  let devByStore={};
-  for(let d of devices){
-    (devByStore[d.store_id]||=[]).push({
-      ...d,
-      online:(d.last_seen&&(Date.now()-new Date(d.last_seen).getTime())<3*60*1000)&&d.status!=='revoked'
-    });
-  }
   let emailCountByStore={},smsCountByStore={};
   for(let e of emailUsage)emailCountByStore[e.store_id]=(emailCountByStore[e.store_id]||0)+1;
   for(let sm of smsUsage){
@@ -323,14 +320,11 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
     else if(sm.status==='failed')c.failed++;
     else if(sm.status==='queued'||sm.status==='sending')c.pending++;
   }
-  let storeNames=Object.fromEntries(stores.map(x=>[x.id,x.name]));
+  let lockedSet=new Set(gateway.lockedStoreIds||[]);
+  let shopCovered=st=>gateway.configured&&(gateway.hasGlobal||lockedSet.has(st.id));
   return json({
     entitlement,
-    devices:devices.map(d=>({
-      ...d,
-      shop_name:storeNames[d.store_id]||'General Shop',
-      online:(d.last_seen&&(Date.now()-new Date(d.last_seen).getTime())<3*60*1000)&&d.status!=='revoked'
-    })),
+    gateway:{configured:gateway.configured,online:gateway.online,lastSeen:gateway.lastSeen},
     shops:stores.map(st=>({
       id:st.id,
       name:st.name,
@@ -351,8 +345,8 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
           auto_return:true,auto_exchange:true,auto_refund:true
         },
         today:smsCountByStore[st.id]||{sent:0,failed:0,pending:0},
-        connected:(devByStore[st.id]||[]).some(d=>(d.status==='active'||d.status==='pending_test')&&d.status!=='revoked'),
-        devices:devByStore[st.id]||[]
+        connected:shopCovered(st),
+        online:shopCovered(st)&&gateway.online
       }
     }))
   });
