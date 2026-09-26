@@ -1338,9 +1338,17 @@ let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign i
   let [msg]=await db(env,'connectx_messages',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({store_id:s.storeId,user_id:s.id,recipient_type:b.recipientType||'manual',recipient_id:b.recipientId||null,invoice_id:attachedInvoiceId,from_email:cfg.from_email,to_emails:to,cc_emails:cc,bcc_emails:bcc,subject:String(b.subject).trim(),custom_body:String(b.body||''),body_html:html,provider:'brevo_api',status:'sending'})});
   let out={messageId:'mock-msg-'+Date.now()};
   if(env.MOCK_EMAIL!=='1'){
-    let res=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':env.BREVO_API_KEY,'content-type':'application/json'},body:JSON.stringify({sender:{name:senderName,email:cfg.from_email},replyTo:cfg.reply_to?{email:cfg.reply_to}:undefined,to:to.map(email=>({email})),...(cc.length?{cc:cc.map(email=>({email}))}:{}),...(bcc.length?{bcc:bcc.map(email=>({email}))}:{}),subject:msg.subject,htmlContent:html})});
+    let res;
+    try{
+      res=await fetch('https://api.brevo.com/v3/smtp/email',{method:'POST',headers:{'api-key':env.BREVO_API_KEY,'content-type':'application/json'},body:JSON.stringify({sender:{name:senderName,email:cfg.from_email},replyTo:cfg.reply_to?{email:cfg.reply_to}:undefined,to:to.map(email=>({email})),...(cc.length?{cc:cc.map(email=>({email}))}:{}),...(bcc.length?{bcc:bcc.map(email=>({email}))}:{}),subject:msg.subject,htmlContent:html})});
+    }catch{
+      // A timeout may happen *after* the provider accepts a message. Never
+      // leave "sending" forever or tell the shop to blindly resend it.
+      await db(env,`connectx_messages?id=eq.${msg.id}&store_id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'failed',error_message:'Provider delivery unconfirmed. It may have been sent; check the recipient before retrying.'})});
+      return fail('Email delivery unconfirmed. Check the recipient before retrying.',502)
+    }
     out=await res.json().catch(()=>({}));
-    if(!res.ok){await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'failed',error_message:out.message||'Provider rejected message'})});return fail('Email could not be sent. Please try again later.',502)}
+    if(!res.ok){await db(env,`connectx_messages?id=eq.${msg.id}&store_id=eq.${s.storeId}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'failed',error_message:String(out.message||'Provider rejected message').slice(0,400)})});return fail('Email could not be sent. Please try again later.',502)}
   }
   await db(env,`connectx_messages?id=eq.${msg.id}`,{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify({status:'sent',provider_message_id:out.messageId||null,sent_at:new Date().toISOString()})});
   await audit(env,s,'send ConnectX email','connectx',msg.id,{to,documentType:b.documentType||null,invoiceId:b.invoiceId||null});

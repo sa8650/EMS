@@ -163,6 +163,7 @@ document keeps the shared print styles so paper output is unchanged.
   verification), **Vaultium** (file storage on Cloudflare R2). The owner sets
   pricing/limits; administrators purchase; staff use them if permitted.
   See [`ADDONS.md`](ADDONS.md).
+- **ConnectX Android companion (v1.6.0/build 17)** — branded **ConnectX: Central Communication Gateway powered by Dexter Studio**. The phone dispatches SMS from a selected SIM and reads the paired shop's **outgoing** EMS email history (read-only); incoming email and Android email composition are not included. Deploy the device email API before updating phones; the existing `connectx_messages` table needs no new email migration. See [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) and the sibling `ConnectX/README.md`.
 - **HelpDesk** — a continuous owner ↔ administrator conversation per
   administrator, with unread badges on both sides.
 - **Read-only mode** — when a store's license is inactive/expired, staff can

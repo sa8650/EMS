@@ -1,5 +1,6 @@
-/* ConnectX Android SMS Gateway — device auth, job claim, auto-queue.
-   Imported by functions/api/[[path]].js. Does not replace ConnectX email. */
+/* ConnectX Android gateway — device auth, SMS dispatch, and read-only
+   access to the paired shop's outgoing ConnectX email history.
+   Imported by functions/api/[[path]].js. */
 import { db } from './db.js';
 
 const DEFAULT_TEMPLATES = {
@@ -154,6 +155,30 @@ function publicDevice(d) {
   };
 }
 
+// D1's compatibility driver returns all table columns even with select=... .
+// Whitelist what a paired phone may read rather than returning raw DB rows.
+function publicEmail(row, detail = false) {
+  if (!row) return null;
+  const addresses = value => Array.isArray(value) ? value.map(String) : [];
+  return {
+    id: row.id,
+    subject: row.subject || '',
+    from_email: row.from_email || '',
+    to_emails: addresses(row.to_emails),
+    cc_emails: addresses(row.cc_emails),
+    recipient_type: row.recipient_type || '',
+    status: row.status || 'queued',
+    error_message: row.error_message || null,
+    created_at: row.created_at,
+    sent_at: row.sent_at || null,
+    ...(detail ? {
+      bcc_emails: addresses(row.bcc_emails),
+      custom_body: row.custom_body || '',
+      body_html: row.body_html || ''
+    } : {})
+  };
+}
+
 function publicAdmin(a) {
   if (!a) return null;
   return {
@@ -171,6 +196,18 @@ function publicAdmin(a) {
 function onlineOf(lastSeen) {
   if (!lastSeen) return false;
   return (Date.now() - new Date(lastSeen).getTime()) < 3 * 60 * 1000;
+}
+
+// The existing gateway used UTC midnight for its "today" figures. Phones can
+// request the start of their local day; omitted offset keeps older clients working.
+function dayStart(request) {
+  const raw = new URL(request.url).searchParams.get('utcOffsetMinutes');
+  if (raw === null) return new Date().toISOString().slice(0, 10) + 'T00:00:00Z';
+  if (!/^-?[0-9]{1,4}$/.test(raw)) return null;
+  const offset = Number(raw);
+  if (offset < -720 || offset > 840) return null;
+  const shifted = Date.now() + offset * 60000;
+  return new Date(Math.floor(shifted / 86400000) * 86400000 - offset * 60000).toISOString();
 }
 
 async function loadDevice(env, s) {
@@ -361,6 +398,67 @@ export async function connectxSmsRoutes(ctx) {
   if (!device) return fail('This ConnectX device has been revoked. Sign in again.', 403);
   if (device.store_id !== s.storeId) return fail('Device is not authorised for this shop.', 403);
 
+  /* Only active, paired devices may read their own shop's outgoing email.
+     No client-supplied store ID is accepted; inactive admins/shops lose access.
+     Email composition, incoming mail and provider credentials stay in EMS. */
+  if (method === 'GET' && (path === 'connectx/gateway/emails' ||
+      path === 'connectx/gateway/emails/stats' || path.startsWith('connectx/gateway/emails/'))) {
+    if (device.status !== 'active') return fail('Complete device setup before viewing email.', 403);
+    if (device.administrator_id !== s.adminId) return fail('Re-pair this device for the current administrator.', 403);
+    const [[admin], [store]] = await Promise.all([
+      db(env, `administrators?id=eq.${device.administrator_id}&select=active&limit=1`),
+      db(env, `stores?id=eq.${device.store_id}&admin_id=eq.${device.administrator_id}&select=id,status&limit=1`)
+    ]);
+    if (!admin?.active || !store || store.status === 'inactive')
+      return fail('Email history is not available for this shop.', 403);
+
+    const visible = `store_id=eq.${device.store_id}&shop_deleted_at=is.null`;
+    if (path === 'connectx/gateway/emails/stats') {
+      const today = dayStart(request);
+      if (!today) return fail('Invalid UTC offset.', 400);
+      const [todayRows, sentToday, latest] = await Promise.all([
+        db(env, `connectx_messages?${visible}&created_at=gte.${today}&select=status,sent_at`),
+        db(env, `connectx_messages?${visible}&status=eq.sent&sent_at=gte.${today}&select=id`),
+        db(env, `connectx_messages?${visible}&select=id,subject,from_email,to_emails,cc_emails,recipient_type,status,error_message,created_at,sent_at&order=created_at.desc,id.desc&limit=1`)
+      ]);
+      return json({
+        sent: sentToday.length + todayRows.filter(row => row.status === 'sent' && !row.sent_at).length,
+        failed: todayRows.filter(row => row.status === 'failed').length,
+        pending: todayRows.filter(row => row.status === 'queued' || row.status === 'sending').length,
+        latest: publicEmail(latest[0])
+      });
+    }
+
+    if (path === 'connectx/gateway/emails') {
+      const qs = new URL(request.url).searchParams;
+      const rawPage = qs.get('page') || '0';
+      if (!/^(0|[1-9][0-9]{0,4})$/.test(rawPage) || Number(rawPage) > 10000)
+        return fail('Invalid email history page.', 400);
+      const page = Number(rawPage);
+      const snapshot = qs.get('snapshot') || (page === 0 ? new Date().toISOString() : '');
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(snapshot) || !Number.isFinite(Date.parse(snapshot)))
+        return fail('Invalid email history snapshot.', 400);
+      const pageSize = 30;
+      const rows = await db(env, `connectx_messages?${visible}&created_at=lte.${encodeURIComponent(snapshot)}` +
+        `&select=id,subject,from_email,to_emails,cc_emails,recipient_type,status,error_message,created_at,sent_at` +
+        `&order=created_at.desc,id.desc&limit=${pageSize + 1}&offset=${page * pageSize}`);
+      return json({
+        items: rows.slice(0, pageSize).map(row => publicEmail(row)),
+        page,
+        hasMore: rows.length > pageSize,
+        snapshot
+      });
+    }
+
+    const id = path.slice('connectx/gateway/emails/'.length);
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+      return fail('Invalid email ID.', 400);
+    let [message] = await db(env, `connectx_messages?${visible}&id=eq.${id}` +
+      '&select=id,subject,from_email,to_emails,cc_emails,bcc_emails,recipient_type,status,error_message,created_at,sent_at,custom_body,body_html&limit=1');
+    if (!message) return fail('Email not found for this shop.', 404);
+    return json(publicEmail(message, true));
+  }
+
   if (path === 'connectx/gateway/heartbeat' && method === 'POST') {
     let b = await body(request);
     let patch = { status: device.status === 'pending_test' ? 'pending_test' : 'active' };
@@ -422,10 +520,12 @@ export async function connectxSmsRoutes(ctx) {
     if (!id) return fail('jobId is required.', 400);
     let [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&select=*`);
     if (!job) return fail('SMS job not found for this shop.', 404);
-    if (job.status === 'sent') return fail('Cannot cancel an already sent SMS.', 400);
-    await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}`, {
+    if (job.status !== 'queued') return fail('SMS is no longer queued. Refresh history before retrying.', 409);
+    // Guard the DELETE itself: another device can claim the job after our GET.
+    const removed = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&status=eq.queued`, {
       method: 'DELETE'
     });
+    if (!removed.length) return fail('SMS was already claimed by a gateway. Refresh history.', 409);
     return json({ ok: true, cancelled: true });
   }
 
@@ -433,10 +533,12 @@ export async function connectxSmsRoutes(ctx) {
     let id = path.split('/')[3];
     let [job] = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&select=*`);
     if (!job) return fail('SMS job not found for this shop.', 404);
-    if (job.status === 'sent') return fail('Cannot cancel an already sent SMS.', 400);
-    await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}`, {
+    if (job.status !== 'queued') return fail('SMS is no longer queued. Refresh history before retrying.', 409);
+    // Guard the DELETE itself: another device can claim the job after our GET.
+    const removed = await db(env, `connectx_sms_messages?id=eq.${id}&store_id=eq.${device.store_id}&status=eq.queued`, {
       method: 'DELETE'
     });
+    if (!removed.length) return fail('SMS was already claimed by a gateway. Refresh history.', 409);
     return json({ ok: true, cancelled: true });
   }
 
@@ -467,7 +569,9 @@ export async function connectxSmsRoutes(ctx) {
           attempts: Number(job.attempts || 0) + 1
         })
       }).catch(() => null);
-      if (upd != null) {
+      // A conditional PATCH that updated zero rows returns [] (not null).
+      // Never dispatch a job unless this device actually claimed it.
+      if (Array.isArray(upd) && upd.length > 0) {
         claimed.push({
           id: job.id,
           shop_id: device.store_id,
@@ -511,14 +615,18 @@ export async function connectxSmsRoutes(ctx) {
   }
 
   if (path === 'connectx/gateway/stats' && method === 'GET') {
-    let today = new Date().toISOString().slice(0, 10);
-    let jobs = await db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&created_at=gte.${today}T00:00:00Z&select=id,status,sent_at,created_at`);
-    let last = await db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&select=created_at,sent_at,status&order=created_at.desc&limit=1`);
+    const today = dayStart(request);
+    if (!today) return fail('Invalid UTC offset.', 400);
+    let [jobs, sentToday, last] = await Promise.all([
+      db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&created_at=gte.${today}&select=id,status,sent_at,created_at`),
+      db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&status=eq.sent&sent_at=gte.${today}&select=id`),
+      db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&select=created_at,sent_at,status&order=created_at.desc&limit=1`)
+    ]);
     await touchDevice(env, device.id);
     let [store] = await db(env, `stores?id=eq.${device.store_id}&select=id,name,address,phone`);
     let [admin] = await db(env, `administrators?id=eq.${device.administrator_id}&select=id,admin_code,name,email,phone,address,created_at,active`);
     return json({
-      sent: jobs.filter(j => j.status === 'sent').length,
+      sent: sentToday.length + jobs.filter(j => j.status === 'sent' && !j.sent_at).length,
       failed: jobs.filter(j => j.status === 'failed').length,
       pending: jobs.filter(j => j.status === 'queued' || j.status === 'sending').length,
       lastActivity: last[0]?.sent_at || last[0]?.created_at || null,
@@ -532,7 +640,8 @@ export async function connectxSmsRoutes(ctx) {
     let qs = new URL(request.url).searchParams;
     let range = qs.get('range') || 'today';
     let days = range === '30d' || range === '30' ? 30 : range === '7d' || range === '7' ? 7 : 1;
-    let since = new Date(Date.now() - days * 86400000).toISOString();
+    let since = range === 'today' ? dayStart(request) : new Date(Date.now() - days * 86400000).toISOString();
+    if (!since) return fail('Invalid UTC offset.', 400);
     let [rows, invoices, returns, exchanges] = await Promise.all([
       db(env, `connectx_sms_messages?store_id=eq.${device.store_id}&created_at=gte.${since}&select=id,to_phone,recipient_name,message_type,event_type,status,error_message,message_body,created_at,sent_at,invoice_id&order=created_at.desc&limit=250`),
       db(env, `invoices?store_id=eq.${device.store_id}&select=id,invoice_number`).catch(() => []),

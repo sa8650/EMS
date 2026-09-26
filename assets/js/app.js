@@ -538,13 +538,13 @@ function ownerOverview(d){
    ══════════════════════════════════════════════════════════════════════ */
 const APP_PRESETS = [
   {
-    title: 'ConnectX SMS Gateway',
+    title: 'ConnectX: Central Communication Gateway powered by Dexter Studio',
     package_name: 'com.ems.connectx',
-    description: 'Official Android SMS Gateway for EMS V1. Dispatches automated sales confirmations, due reminders, return & exchange slips, and manual text alerts directly through your Android phone physical SIM cards with multi-shop routing and live heartbeat.',
-    version: '1.5.1',
-    version_code: 16,
+    description: 'The central Android communication gateway for EMS: dispatch SMS using your selected physical SIM and securely view the selected shop’s outgoing ConnectX email history. Email sending remains on the EMS website; Android email access is read-only.',
+    version: '1.6.0',
+    version_code: 17,
     icon_url: '/assets/android-chrome-192.png',
-    release_notes: '• SIM Balance only: one manual query on the selected sending SIM\n• Owner-managed carrier balance codes and response patterns; no SMS-quota request\n• Safer formatted balance parsing and more reliable carrier settings\n• Hardened gateway restart, scheduling, and device backup rules'
+    release_notes: '• New read-only Email page: shop-scoped outgoing history, full details and status\n• New SMS page with sending-SIM switch, manual SIM balance and SMS history\n• Redesigned dashboard with both SMS and email sent/failed/pending totals\n• Safer SMS cancellation and clearer loading/error states'
   },
   {
     title: 'EMS Mobile POS Terminal',
@@ -724,22 +724,22 @@ function appModal(app = null) {
     isEdit ? `Update ${esc(app.title)}` : 'Publish New Application',
     `
     <form class="ob-form" id="appStoreForm">
-      ${!isEdit ? `
+      ${!isEdit || APP_PRESETS.some(p => p.package_name === app.package_name) ? `
         <div style="background:var(--ob-bg);border:1px solid var(--ob-line);border-radius:10px;padding:12px;margin-bottom:14px;">
-          <b style="font-size:12px;color:var(--ob-text);display:block;margin-bottom:6px;">⚡ Quick Presets (1-Click Fill):</b>
+          <b style="font-size:12px;color:var(--ob-text);display:block;margin-bottom:6px;">⚡ Quick Presets (text fields only — upload the signed APK separately):</b>
           <div style="display:flex;flex-wrap:wrap;gap:6px;">
-            ${APP_PRESETS.map((p, idx) => `
+            ${APP_PRESETS.map((p, idx) => !isEdit || p.package_name === app.package_name ? `
               <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-app-preset="${idx}">
                 ${esc(p.title)}
               </button>
-            `).join('')}
+            ` : '').join('')}
           </div>
         </div>
       ` : ''}
 
       <div class="ob-grid2">
         <label>App Title *
-          <input name="title" id="appFieldTitle" required value="${esc(app?.title || '')}" placeholder="e.g. ConnectX SMS Gateway">
+          <input name="title" id="appFieldTitle" required value="${esc(app?.title || '')}" placeholder="e.g. ConnectX: Central Communication Gateway powered by Dexter Studio">
         </label>
         <label>Package Name (Identifier) *
           <input name="package_name" id="appFieldPkg" required value="${esc(app?.package_name || 'com.ems.connectx')}" placeholder="e.g. com.ems.connectx">
@@ -797,7 +797,7 @@ function appModal(app = null) {
       </div>
 
       <label>APK Download Filename (optional)
-        <input name="apk_filename" id="appFieldApkFilename" value="${esc(app?.apk_filename || '')}" placeholder="e.g. ConnectX-v1.5.1-build16.apk" maxlength="180">
+        <input name="apk_filename" id="appFieldApkFilename" value="${esc(app?.apk_filename || '')}" placeholder="e.g. ConnectX-v1.6.0-build17.apk" maxlength="180">
         <small style="display:block;margin-top:4px;color:var(--ob-muted);">For EMS R2 downloads only. Renames the file people receive; does not change the APK, package, build code, or signature.</small>
       </label>
 

@@ -1,6 +1,8 @@
-# ConnectX SMS gateway (EMS)
+# ConnectX SMS subsystem (EMS)
 
-Android companion app lives in `/ConnectX`. EMS changes in this repo:
+**ConnectX: Central Communication Gateway powered by Dexter Studio** now includes Android read-only outgoing EMS email history alongside this SMS dispatch subsystem. The Android **SMS page** contains SIM switching, selected-SIM manual balance and outgoing SMS activity; the **Email page** reads this shop's existing `connectx_messages`. For the new email device routes and release order, see [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md). There is no new email database migration.
+
+Android companion app lives in `/ConnectX`. SMS integration in this repo:
 
 - `supabase/migrations/041_connectx_sms_gateway.sql`
 - `supabase/d1/migration_connectx_gateway.sql`

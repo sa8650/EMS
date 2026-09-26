@@ -545,8 +545,11 @@ export async function db(env, path, opt = {}) {
     if (segments[1]) search.set('id', 'eq.' + segments[1]);
     const { clause, params } = buildWhere(table, search);
     if (!clause) throw Error('Refusing to DELETE without a filter');
-    await d1Run(env, `DELETE FROM ${table}${clause}`, params);
-    return [];
+    // Match Supabase's Prefer: return=representation. In particular, a
+    // conditional SMS cancellation must know whether it actually deleted a
+    // queued job or lost a race to another gateway's claim.
+    const r = await d1Run(env, `DELETE FROM ${table}${clause} RETURNING *`, params);
+    return (r.results || []).map(row => decodeRow(table, row));
   }
   throw Error('Unsupported method ' + method);
 }
