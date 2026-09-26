@@ -148,7 +148,7 @@ body.adm-on
     ├── .adm-side                 sticky sidebar (full height)
     │   ├── .adm-mark             brand: sky 3D gradient square + EMS V1
     │   ├── .adm-nav              2 groups, 6 buttons [data-admin-page]
-    │   │   ├── group "Business"  Store manage · ConnectX · Licenses · Premium add-ons
+    │   │   ├── group "Business"  Store manage · Licenses · Premium add-ons
     │   │   └── group "Account"   My profile · Devices · HelpDesk (+#ahbBadge)
     │   └── .adm-user             avatar chip + administrator name
     ├── .adm-main

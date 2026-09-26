@@ -282,7 +282,7 @@ const OB_NAV=[
   {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
-  {h:'Services',items:[['connectx','ConnectX','mail'],['api-access','EMS API','key'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
+  {h:'Services',items:[['connectx','ConnectX','mail'],['sim-carriers','SIM balance','smartphone'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
   {h:'System',items:[['factory-reset','Factory reset','refresh']]}
 ];
 const OB_LABEL=Object.fromEntries(OB_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -374,7 +374,7 @@ const OB_SKEL={
   administrators:()=>SKEL.kpis(4)+SKEL.table(6,6),shops:()=>SKEL.toolbar()+SKEL.table(6,7),
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
   blogs:()=>SKEL.toolbar()+SKEL.table(4,5),'contact-messages':()=>SKEL.toolbar()+SKEL.table(5,5),
-  connectx:()=>SKEL.panel(SKEL.table(4,5)),'api-access':()=>SKEL.kpis(4)+SKEL.panel(SKEL.table(5,5))+SKEL.panel(SKEL.kv(4)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
+  connectx:()=>SKEL.panel(SKEL.table(4,5)),'sim-carriers':()=>SKEL.toolbar()+SKEL.panel(SKEL.table(4,6)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
   truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),
   helpdesk:()=>SKEL.grid('300px minmax(0,1fr)',SKEL.list(5),SKEL.panel(SKEL.msgs(4))),
   addons:()=>SKEL.toolbar()+SKEL.table(5,5),'factory-reset':()=>SKEL.panel(SKEL.form(4)),
@@ -443,7 +443,6 @@ async function adminPage(p){
     if(p==='helpdesk')return await helpdeskAdmin();
   }catch(e){el.innerHTML=`<section class="adm-panel"><div class="adm-panel-head"><div><h3>Could not load this page</h3><p class="adm-desc">${esc(e.message)}</p></div></div></section>`}
 }
-window.adminPage=adminPage; /* app.js is a module — expose for inline onclick handlers */
 function ownerHome(){document.body.classList.remove('shp-on','adm-fixed-page');
   document.body.classList.add('ob-on');
   if(!document.body.dataset.obTheme)document.body.dataset.obTheme=localStorage.getItem('ems.obTheme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');
@@ -482,7 +481,7 @@ async function ownerPage(p){
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
   try{
     if(p==='app-store')return await ownerAppStore();
-    if(p==='api-access')return await ownerApiAccess();
+    if(p==='sim-carriers')return await ownerSimCarriers();
     let d=await api('platform/overview');
     if(p==='overview')return ownerOverview(d);
     if(p==='licenses')return ownerLicenses(d);
@@ -545,7 +544,7 @@ const APP_PRESETS = [
     version: '1.6.0',
     version_code: 17,
     icon_url: '/assets/android-chrome-192.png',
-    release_notes: '• New read-only Email page: shop-scoped outgoing history, full details and status\n• New SMS page with sending-SIM switch and SMS history\n• Redesigned dashboard with both SMS and email sent/failed/pending totals\n• Safer SMS cancellation and clearer loading/error states'
+    release_notes: '• New read-only Email page: shop-scoped outgoing history, full details and status\n• New SMS page with sending-SIM switch, manual SIM balance and SMS history\n• Redesigned dashboard with both SMS and email sent/failed/pending totals\n• Safer SMS cancellation and clearer loading/error states'
   },
   {
     title: 'EMS Mobile POS Terminal',
@@ -1053,212 +1052,58 @@ function appModal(app = null) {
 }
 
 /* Owner-only catalog. No USSD code is shipped by ConnectX. */
-/* ═══════════════ OWNER · EMS API (platform service credentials) ═══════════════ */
-const API_SCOPE_INFO=[
-  ['read','Global read — every resource, read-only'],
-  ['write','Global write — includes SMS dispatch'],
-  ['auth:login','Verify administrator logins (ConnectX dashboard sign-in). Never granted by global read/write'],
-  ['admins:read','Administrator accounts, profiles & entitlements'],
-  ['shops:read','Shop profiles (all EMS shops)'],
-  ['customers:read','Customer contacts'],
-  ['suppliers:read','Supplier contacts'],
-  ['staff:read','Staff directory'],
-  ['inventory:read','Inventory items & stock'],
-  ['invoices:read','Sales / purchase invoices'],
-  ['emails:read','Outgoing ConnectX email history'],
-  ['sms:read','SMS queue, history & settings'],
-  ['sms:write','Claim, dispatch, report & queue SMS']
-];
-async function ownerApiAccess(){
-  let data=await api('platform/api-keys');
-  let keys=data.items||[],storesList=data.stores||[];
-  let active=keys.filter(k=>k.status==='active');
-  let online=active.filter(k=>k.last_used_at&&(Date.now()-new Date(k.last_used_at).getTime())<3*60*1000);
-  let smsCapable=active.filter(k=>(k.scopes||[]).includes('write')||(k.scopes||[]).includes('sms:write'));
-  let baseUrl=location.origin+'/api/v1';
-
-  const scopeChips=sc=>(sc||[]).map(x=>`<code style="font-size:10.5px;">${esc(x)}</code>`).join(' ');
-  const keyState=k=>{
-    if(k.status!=='active')return obBadge('Revoked','rose');
-    if(k.expires_at&&new Date(k.expires_at)<=new Date())return obBadge('Expired','amber');
-    let on=k.last_used_at&&(Date.now()-new Date(k.last_used_at).getTime())<3*60*1000;
-    return on?`<span class="ob-badge ob-t-emerald" style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span> Online</span>`:obBadge('Active','sky');
-  };
-
-  $('#page').innerHTML=obHead(
-    'api-access','',
-    `<button id="akCreateBtn" class="ob-btn ob-btn-primary">${lucide('plus')} Create API Key</button>`
-  )+`
-    <div class="ob-grid ob-kpis">
-      ${obKpi('shield','sky','Active credentials',active.length,`${keys.length} total`)}
-      ${obKpi('activity',online.length>0?'emerald':'zinc','Online now',online.length,'used in the last 3 minutes')}
-      ${obKpi('smartphone','violet','SMS-capable',smsCapable.length,'can automate ConnectX SMS dispatch')}
-      ${obKpi('key','amber','Key limit','25','active platform keys')}
-    </div>
-
-    <section class="ob-panel">
-      <div class="ob-panel-head">
-        <div>
-          <h3>Platform API Credentials</h3>
-          <p class="ob-desc">Service credentials for the EMS ↔ ConnectX integration. The ConnectX central service needs <code>sms:read</code> + <code>sms:write</code> to automate SMS dispatch, plus <code>auth:login</code> + <code>admins:read</code> so administrators can sign in to the ConnectX dashboard with their EMS credentials. Email needs nothing here — EMS sends it directly via Brevo. The full key is shown only once at creation (EMS keeps a SHA-256 hash). Revoking disconnects the service instantly. Administrators never see or manage these keys.</p>
-        </div>
-      </div>
-      <div id="akTableBox">
-        ${keys.length?`
-        <div class="ob-tw"><table>
-          <thead><tr><th>Status</th><th>Name</th><th>Shop Scope</th><th>Key</th><th>Permissions</th><th>Expires</th><th>Last Used</th><th style="text-align:right;">Actions</th></tr></thead>
-          <tbody>
-            ${keys.map(k=>`
-              <tr>
-                <td>${keyState(k)}</td>
-                <td><strong style="font-size:12.5px;">${esc(k.name)}</strong><small style="display:block;color:var(--ob-muted);font-size:10.5px;">created ${new Date(k.created_at).toLocaleDateString()}</small></td>
-                <td>${esc(k.shop_name||'All shops (platform-wide)')}</td>
-                <td><code>${esc(k.key_prefix)}…</code></td>
-                <td><div style="display:flex;gap:4px;flex-wrap:wrap;max-width:260px;">${scopeChips(k.scopes)}</div></td>
-                <td class="ob-num">${k.expires_at?new Date(k.expires_at).toLocaleDateString():'Never'}</td>
-                <td class="ob-num">${k.last_used_at?ago(k.last_used_at):'Never'}</td>
-                <td style="text-align:right;">
-                  <div style="display:inline-flex;gap:5px;">
-                    ${k.status==='active'?`<button class="ob-btn ob-btn-ghost ob-btn-sm" data-ak-revoke="${k.id}">Revoke</button>`:`<button class="ob-btn ob-btn-soft ob-btn-sm" data-ak-delete="${k.id}">Delete</button>`}
-                  </div>
-                </td>
-              </tr>`).join('')}
-          </tbody>
-        </table></div>`:obEmpty('No API credentials yet. Create one for the ConnectX central service so it can automate SMS dispatch.')}
-      </div>
-    </section>
-
-    <section class="ob-panel">
-      <div class="ob-panel-head">
-        <div>
-          <h3>Integration Quick Reference</h3>
-          <p class="ob-desc">Full endpoint documentation: <code>API.md</code> in the EMS repository. The /api/v1 contract is storage-agnostic — migrating EMS from Supabase to a dedicated server never breaks integrations.</p>
-        </div>
-      </div>
-      <div class="ob-kv" style="margin-bottom:12px;">
-        <div><span>Base URL</span><b><code id="akBaseUrl">${esc(baseUrl)}</code> <button class="ob-btn ob-btn-soft ob-btn-sm" id="akCopyBase">${lucide('copy')} Copy</button></b></div>
-        <div><span>Authentication</span><b><code>Authorization: Bearer emsk_…</code> (or <code>X-API-Key</code>)</b></div>
-        <div><span>Shop selection</span><b>Platform-wide keys work fleet-wide; per-shop calls pass <code>?shop_id=…</code></b></div>
-        <div><span>Connection check</span><b><code>GET ${esc(baseUrl)}/ping</code></b></div>
-      </div>
-      <div class="ob-tw"><table>
-        <thead><tr><th>Endpoint</th><th>Method</th><th>Scope</th><th>Purpose</th></tr></thead>
-        <tbody>
-          <tr><td><code>/v1/ping</code> · <code>/v1/me</code> · <code>/v1/heartbeat</code></td><td>GET/POST</td><td>any</td><td>Key check, platform summary, online signal</td></tr>
-          <tr><td><code>/v1/auth/login</code></td><td>POST</td><td><code>auth:login</code></td><td>Verify an administrator's EMS email + password (ConnectX dashboard sign-in) — returns profile, shops & entitlement</td></tr>
-          <tr><td><code>/v1/administrators</code> · <code>/v1/administrators/:id</code></td><td>GET</td><td><code>admins:read</code></td><td>Administrator accounts, their shops & entitlements</td></tr>
-          <tr><td><code>/v1/shops</code> · <code>/v1/shops?admin_id=…</code></td><td>GET</td><td><code>shops:read</code></td><td>All EMS shops, optionally per administrator</td></tr>
-          <tr><td><code>/v1/customers</code> · <code>/v1/suppliers</code> · <code>/v1/staff</code></td><td>GET</td><td><code>*:read</code></td><td>Contacts (per shop)</td></tr>
-          <tr><td><code>/v1/inventory</code> · <code>/v1/invoices</code></td><td>GET</td><td><code>*:read</code></td><td>Stock & invoices (per shop)</td></tr>
-          <tr><td><code>/v1/emails</code> · <code>/v1/emails/stats</code></td><td>GET</td><td><code>emails:read</code></td><td>Outgoing email history (EMS sends email itself)</td></tr>
-          <tr><td><code>/v1/sms/queue</code> · <code>/v1/sms/messages</code> · <code>/v1/sms/stats</code></td><td>GET</td><td><code>sms:read</code></td><td>SMS queue & history — fleet-wide or per shop</td></tr>
-          <tr><td><code>/v1/sms/claim</code> · <code>/v1/sms/report</code> · <code>/v1/sms/cancel</code></td><td>POST</td><td><code>sms:write</code></td><td>ConnectX dispatch loop (fleet-wide claim supported)</td></tr>
-          <tr><td><code>/v1/sms/send</code></td><td>POST</td><td><code>sms:write</code></td><td>Queue a new SMS (entitlement + daily limit enforced)</td></tr>
-        </tbody>
-      </table></div>
-    </section>
-  `;
-
-  $('#akCopyBase').onclick=()=>{navigator.clipboard?.writeText(baseUrl).then(()=>toast('Base URL copied.')).catch(()=>toast('Copy failed.'))};
-
-  document.querySelectorAll('[data-ak-revoke]').forEach(btn=>{
-    btn.onclick=async()=>{
-      if(!confirm('Revoke this API key? The ConnectX service using it will lose access immediately.'))return;
-      try{await api('platform/api-keys/'+btn.dataset.akRevoke+'/revoke',{method:'POST',body:'{}'});toast('API key revoked.');ownerApiAccess()}catch(e){toast(e.message)}
-    };
+async function ownerSimCarriers(){
+  const rows=await api('platform/sim-carriers');
+  $('#page').innerHTML=`
+    ${obHead('sim-carriers','Configure verified SIM balance USSD codes for ConnectX.',
+      `<button class="ob-btn ob-btn-primary" id="addSimCarrier">${lucide('plus')} Add carrier</button>`)}
+    <section class="ob-panel" style="padding:18px;">
+      <div class="ob-panel-head"><div><h3>SIM balance carriers</h3>
+        <p class="ob-desc">Only active carriers are matched to registered ConnectX devices. No USSD code is built into the APK; calls occur only when a phone user taps Refresh.</p></div></div>
+      <p class="ob-desc" style="margin:8px 0 18px;">Balance USSD codes must be verified with the operator and may incur charges or change services. Use the MCC/MNC from the SIM (including leading zeros). Keep unverified rows inactive; a missing or failed result displays “Balance unavailable.”</p>
+      ${rows.length ? `<div class="ob-tw"><table><thead><tr><th>Carrier</th><th>MCC/MNC</th><th>Identifier</th><th>Balance code</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+        ${rows.map(c=>`<tr><td><b>${esc(c.carrier_name)}</b></td><td><code>${esc(c.mcc_mnc||'—')}</code></td><td>${esc(c.carrier_identifier||'—')}</td><td><code>${esc(c.balance_ussd_code||'—')}</code></td><td>${c.active?obBadge('Active','emerald'):obBadge('Inactive','zinc')}</td><td><button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-carrier-edit="${esc(c.id)}">Edit</button> <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-carrier-delete="${esc(c.id)}">Delete</button></td></tr>`).join('')}
+        </tbody></table></div>`:obEmpty('No carriers configured. Add one with a verified balance USSD code; ConnectX will show “Balance unavailable” until then.')}
+    </section>`;
+  $('#addSimCarrier').onclick=()=>ownerSimCarrierModal(null);
+  document.querySelectorAll('[data-carrier-edit]').forEach(button=>button.onclick=()=>{
+    ownerSimCarrierModal(rows.find(c=>c.id===button.dataset.carrierEdit));
   });
-  document.querySelectorAll('[data-ak-delete]').forEach(btn=>{
-    btn.onclick=async()=>{
-      if(!confirm('Permanently delete this revoked API key record?'))return;
-      try{await api('platform/api-keys/'+btn.dataset.akDelete,{method:'DELETE'});toast('API key deleted.');ownerApiAccess()}catch(e){toast(e.message)}
-    };
+  document.querySelectorAll('[data-carrier-delete]').forEach(button=>button.onclick=async()=>{
+    const c=rows.find(row=>row.id===button.dataset.carrierDelete);
+    if(!c||!confirm(`Remove ${c.carrier_name} from the ConnectX carrier catalog?`))return;
+    try{await api('platform/sim-carriers/'+encodeURIComponent(c.id),{method:'DELETE'});toast('Carrier removed.');ownerSimCarriers()}
+    catch(err){toast(err.message)}
   });
+}
 
-  $('#akCreateBtn').onclick=()=>{
-    let presets=[
-      ['connectx','ConnectX Central Service',['auth:login','admins:read','shops:read','sms:read','sms:write']],
-      ['connectx-full','ConnectX + shop data',['auth:login','admins:read','shops:read','customers:read','suppliers:read','staff:read','inventory:read','invoices:read','emails:read','sms:read','sms:write']],
-      ['readonly','Read-only integration',['read']],
-      ['full','Full access',['read','write','auth:login','admins:read']]
-    ];
-    let m=obModal('Create Platform API Key',`
-      <div class="ob-form" style="gap:14px;">
-        <label>Credential name
-          <input id="akName" maxlength="80" placeholder="e.g. ConnectX Central Service">
-        </label>
-        <label>Shop scope
-          <select id="akStore">
-            <option value="">All shops (platform-wide — recommended for ConnectX)</option>
-            ${storesList.map(st=>`<option value="${st.id}">${esc(st.name)} (${esc(st.shop_code||'')})</option>`).join('')}
-          </select>
-        </label>
-        <div>
-          <b style="font-size:12px;display:block;margin-bottom:6px;">Quick presets</b>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            ${presets.map(([id,label])=>`<button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-ak-preset="${id}">${esc(label)}</button>`).join('')}
-          </div>
-        </div>
-        <div>
-          <b style="font-size:12px;display:block;margin-bottom:6px;">Granular permissions</b>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;">
-            ${API_SCOPE_INFO.map(([sc,desc])=>`
-              <label style="display:flex;align-items:flex-start;gap:8px;margin:0;padding:8px;border:1px solid var(--ob-line);border-radius:10px;cursor:pointer;">
-                <input type="checkbox" data-ak-scope="${sc}" style="margin-top:2px;width:15px;height:15px;accent-color:#8b5cf6;">
-                <span><code style="font-size:11px;">${sc}</code><small style="display:block;color:var(--ob-muted);font-size:10.5px;line-height:1.35;">${desc}</small></span>
-              </label>`).join('')}
-          </div>
-        </div>
-        <label>Expiry (optional, days)
-          <input id="akExpiry" type="number" min="1" max="3650" placeholder="Leave empty for no expiry">
-        </label>
-        <div class="ob-form-actions">
-          <button type="button" class="ob-btn ob-btn-primary" id="akSubmit">Create key</button>
-        </div>
-      </div>
-    `);
-    m.querySelectorAll('[data-ak-preset]').forEach(b=>{
-      b.onclick=()=>{
-        let preset=presets.find(p=>p[0]===b.dataset.akPreset);
-        m.querySelectorAll('[data-ak-scope]').forEach(c=>c.checked=preset[2].includes(c.dataset.akScope));
-      };
-    });
-    m.querySelector('#akSubmit').onclick=async()=>{
-      let scopes=[...m.querySelectorAll('[data-ak-scope]')].filter(c=>c.checked).map(c=>c.dataset.akScope);
-      let payload={
-        name:m.querySelector('#akName').value.trim(),
-        storeId:m.querySelector('#akStore').value||null,
-        scopes,
-        expiresInDays:m.querySelector('#akExpiry').value||null
-      };
-      if(!payload.name)return toast('Enter a credential name.');
-      if(!scopes.length)return toast('Select at least one permission scope.');
-      let btn=m.querySelector('#akSubmit');btn.disabled=true;btn.textContent='Creating…';
-      try{
-        let r=await api('platform/api-keys',{method:'POST',body:JSON.stringify(payload)});
-        m.remove();
-        let shown=obModal('API Key Created — Copy It Now',`
-          <div class="ob-form" style="gap:12px;">
-            <div style="background:color-mix(in srgb,#8b5cf6 10%,transparent);border:1px solid color-mix(in srgb,#8b5cf6 30%,transparent);border-radius:10px;padding:12px;">
-              <b style="font-size:12px;display:block;">This key is shown only once</b>
-              <p style="margin:4px 0 0 0;font-size:11.5px;color:var(--ob-muted);">EMS stores only a secure hash. Paste it into the ConnectX central service configuration now. If you lose it, revoke the key and create a new one.</p>
-            </div>
-            <label>API key
-              <textarea id="akSecret" rows="2" readonly style="font-family:var(--ob-mono,monospace);font-size:12px;">${esc(r.apiKey)}</textarea>
-            </label>
-            <div class="ob-kv">
-              <div><span>Base URL</span><b><code>${esc(baseUrl)}</code></b></div>
-              <div><span>Header</span><b><code>Authorization: Bearer &lt;key&gt;</code></b></div>
-            </div>
-            <div class="ob-form-actions">
-              <button type="button" class="ob-btn ob-btn-primary" id="akCopyKey">${lucide('copy')} Copy key</button>
-              <button type="button" class="ob-btn ob-btn-soft" id="akDone">Done</button>
-            </div>
-          </div>
-        `);
-        shown.querySelector('#akCopyKey').onclick=()=>{navigator.clipboard?.writeText(r.apiKey).then(()=>toast('API key copied.')).catch(()=>{shown.querySelector('#akSecret').select();document.execCommand('copy');toast('API key copied.')})};
-        shown.querySelector('#akDone').onclick=()=>{shown.remove();ownerApiAccess()};
-      }catch(e){toast(e.message);btn.disabled=false;btn.textContent='Create key'}
-    };
+function ownerSimCarrierModal(carrier){
+  const editing=!!carrier;
+  const modal=obModal(editing?`Edit ${esc(carrier.carrier_name)}`:'Add SIM carrier',`
+    <form id="simCarrierForm" class="ob-form">
+      <div class="ob-grid2"><label>Carrier name *<input name="carrier_name" required maxlength="100" value="${esc(carrier?.carrier_name||'')}" placeholder="e.g. Your carrier's official name"></label>
+        <label>MCC/MNC (preferred)<input name="mcc_mnc" inputmode="numeric" pattern="[0-9]{5,6}" maxlength="6" value="${esc(carrier?.mcc_mnc||'')}" placeholder="5–6 digits from the SIM"></label></div>
+      <label>Carrier identifier (if MCC/MNC is unavailable)<input name="carrier_identifier" maxlength="100" value="${esc(carrier?.carrier_identifier||'')}" placeholder="Exact carrier name shown by Android"></label>
+      <label>Balance USSD code<input name="balance_ussd_code" value="${esc(carrier?.balance_ussd_code||'')}" placeholder="Verified carrier-provided *...# code"></label>
+      <p class="ob-desc">Optional: capture group 1 must contain the balance number. Use a pattern only if the carrier reply lacks a clear “Balance” label. Test it on actual replies; unparseable results stay unavailable. No response text is sent to EMS.</p>
+      <label>Balance response pattern (optional)<input name="balance_pattern" maxlength="160" value="${esc(carrier?.balance_pattern||'')}" placeholder="Balance: ([0-9.]+)"></label>
+      <label class="ob-toggle" style="display:flex;gap:10px;align-items:center;"><input name="active" type="checkbox" ${carrier?.active?'checked':''}><span>Active — allow ConnectX to request this verified balance</span></label>
+      <div class="ob-form-actions"><button type="button" class="ob-btn ob-btn-ghost" id="cancelCarrier">Cancel</button><button type="submit" class="ob-btn ob-btn-primary" id="saveCarrier">${editing?'Save carrier':'Add carrier'}</button></div>
+    </form>`,'ob-modal-lg');
+  modal.querySelector('#cancelCarrier').onclick=()=>modal.remove();
+  modal.querySelector('#simCarrierForm').onsubmit=async event=>{
+    event.preventDefault();
+    const submit=modal.querySelector('#saveCarrier');submit.disabled=true;
+    const f=event.target.elements;
+    const payload={carrier_name:f.namedItem('carrier_name').value.trim(),mcc_mnc:f.namedItem('mcc_mnc').value.trim()||null,
+      carrier_identifier:f.namedItem('carrier_identifier').value.trim(),
+      balance_ussd_code:f.namedItem('balance_ussd_code').value.trim(),
+      balance_pattern:f.namedItem('balance_pattern').value.trim(),
+      active:f.namedItem('active').checked};
+    try{await api('platform/sim-carriers'+(editing?'/'+encodeURIComponent(carrier.id):''),
+      {method:editing?'PATCH':'POST',body:JSON.stringify(payload)});
+      modal.remove();toast(editing?'Carrier updated.':'Carrier added.');ownerSimCarriers();}
+    catch(err){toast(err.message);submit.disabled=false}
   };
 }
 
@@ -2504,41 +2349,44 @@ function storeModal(record,fields){
 }
 
 function showPairingGuideModal(){
-  admModal('How SMS & Email Delivery Works',`
-    <div class="adm-form" style="gap:14px;">
-      <p class="adm-desc" style="margin:0;font-size:12px;line-height:1.5;">
-        EMS delivers customer notifications through two independent channels. Both are centrally operated — nothing needs to be installed or paired from this console.
-      </p>
+  admModal('ConnectX Android SMS Gateway Setup',`
+    <div class="adm-form" style="gap:16px;">
+      <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:14px;">
+        <h4 style="font-size:13.5px;font-weight:700;margin:0 0 6px 0;color:var(--adm-text);">How to Turn Your Phone into an SMS Gateway</h4>
+        <p class="adm-desc" style="font-size:12px;margin:0;line-height:1.5;">
+          ConnectX uses your real Android device and SIM card to dispatch automated invoices, receipts, and custom notifications with 100% carrier deliverability.
+        </p>
+      </div>
 
-      <div style="display:flex;flex-direction:column;gap:12px;">
+      <div style="display:grid;gap:12px;">
         <div style="display:flex;gap:12px;align-items:flex-start;">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">1</span>
           <div>
-            <strong style="font-size:12.5px;display:block;">Email — sent directly by EMS</strong>
-            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Sales invoices, receipts and return notifications are emailed by EMS itself through the central Brevo SMTP gateway. The ConnectX service plays no role in email delivery.</p>
+            <strong style="font-size:12.5px;display:block;">Install ConnectX APK</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Download and install the latest ConnectX app on your dedicated Android smartphone (Android 8.0 or higher).</p>
           </div>
         </div>
 
         <div style="display:flex;gap:12px;align-items:flex-start;">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">2</span>
           <div>
-            <strong style="font-size:12.5px;display:block;">SMS — dispatched by the central ConnectX service</strong>
-            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">When a sale, payment or return happens, EMS queues the SMS. The ConnectX central service — connected to EMS through the secure Public API with a credential issued by the EMS platform owner — picks up queued messages and delivers them automatically.</p>
+            <strong style="font-size:12.5px;display:block;">Sign in with Administrator Credentials</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Open the app, enter your EMS Server URL, your Administrator Email, and Password. Select your shop from the dropdown.</p>
           </div>
         </div>
 
         <div style="display:flex;gap:12px;align-items:flex-start;">
           <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0ea5e9;color:#fff;font-size:12px;font-weight:700;flex-shrink:0;">3</span>
           <div>
-            <strong style="font-size:12.5px;display:block;">Your controls in this console</strong>
-            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Per shop you can enable or disable the SMS gateway and pick the automatic triggers (sales invoice, payment receipt, due reminder, return &amp; exchange). The gateway status card on this page shows whether the central service is currently online.</p>
+            <strong style="font-size:12.5px;display:block;">Select SIM Card & Grant SMS Permissions</strong>
+            <p class="adm-desc" style="margin:2px 0 0 0;font-size:11.5px;">Select which SIM card to dispatch messages from and tap <b>Test Gateway</b>. The device will link automatically and appear here.</p>
           </div>
         </div>
       </div>
 
       <div class="adm-payinfo" style="margin-top:6px;">
-        <b style="font-size:12px;color:var(--adm-primary);">Security</b>
-        <p style="margin:0;font-size:11.5px;">The ConnectX service never accesses the EMS database directly and never uses account passwords — it authenticates over the EMS Public API with a revocable, scope-limited credential managed by the platform owner.</p>
+        <b style="font-size:12px;color:var(--adm-primary);">Pro-Tip: Background Battery Optimization</b>
+        <p style="margin:0;font-size:11.5px;">For uninterrupted 24/7 background queue dispatching, ensure battery optimization is set to "Unrestricted" for ConnectX on your Android phone.</p>
       </div>
 
       <div class="adm-form-actions" style="margin-top:8px;">
@@ -2548,6 +2396,9 @@ function showPairingGuideModal(){
   `);
 }
 
+/* ══════════════════════════════════════════════════════════════════════
+   EMS ADMINISTRATOR CONSOLE — Official App Store
+   ══════════════════════════════════════════════════════════════════════ */
 function getAdminAppIconHtml(app, size = 64) {
   let iconSrc = String(app?.icon_url || '').trim();
   let fallbackColor = '#2563EB';
@@ -2622,7 +2473,7 @@ async function adminAppStore(){
           </div>
           <h2 style="font-size:20px;font-weight:800;color:var(--adm-text);margin:0 0 4px 0;">${esc(cxApp.title)}</h2>
           <p style="font-size:13px;color:var(--adm-muted);line-height:1.45;margin:0;">
-            Turn any Android phone into a central SMS gateway for your EMS stores. Sends automated invoices, receipts, and payment notifications using your physical SIM.
+            Turn any Android phone into a central SMS gateway for your EMS stores. Sends automated invoices, receipts, and payment notifications using your physical SIM balance.
           </p>
         </div>
       </div>
@@ -2809,60 +2660,95 @@ async function adminConnectX(){
 
   let data=await api('admin/connectx/overview');
   let shops=data.shops||[];
-  let gw=data.gateway||{configured:false,online:false,lastSeen:null};
+  let devices=data.devices||[];
   let ent=data.entitlement||{};
 
   let totalShops=shops.length;
   let activeSmsShops=shops.filter(s=>s.sms?.settings?.enabled).length;
+  let onlineDevices=devices.filter(d=>d.online).length;
   let totalSmsSentToday=shops.reduce((a,s)=>a+Number(s.sms?.today?.sent||0),0);
   let totalEmailSentToday=shops.reduce((a,s)=>a+Number(s.email?.usedToday||0),0);
 
-  function renderGatewayPanel(){
-    let stateBadge=gw.configured
-      ?(gw.online
-        ?`<span class="adm-badge adm-t-emerald" style="display:inline-flex;align-items:center;gap:6px;"><span style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span> Online</span>`
-        :admBadge('Configured · Idle','amber'))
-      :admBadge('Not configured','rose');
+  function renderHardwareDevices(devs){
+    if(!devs.length){
+      return `
+        <div class="adm-empty" style="padding:24px 16px;text-align:center;background:var(--adm-inset);border-radius:14px;border:1px dashed var(--adm-line-strong);">
+          <div style="display:inline-flex;padding:12px;border-radius:50%;background:color-mix(in srgb,var(--adm-primary) 12%,transparent);margin-bottom:10px;">
+            ${lucide('smartphone')}
+          </div>
+          <h4 style="font-size:13.5px;font-weight:700;margin:0 0 6px 0;">No Android Gateway Phones Linked</h4>
+          <p class="adm-desc" style="max-width:480px;margin:0 auto 14px auto;font-size:12px;line-height:1.5;">
+            Turn any Android smartphone into a local SMS Gateway. Download and install the <b>ConnectX</b> Android app, log in with your administrator credentials, and link your shop to start dispatching automated and manual SMS.
+          </p>
+          <button class="adm-btn adm-btn-primary adm-btn-sm" id="cxHowToPairBtn">${lucide('help-circle')} How to Pair Android App</button>
+        </div>
+      `;
+    }
+
     return `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px;">
-        <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              ${admChip('smartphone',gw.online?'emerald':(gw.configured?'amber':'zinc'))}
-              <div>
-                <b style="font-size:12.5px;display:block;">ConnectX SMS Gateway</b>
-                <small style="color:var(--adm-muted);font-size:11px;">Central service · operated by the EMS platform</small>
-              </div>
-            </div>
-            ${stateBadge}
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--adm-card);border:1px solid var(--adm-line);">
-            <span style="font-size:11.5px;color:var(--adm-text2);">Last gateway activity</span>
-            <span class="adm-num" style="font-size:12px;font-weight:700;">${gw.lastSeen?ago(gw.lastSeen):'Never'}</span>
-          </div>
-          <p class="adm-desc" style="font-size:11px;margin:0;line-height:1.45;">
-            SMS is dispatched by the central ConnectX service through the secure EMS Public API. The connection is provisioned and managed by the EMS platform owner — you only enable SMS and choose the automatic triggers per shop below.
-          </p>
-        </div>
-        <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <div style="display:flex;align-items:center;gap:8px;">
-              ${admChip('mail','sky')}
-              <div>
-                <b style="font-size:12.5px;display:block;">Email Gateway</b>
-                <small style="color:var(--adm-muted);font-size:11px;">Central Brevo SMTP · sent directly by EMS</small>
-              </div>
-            </div>
-            ${ent?.connectx_enabled?admBadge('Active','sky'):admBadge('Inactive','zinc')}
-          </div>
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--adm-card);border:1px solid var(--adm-line);">
-            <span style="font-size:11.5px;color:var(--adm-text2);">Emails sent today</span>
-            <span class="adm-num" style="font-size:12px;font-weight:700;">${totalEmailSentToday} / ${ent.connectx_daily_limit||100}</span>
-          </div>
-          <p class="adm-desc" style="font-size:11px;margin:0;line-height:1.45;">
-            Invoice, receipt and return emails are sent by EMS itself — the SMS gateway service is not involved in email delivery.
-          </p>
-        </div>
+      <div class="adm-tw">
+        <table>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Device / Phone</th>
+              <th>Assigned Shop</th>
+              <th>Hardware ID</th>
+              <th>SIM Carrier & Number</th>
+              <th>Last Heartbeat</th>
+              <th style="text-align:right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${devs.map(d=>{
+              let isOnline=!!d.online;
+              let isRevoked=d.status==='revoked';
+              return `
+                <tr>
+                  <td>
+                    ${isRevoked?admBadge('Revoked','rose'):(isOnline?`<span class="adm-badge adm-t-emerald" style="display:inline-flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;"></span> Online</span>`:admBadge('Offline','zinc'))}
+                    ${d.is_primary?`<span class="adm-badge adm-t-sky" style="margin-left:4px;">Primary</span>`:''}
+                  </td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      <span style="display:inline-flex;padding:6px;border-radius:8px;background:var(--adm-inset2);color:var(--adm-text);">
+                        ${lucide('smartphone')}
+                      </span>
+                      <div>
+                        <strong style="font-size:12.5px;display:block;">${esc(d.device_name||'Android Device')}</strong>
+                        <small style="color:var(--adm-muted);font-size:11px;">${esc(d.android_version||'Android')} · SDK ${esc(d.app_version||'1.0')}</small>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <strong style="font-size:12px;">${esc(d.shop_name||'General')}</strong>
+                  </td>
+                  <td>
+                    <code>${esc(d.public_id||shortId(d.id))}</code>
+                  </td>
+                  <td>
+                    <div>
+                      <span style="font-weight:600;font-size:12px;">${esc(d.sim_carrier||'SIM')}</span>
+                      ${d.phone_number?`<code style="display:block;font-size:11px;margin-top:2px;">${esc(d.phone_number)}</code>`:'<span style="display:block;color:var(--adm-muted);font-size:11px;">No phone #</span>'}
+                    </div>
+                  </td>
+                  <td>
+                    <div style="font-family:var(--adm-mono);font-size:11px;color:var(--adm-text2);">
+                      ${d.last_seen?ago(d.last_seen):'Never'}
+                    </div>
+                    ${d.last_seen?`<small style="font-family:var(--adm-mono);font-size:10px;color:var(--adm-muted);">${new Date(d.last_seen).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</small>`:''}
+                  </td>
+                  <td style="text-align:right;">
+                    <div style="display:inline-flex;gap:5px;">
+                      ${!d.is_primary&&!isRevoked?`<button class="adm-btn adm-btn-soft adm-btn-sm" data-cx-set-primary="${d.id}" title="Set as primary SMS gateway for its shop">Set Primary</button>`:''}
+                      ${!isRevoked?`<button class="adm-btn adm-btn-danger adm-btn-sm" data-cx-revoke="${d.id}" title="Revoke this device">Revoke</button>`:''}
+                    </div>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     `;
   }
@@ -2873,8 +2759,8 @@ async function adminConnectX(){
     return shopList.map(st=>{
       let isEmailOn=!!st.email?.enabled;
       let isSmsOn=!!st.sms?.settings?.enabled;
-      let gwConnected=!!st.sms?.connected;
-      let gwOnline=!!st.sms?.online;
+      let devCount=(st.sms?.devices||[]).length;
+      let hasOnlineDev=(st.sms?.devices||[]).some(d=>d.online);
       let sSet=st.sms?.settings||{};
 
       return `
@@ -2924,7 +2810,7 @@ async function adminConnectX(){
                   ${admChip('smartphone',isSmsOn?'emerald':'zinc')}
                   <div>
                     <b style="font-size:12.5px;display:block;">SMS Gateway (ConnectX)</b>
-                    <small style="color:var(--adm-muted);font-size:11px;">Dispatched by the central ConnectX service</small>
+                    <small style="color:var(--adm-muted);font-size:11px;">Local Android Telephony</small>
                   </div>
                 </div>
                 <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;margin:0;">
@@ -2936,9 +2822,9 @@ async function adminConnectX(){
               <!-- Hardware Device Connection Status -->
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;border-radius:10px;background:var(--adm-card);border:1px solid var(--adm-line);">
                 <div style="display:flex;align-items:center;gap:6px;">
-                  ${gwConnected?(gwOnline?'<span style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;display:inline-block;"></span>':'<span style="width:8px;height:8px;border-radius:50%;background:#71717a;display:inline-block;"></span>'):'<span style="width:8px;height:8px;border-radius:50%;background:#f43f5e;display:inline-block;"></span>'}
+                  ${devCount>0?(hasOnlineDev?'<span style="width:8px;height:8px;border-radius:50%;background:#10b981;box-shadow:0 0 6px #10b981;display:inline-block;"></span>':'<span style="width:8px;height:8px;border-radius:50%;background:#71717a;display:inline-block;"></span>'):'<span style="width:8px;height:8px;border-radius:50%;background:#f43f5e;display:inline-block;"></span>'}
                   <span style="font-size:11.5px;font-weight:600;">
-                    ${gwConnected?(gwOnline?'Gateway service online':'Gateway configured (idle)'):'Gateway not connected'}
+                    ${devCount>0?(hasOnlineDev?`${devCount} phone linked (Online)`:`${devCount} phone linked (Offline)`):'No Android phone linked'}
                   </span>
                 </div>
                 <div style="font-size:11px;color:var(--adm-muted);">
@@ -2978,27 +2864,27 @@ async function adminConnectX(){
 
   $('#page').innerHTML=admHead(
     'connectx',
-    'Central Brevo email and ConnectX SMS delivery for every shop under your administrator account. The SMS gateway connection is operated by the EMS platform — you control per-shop settings here.',
-    `<button id="cxPairGuideBtn" class="adm-btn adm-btn-soft">${lucide('help-circle')} How It Works</button>
+    'Manage central Brevo Email and local Android SMS Gateways for every shop under your administrator account.',
+    `<button id="cxPairGuideBtn" class="adm-btn adm-btn-soft">${lucide('smartphone')} App Setup Guide</button>
      <button id="cxRefreshBtn" class="adm-btn adm-btn-primary">${lucide('refresh-cw')} Refresh</button>`
   )+`
     <div class="adm-grid adm-kpis">
       ${admKpi('store','violet','Active Shops',`${activeSmsShops} / ${totalShops}`,'with SMS gateway enabled')}
-      ${admKpi('smartphone',gw.online?'emerald':(gw.configured?'amber':'rose'),'SMS Gateway',gw.configured?(gw.online?'Online':'Idle'):'Not connected',gw.lastSeen?`last activity ${ago(gw.lastSeen)}`:'managed by the EMS platform')}
+      ${admKpi('smartphone',onlineDevices>0?'emerald':'amber','Android Gateways',`${onlineDevices} online`,`${devices.length} total paired devices`)}
       ${admKpi('message-square','sky','SMS Sent Today',totalSmsSentToday,'across all shops')}
       ${admKpi('mail','violet','Emails Sent Today',`${totalEmailSentToday} / ${ent.connectx_daily_limit||100}`,'central Brevo SMTP')}
     </div>
 
-    <!-- Gateway Status Section -->
+    <!-- Hardware Fleet Section -->
     <section class="adm-panel">
       <div class="adm-panel-head">
         <div>
-          <h3>Delivery Services Status</h3>
-          <p class="adm-desc">Both delivery channels are centrally managed. The ConnectX SMS service connects to EMS through the secure Public API with credentials issued by the platform owner — no setup is required in this console.</p>
+          <h3>Android SMS Gateway Devices (${devices.length})</h3>
+          <p class="adm-desc">Real-time status of paired Android smartphones dispatching SMS through their physical SIM cards.</p>
         </div>
       </div>
-      <div id="cxGatewayContainer">
-        ${renderGatewayPanel()}
+      <div id="cxDevicesContainer">
+        ${renderHardwareDevices(devices)}
       </div>
     </section>
 
@@ -3020,6 +2906,8 @@ async function adminConnectX(){
   // Bind Events
   $('#cxRefreshBtn').onclick=()=>adminConnectX();
   $('#cxPairGuideBtn').onclick=()=>showPairingGuideModal();
+  let pairGuideBtnInner=$('#cxHowToPairBtn');
+  if(pairGuideBtnInner)pairGuideBtnInner.onclick=()=>showPairingGuideModal();
 
   $('#cxShopSearch').oninput=e=>{
     let q=e.target.value.toLowerCase().trim();
@@ -3083,7 +2971,37 @@ async function adminConnectX(){
     });
   }
 
+  function bindDeviceControls(){
+    document.querySelectorAll('[data-cx-set-primary]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let devId=btn.dataset.cxSetPrimary;
+        try{
+          await api('connectx/devices/'+devId+'/primary',{method:'POST',body:'{}'});
+          toast('Device set as primary gateway.');
+          adminConnectX();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+
+    document.querySelectorAll('[data-cx-revoke]').forEach(btn=>{
+      btn.onclick=async()=>{
+        let devId=btn.dataset.cxRevoke;
+        if(!confirm('Are you sure you want to revoke this Android Gateway device? It will stop dispatching SMS.'))return;
+        try{
+          await api('connectx/devices/'+devId+'/revoke',{method:'POST',body:'{}'});
+          toast('Device revoked.');
+          adminConnectX();
+        }catch(e){
+          toast(e.message);
+        }
+      };
+    });
+  }
+
   bindShopControls();
+  bindDeviceControls();
 }
 
 async function devices(){let rows=await api('admin/devices');const storesN=new Set(rows.map(x=>x.stores?.name).filter(Boolean)).size,staffN=new Set(rows.map(x=>x.staff?.user_id).filter(Boolean)).size,times=rows.map(x=>new Date(x.last_seen_at)).filter(d=>!isNaN(d)),last=times.sort((a,b)=>b-a)[0];
