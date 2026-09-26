@@ -1046,4 +1046,6 @@ begin
     execute format('alter table public.%I enable row level security', t);
   end loop;
 end $$;
+-- Make every new table visible to PostgREST immediately.
+notify pgrst, 'reload schema';
 -- End of EMS V1 complete standalone schema.

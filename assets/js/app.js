@@ -282,7 +282,7 @@ const OB_NAV=[
   {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
-  {h:'Services',items:[['connectx','ConnectX','mail'],['api-access','EMS API','key'],['sim-carriers','SIM balance','smartphone'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
+  {h:'Services',items:[['connectx','ConnectX','mail'],['api-access','EMS API','key'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
   {h:'System',items:[['factory-reset','Factory reset','refresh']]}
 ];
 const OB_LABEL=Object.fromEntries(OB_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -374,7 +374,7 @@ const OB_SKEL={
   administrators:()=>SKEL.kpis(4)+SKEL.table(6,6),shops:()=>SKEL.toolbar()+SKEL.table(6,7),
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
   blogs:()=>SKEL.toolbar()+SKEL.table(4,5),'contact-messages':()=>SKEL.toolbar()+SKEL.table(5,5),
-  connectx:()=>SKEL.panel(SKEL.table(4,5)),'api-access':()=>SKEL.kpis(4)+SKEL.panel(SKEL.table(5,5))+SKEL.panel(SKEL.kv(4)),'sim-carriers':()=>SKEL.toolbar()+SKEL.panel(SKEL.table(4,6)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
+  connectx:()=>SKEL.panel(SKEL.table(4,5)),'api-access':()=>SKEL.kpis(4)+SKEL.panel(SKEL.table(5,5))+SKEL.panel(SKEL.kv(4)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
   truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),
   helpdesk:()=>SKEL.grid('300px minmax(0,1fr)',SKEL.list(5),SKEL.panel(SKEL.msgs(4))),
   addons:()=>SKEL.toolbar()+SKEL.table(5,5),'factory-reset':()=>SKEL.panel(SKEL.form(4)),
@@ -482,7 +482,6 @@ async function ownerPage(p){
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
   try{
     if(p==='app-store')return await ownerAppStore();
-    if(p==='sim-carriers')return await ownerSimCarriers();
     if(p==='api-access')return await ownerApiAccess();
     let d=await api('platform/overview');
     if(p==='overview')return ownerOverview(d);
@@ -546,7 +545,7 @@ const APP_PRESETS = [
     version: '1.6.0',
     version_code: 17,
     icon_url: '/assets/android-chrome-192.png',
-    release_notes: '• New read-only Email page: shop-scoped outgoing history, full details and status\n• New SMS page with sending-SIM switch, manual SIM balance and SMS history\n• Redesigned dashboard with both SMS and email sent/failed/pending totals\n• Safer SMS cancellation and clearer loading/error states'
+    release_notes: '• New read-only Email page: shop-scoped outgoing history, full details and status\n• New SMS page with sending-SIM switch and SMS history\n• Redesigned dashboard with both SMS and email sent/failed/pending totals\n• Safer SMS cancellation and clearer loading/error states'
   },
   {
     title: 'EMS Mobile POS Terminal',
@@ -1058,6 +1057,8 @@ function appModal(app = null) {
 const API_SCOPE_INFO=[
   ['read','Global read — every resource, read-only'],
   ['write','Global write — includes SMS dispatch'],
+  ['auth:login','Verify administrator logins (ConnectX dashboard sign-in). Never granted by global read/write'],
+  ['admins:read','Administrator accounts, profiles & entitlements'],
   ['shops:read','Shop profiles (all EMS shops)'],
   ['customers:read','Customer contacts'],
   ['suppliers:read','Supplier contacts'],
@@ -1099,7 +1100,7 @@ async function ownerApiAccess(){
       <div class="ob-panel-head">
         <div>
           <h3>Platform API Credentials</h3>
-          <p class="ob-desc">Service credentials for the EMS ↔ ConnectX integration. The ConnectX central service needs a key with <code>sms:read</code> + <code>sms:write</code> to automate SMS dispatch — email needs nothing here, EMS sends it directly via Brevo. The full key is shown only once at creation (EMS keeps a SHA-256 hash). Revoking disconnects the service instantly. Administrators never see or manage these keys.</p>
+          <p class="ob-desc">Service credentials for the EMS ↔ ConnectX integration. The ConnectX central service needs <code>sms:read</code> + <code>sms:write</code> to automate SMS dispatch, plus <code>auth:login</code> + <code>admins:read</code> so administrators can sign in to the ConnectX dashboard with their EMS credentials. Email needs nothing here — EMS sends it directly via Brevo. The full key is shown only once at creation (EMS keeps a SHA-256 hash). Revoking disconnects the service instantly. Administrators never see or manage these keys.</p>
         </div>
       </div>
       <div id="akTableBox">
@@ -1144,14 +1145,15 @@ async function ownerApiAccess(){
         <thead><tr><th>Endpoint</th><th>Method</th><th>Scope</th><th>Purpose</th></tr></thead>
         <tbody>
           <tr><td><code>/v1/ping</code> · <code>/v1/me</code> · <code>/v1/heartbeat</code></td><td>GET/POST</td><td>any</td><td>Key check, platform summary, online signal</td></tr>
-          <tr><td><code>/v1/shops</code></td><td>GET</td><td><code>shops:read</code></td><td>All EMS shops</td></tr>
+          <tr><td><code>/v1/auth/login</code></td><td>POST</td><td><code>auth:login</code></td><td>Verify an administrator's EMS email + password (ConnectX dashboard sign-in) — returns profile, shops & entitlement</td></tr>
+          <tr><td><code>/v1/administrators</code> · <code>/v1/administrators/:id</code></td><td>GET</td><td><code>admins:read</code></td><td>Administrator accounts, their shops & entitlements</td></tr>
+          <tr><td><code>/v1/shops</code> · <code>/v1/shops?admin_id=…</code></td><td>GET</td><td><code>shops:read</code></td><td>All EMS shops, optionally per administrator</td></tr>
           <tr><td><code>/v1/customers</code> · <code>/v1/suppliers</code> · <code>/v1/staff</code></td><td>GET</td><td><code>*:read</code></td><td>Contacts (per shop)</td></tr>
           <tr><td><code>/v1/inventory</code> · <code>/v1/invoices</code></td><td>GET</td><td><code>*:read</code></td><td>Stock & invoices (per shop)</td></tr>
           <tr><td><code>/v1/emails</code> · <code>/v1/emails/stats</code></td><td>GET</td><td><code>emails:read</code></td><td>Outgoing email history (EMS sends email itself)</td></tr>
           <tr><td><code>/v1/sms/queue</code> · <code>/v1/sms/messages</code> · <code>/v1/sms/stats</code></td><td>GET</td><td><code>sms:read</code></td><td>SMS queue & history — fleet-wide or per shop</td></tr>
           <tr><td><code>/v1/sms/claim</code> · <code>/v1/sms/report</code> · <code>/v1/sms/cancel</code></td><td>POST</td><td><code>sms:write</code></td><td>ConnectX dispatch loop (fleet-wide claim supported)</td></tr>
           <tr><td><code>/v1/sms/send</code></td><td>POST</td><td><code>sms:write</code></td><td>Queue a new SMS (entitlement + daily limit enforced)</td></tr>
-          <tr><td><code>/v1/sim-carrier</code></td><td>GET</td><td><code>sms:read</code></td><td>USSD balance code lookup</td></tr>
         </tbody>
       </table></div>
     </section>
@@ -1174,10 +1176,10 @@ async function ownerApiAccess(){
 
   $('#akCreateBtn').onclick=()=>{
     let presets=[
-      ['connectx','ConnectX SMS Service',['sms:read','sms:write']],
-      ['connectx-full','ConnectX + Email history',['sms:read','sms:write','emails:read','shops:read']],
+      ['connectx','ConnectX Central Service',['auth:login','admins:read','shops:read','sms:read','sms:write']],
+      ['connectx-full','ConnectX + shop data',['auth:login','admins:read','shops:read','customers:read','suppliers:read','staff:read','inventory:read','invoices:read','emails:read','sms:read','sms:write']],
       ['readonly','Read-only integration',['read']],
-      ['full','Full access',['read','write']]
+      ['full','Full access',['read','write','auth:login','admins:read']]
     ];
     let m=obModal('Create Platform API Key',`
       <div class="ob-form" style="gap:14px;">
@@ -1257,61 +1259,6 @@ async function ownerApiAccess(){
         shown.querySelector('#akDone').onclick=()=>{shown.remove();ownerApiAccess()};
       }catch(e){toast(e.message);btn.disabled=false;btn.textContent='Create key'}
     };
-  };
-}
-
-async function ownerSimCarriers(){
-  const rows=await api('platform/sim-carriers');
-  $('#page').innerHTML=`
-    ${obHead('sim-carriers','Configure verified SIM balance USSD codes for ConnectX.',
-      `<button class="ob-btn ob-btn-primary" id="addSimCarrier">${lucide('plus')} Add carrier</button>`)}
-    <section class="ob-panel" style="padding:18px;">
-      <div class="ob-panel-head"><div><h3>SIM balance carriers</h3>
-        <p class="ob-desc">Only active carriers are matched to registered ConnectX devices. No USSD code is built into the APK; calls occur only when a phone user taps Refresh.</p></div></div>
-      <p class="ob-desc" style="margin:8px 0 18px;">Balance USSD codes must be verified with the operator and may incur charges or change services. Use the MCC/MNC from the SIM (including leading zeros). Keep unverified rows inactive; a missing or failed result displays “Balance unavailable.”</p>
-      ${rows.length ? `<div class="ob-tw"><table><thead><tr><th>Carrier</th><th>MCC/MNC</th><th>Identifier</th><th>Balance code</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-        ${rows.map(c=>`<tr><td><b>${esc(c.carrier_name)}</b></td><td><code>${esc(c.mcc_mnc||'—')}</code></td><td>${esc(c.carrier_identifier||'—')}</td><td><code>${esc(c.balance_ussd_code||'—')}</code></td><td>${c.active?obBadge('Active','emerald'):obBadge('Inactive','zinc')}</td><td><button type="button" class="ob-btn ob-btn-soft ob-btn-sm" data-carrier-edit="${esc(c.id)}">Edit</button> <button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-carrier-delete="${esc(c.id)}">Delete</button></td></tr>`).join('')}
-        </tbody></table></div>`:obEmpty('No carriers configured. Add one with a verified balance USSD code; ConnectX will show “Balance unavailable” until then.')}
-    </section>`;
-  $('#addSimCarrier').onclick=()=>ownerSimCarrierModal(null);
-  document.querySelectorAll('[data-carrier-edit]').forEach(button=>button.onclick=()=>{
-    ownerSimCarrierModal(rows.find(c=>c.id===button.dataset.carrierEdit));
-  });
-  document.querySelectorAll('[data-carrier-delete]').forEach(button=>button.onclick=async()=>{
-    const c=rows.find(row=>row.id===button.dataset.carrierDelete);
-    if(!c||!confirm(`Remove ${c.carrier_name} from the ConnectX carrier catalog?`))return;
-    try{await api('platform/sim-carriers/'+encodeURIComponent(c.id),{method:'DELETE'});toast('Carrier removed.');ownerSimCarriers()}
-    catch(err){toast(err.message)}
-  });
-}
-
-function ownerSimCarrierModal(carrier){
-  const editing=!!carrier;
-  const modal=obModal(editing?`Edit ${esc(carrier.carrier_name)}`:'Add SIM carrier',`
-    <form id="simCarrierForm" class="ob-form">
-      <div class="ob-grid2"><label>Carrier name *<input name="carrier_name" required maxlength="100" value="${esc(carrier?.carrier_name||'')}" placeholder="e.g. Your carrier's official name"></label>
-        <label>MCC/MNC (preferred)<input name="mcc_mnc" inputmode="numeric" pattern="[0-9]{5,6}" maxlength="6" value="${esc(carrier?.mcc_mnc||'')}" placeholder="5–6 digits from the SIM"></label></div>
-      <label>Carrier identifier (if MCC/MNC is unavailable)<input name="carrier_identifier" maxlength="100" value="${esc(carrier?.carrier_identifier||'')}" placeholder="Exact carrier name shown by Android"></label>
-      <label>Balance USSD code<input name="balance_ussd_code" value="${esc(carrier?.balance_ussd_code||'')}" placeholder="Verified carrier-provided *...# code"></label>
-      <p class="ob-desc">Optional: capture group 1 must contain the balance number. Use a pattern only if the carrier reply lacks a clear “Balance” label. Test it on actual replies; unparseable results stay unavailable. No response text is sent to EMS.</p>
-      <label>Balance response pattern (optional)<input name="balance_pattern" maxlength="160" value="${esc(carrier?.balance_pattern||'')}" placeholder="Balance: ([0-9.]+)"></label>
-      <label class="ob-toggle" style="display:flex;gap:10px;align-items:center;"><input name="active" type="checkbox" ${carrier?.active?'checked':''}><span>Active — allow ConnectX to request this verified balance</span></label>
-      <div class="ob-form-actions"><button type="button" class="ob-btn ob-btn-ghost" id="cancelCarrier">Cancel</button><button type="submit" class="ob-btn ob-btn-primary" id="saveCarrier">${editing?'Save carrier':'Add carrier'}</button></div>
-    </form>`,'ob-modal-lg');
-  modal.querySelector('#cancelCarrier').onclick=()=>modal.remove();
-  modal.querySelector('#simCarrierForm').onsubmit=async event=>{
-    event.preventDefault();
-    const submit=modal.querySelector('#saveCarrier');submit.disabled=true;
-    const f=event.target.elements;
-    const payload={carrier_name:f.namedItem('carrier_name').value.trim(),mcc_mnc:f.namedItem('mcc_mnc').value.trim()||null,
-      carrier_identifier:f.namedItem('carrier_identifier').value.trim(),
-      balance_ussd_code:f.namedItem('balance_ussd_code').value.trim(),
-      balance_pattern:f.namedItem('balance_pattern').value.trim(),
-      active:f.namedItem('active').checked};
-    try{await api('platform/sim-carriers'+(editing?'/'+encodeURIComponent(carrier.id):''),
-      {method:editing?'PATCH':'POST',body:JSON.stringify(payload)});
-      modal.remove();toast(editing?'Carrier updated.':'Carrier added.');ownerSimCarriers();}
-    catch(err){toast(err.message);submit.disabled=false}
   };
 }
 
@@ -2675,7 +2622,7 @@ async function adminAppStore(){
           </div>
           <h2 style="font-size:20px;font-weight:800;color:var(--adm-text);margin:0 0 4px 0;">${esc(cxApp.title)}</h2>
           <p style="font-size:13px;color:var(--adm-muted);line-height:1.45;margin:0;">
-            Turn any Android phone into a central SMS gateway for your EMS stores. Sends automated invoices, receipts, and payment notifications using your physical SIM balance.
+            Turn any Android phone into a central SMS gateway for your EMS stores. Sends automated invoices, receipts, and payment notifications using your physical SIM.
           </p>
         </div>
       </div>

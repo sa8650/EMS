@@ -93,9 +93,14 @@ work too.
 | `emails:read` | Outgoing ConnectX email history (read-only) |
 | `sms:read` | SMS queue, history, stats, settings, SIM-carrier lookup |
 | `sms:write` | Claim, dispatch, report, cancel, and queue SMS |
+| `admins:read` | Administrator accounts, profiles & entitlements |
+| `auth:login` | Verify an administrator's EMS email + password (dashboard sign-in) |
 
-Recommended for the **ConnectX central service**: `sms:read` + `sms:write`
-(optionally `shops:read` and `emails:read`).
+> `auth:login` is **never** implied by the global `read`/`write` scopes —
+> credential verification must be granted explicitly.
+
+Recommended for the **ConnectX central service**:
+`auth:login` + `admins:read` + `shops:read` + `sms:read` + `sms:write`.
 
 ## 4. Endpoints
 
@@ -110,14 +115,33 @@ All endpoints return JSON. `limit` query parameters are capped server-side.
 | GET | `/v1/me` | any | Key info + platform summary (total/active shop counts) |
 | POST | `/v1/heartbeat` | any | Marks the service **Online**; adds shop summary + `smsEnabled` when a shop is selected |
 
-### 4.2 Shops
+### 4.2 Authentication & administration data
+
+The ConnectX central website signs administrators into **its own dashboard**
+with their EMS credentials. ConnectX forwards the email + password, EMS
+verifies them and answers with the administrator's profile, shops, and
+entitlement. **No EMS session token is issued** — ConnectX manages its own
+sessions; EMS passwords are verified server-side and never stored by ConnectX.
+
+| Method | Path | Scope | Description |
+|---|---|---|---|
+| POST | `/v1/auth/login` | `auth:login` | Body `{"email":"…","password":"…"}` → `{ok, administrator, shops, entitlement}`. `401 invalid_credentials`, `403 account_inactive` |
+| GET | `/v1/administrators` | `admins:read` | All administrator accounts (whitelisted fields + `shops_count`) |
+| GET | `/v1/administrators/:id` | `admins:read` | One administrator + their shops + active entitlement |
+
+`entitlement` is the administrator's active plan summary:
+`{status, shop_limit, connectx_enabled, connectx_daily_limit, starts_at, expires_at}`
+(or `null` when no active license).
+
+### 4.3 Shops
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
 | GET | `/v1/shops?limit=200` | `shops:read` | every EMS shop (platform-wide) |
+| GET | `/v1/shops?admin_id=…` | `shops:read` | one administrator's shops |
 | GET | `/v1/shops/:id` | `shops:read` | one shop |
 
-### 4.3 Contacts, inventory, invoices (read-only)
+### 4.4 Contacts, inventory, invoices (read-only)
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
@@ -128,7 +152,7 @@ All endpoints return JSON. `limit` query parameters are capped server-side.
 | GET | `/v1/invoices?shop_id=…&kind=sale` | `invoices:read` | `kind` = `sale` \| `purchase` |
 | GET | `/v1/invoices/:id?shop_id=…` | `invoices:read` | includes line items |
 
-### 4.4 ConnectX email history (read-only)
+### 4.5 ConnectX email history (read-only)
 
 | Method | Path | Scope | Notes |
 |---|---|---|---|
@@ -139,7 +163,7 @@ All endpoints return JSON. `limit` query parameters are capped server-side.
 Email **sending** stays inside EMS — the API never exposes provider
 credentials.
 
-### 4.5 SMS gateway (how the ConnectX app dispatches)
+### 4.6 SMS dispatch (how the ConnectX central service sends)
 
 | Method | Path | Scope | Description |
 |---|---|---|---|
@@ -152,7 +176,6 @@ credentials.
 | POST | `/v1/sms/cancel` | `sms:write` | `{"jobId":"…"}` — only while still queued; no shop needed |
 | DELETE | `/v1/sms/jobs/:id` | `sms:write` | same as cancel |
 | POST | `/v1/sms/send?shop_id=…` | `sms:write` | queue a new SMS for a shop (see below) |
-| GET | `/v1/sim-carrier?mccMnc=47001` | `sms:read` | owner-managed USSD balance-code lookup |
 
 `POST /v1/sms/send` body:
 
@@ -191,6 +214,11 @@ concurrently without double-sending.
 ```bash
 # Verify a key
 curl -H "Authorization: Bearer $EMS_KEY" https://your-ems.pages.dev/api/v1/ping
+
+# Verify an administrator's EMS credentials (ConnectX dashboard sign-in)
+curl -X POST -H "Authorization: Bearer $EMS_KEY" -H "content-type: application/json" \
+  -d '{"email":"admin@shop.com","password":"…"}' \
+  https://your-ems.pages.dev/api/v1/auth/login
 
 # List queued SMS across the whole fleet (platform-wide key)
 curl -H "Authorization: Bearer $EMS_KEY" \
@@ -246,6 +274,9 @@ the phone + 400-day device JWTs) has been removed. These endpoints now return
 - `connectx/gateway/*` (register, shops, heartbeat, claim, report, stats,
   activity, emails, sim, test, disconnect, me, sim-carrier)
 - `connectx/devices*` (list, revoke, set-primary)
+
+The owner-managed **SIM-balance carrier catalog** (`platform/sim-carriers`,
+`/v1/sim-carrier`, table `connectx_sim_carriers`) has been removed entirely.
 
 Equivalent functionality lives under `/api/v1` (see §4). SMS dispatch is now
 performed by the **ConnectX central service** using an owner-issued API key;

@@ -170,8 +170,10 @@ each key carries granular scopes (`read`, `write`, or per-resource such as
 `sms:read` / `sms:write`), an optional single-shop lock (default: platform-wide,
 covering every shop) and an optional expiry. The plaintext key (`emsk_…`) is
 shown **once** in a copy modal — EMS keeps only a SHA-256 hash. This is where
-the **ConnectX central SMS service** gets its credential (`sms:read` +
-`sms:write`); it then claims queued SMS fleet-wide through `/api/v1/sms/claim`.
+the **ConnectX central service** gets its credential (`auth:login` +
+`admins:read` + `shops:read` + `sms:read` + `sms:write`); it claims queued
+SMS fleet-wide through `/api/v1/sms/claim` and verifies administrator
+dashboard logins through `/api/v1/auth/login`.
 KPIs show active/online/SMS-capable keys; a quick-reference panel lists the base
 URL, auth header and endpoint map. Administrators never see this page — their
 ConnectX page only shows an aggregate gateway online/offline status. All

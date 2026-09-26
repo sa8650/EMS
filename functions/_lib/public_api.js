@@ -26,11 +26,24 @@
    ===================================================================== */
 import { db } from './db.js';
 import { smsSettingsFor, enqueueSmsJob } from './connectx_sms.js';
-import { simCarrierLookup } from './connectx_sim_carriers.js';
 
 /* ---------------- key material ---------------- */
 const KEY_PREFIX = 'emsk_';
 const enc = new TextEncoder();
+
+const PBKDF2_ITERATIONS = 100000; /* must match the EMS console hasher */
+const b64u = b => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+async function verifyPassword(password, stored) {
+  const [, i, salt, v] = String(stored || '').split('$');
+  const iterations = +i;
+  if (!iterations || iterations > PBKDF2_ITERATIONS || !salt || !v) return false;
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: enc.encode(salt), iterations, hash: 'SHA-256' },
+    await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveBits']),
+    256
+  );
+  return b64u(bits) === v;
+}
 
 async function sha256Hex(text) {
   const buf = await crypto.subtle.digest('SHA-256', enc.encode(text));
@@ -46,7 +59,12 @@ function generateKey() {
 
 /* ---------------- scopes ---------------- */
 const RESOURCES = ['shops', 'customers', 'suppliers', 'staff', 'inventory', 'invoices', 'emails', 'sms'];
-export const VALID_SCOPES = ['read', 'write', ...RESOURCES.flatMap(r => [r + ':read', r + ':write'])];
+export const VALID_SCOPES = [
+  'read', 'write',
+  ...RESOURCES.flatMap(r => [r + ':read', r + ':write']),
+  'admins:read',   // administrator accounts & profiles (whitelisted fields)
+  'auth:login'     // verify administrator credentials (ConnectX dashboard login)
+];
 
 function normalizeScopes(input) {
   const list = Array.isArray(input) ? input.map(x => String(x).trim().toLowerCase()).filter(Boolean) : [];
@@ -184,6 +202,31 @@ async function resolveShop(env, key, request) {
   return { store };
 }
 
+/* Whitelisted administrator projection — password hashes and internal
+   columns are never serialized. */
+const publicAdmin = a => ({
+  id: a.id, admin_code: a.admin_code, name: a.name, email: a.email,
+  phone: a.phone || null, address: a.address || null,
+  active: !!a.active, created_at: a.created_at
+});
+
+/* Active entitlement summary for one administrator (plan limits ConnectX
+   may need to respect on its dashboard). */
+async function entitlementFor(env, adminId) {
+  const now = new Date().toISOString();
+  const rows = await db(env, `current_entitlements?admin_id=eq.${adminId}&status=eq.active&starts_at=lte.${now}&expires_at=gt.${now}&select=*`).catch(() => []);
+  const e = rows[0];
+  if (!e) return null;
+  return {
+    status: e.status,
+    shop_limit: Number(e.shop_limit || 0),
+    connectx_enabled: !!e.connectx_enabled,
+    connectx_daily_limit: Number(e.connectx_daily_limit || 0),
+    starts_at: e.starts_at || null,
+    expires_at: e.expires_at || null
+  };
+}
+
 /* Shop is optional for fleet-level SMS endpoints: the ConnectX central
    service may operate across every EMS shop with one credential. */
 async function resolveShopOptional(env, key, request) {
@@ -251,10 +294,67 @@ export async function publicApiRoutes({ env, request, path, method }) {
     return vjson(out);
   }
 
+
+  /* ---- authentication ----------------------------------------------------
+     The ConnectX central website signs administrators into ITS dashboard
+     with their EMS credentials: it forwards email+password here, EMS
+     verifies them, and returns the administrator's profile, shops, and
+     entitlement. No EMS session is created; ConnectX manages its own
+     sessions. Requires the explicit "auth:login" scope — the global
+     "read"/"write" scopes deliberately do NOT grant credential checks. */
+  if (sub === 'auth/login' && method === 'POST') {
+    if (!key.scopes.includes('auth:login')) {
+      return vfail('This API key does not have the "auth:login" scope.', 403, 'insufficient_scope');
+    }
+    const b = await readBody(request);
+    const email = String(b.email || '').trim().toLowerCase();
+    const password = String(b.password || '');
+    if (!email || !password) return vfail('Email and password are required.', 400, 'missing_credentials');
+    const [admin] = await db(env, `administrators?email=eq.${encodeURIComponent(email)}&select=*`).catch(() => []);
+    if (!admin || !(await verifyPassword(password, admin.password_hash))) {
+      return vfail('Wrong email or password.', 401, 'invalid_credentials');
+    }
+    if (!admin.active) return vfail('This administrator account is deactivated.', 403, 'account_inactive');
+    const storeFilter = key.store_id ? `id=eq.${key.store_id}&` : '';
+    const [stores, entitlement] = await Promise.all([
+      db(env, `stores?${storeFilter}admin_id=eq.${admin.id}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`),
+      entitlementFor(env, admin.id)
+    ]);
+    return vjson({ ok: true, administrator: publicAdmin(admin), shops: stores.map(publicShop), entitlement });
+  }
+
+  /* ---- administration data (read-only) ---- */
+  if (sub === 'administrators' && method === 'GET') {
+    if (!hasScope(key.scopes, 'admins', 'read')) return deny('admins', 'read');
+    const [admins, stores] = await Promise.all([
+      db(env, `administrators?select=id,admin_code,name,email,phone,address,active,created_at&order=created_at.desc&limit=${limitOf(request, 200)}`),
+      db(env, 'stores?select=id,admin_id').catch(() => [])
+    ]);
+    const counts = {};
+    for (const st of stores) counts[st.admin_id] = (counts[st.admin_id] || 0) + 1;
+    return vjson({ items: admins.map(a => ({ ...publicAdmin(a), shops_count: counts[a.id] || 0 })) });
+  }
+  if (sub.match(/^administrators\/[^/]+$/) && method === 'GET') {
+    if (!hasScope(key.scopes, 'admins', 'read')) return deny('admins', 'read');
+    const id = sub.split('/')[1];
+    if (!UUID_RE.test(id)) return vfail('Invalid administrator ID.', 400);
+    const [admin] = await db(env, `administrators?id=eq.${id}&select=id,admin_code,name,email,phone,address,active,created_at`);
+    if (!admin) return vfail('Administrator not found.', 404);
+    const [stores, entitlement] = await Promise.all([
+      db(env, `stores?admin_id=eq.${id}&select=id,name,address,phone,shop_code,status,category&order=created_at.desc`),
+      entitlementFor(env, id)
+    ]);
+    return vjson({ administrator: publicAdmin(admin), shops: stores.map(publicShop), entitlement });
+  }
+
   /* ---- shops ---- */
   if (sub === 'shops' && method === 'GET') {
     if (!hasScope(key.scopes, 'shops', 'read')) return deny('shops', 'read');
-    const stores = await db(env, `stores?${key.store_id ? `id=eq.${key.store_id}&` : ''}select=id,name,address,phone,shop_code,status,category&order=created_at.desc&limit=${limitOf(request, 200)}`);
+    const qs = new URL(request.url).searchParams;
+    const adminId = qs.get('admin_id') || '';
+    if (adminId && !UUID_RE.test(adminId)) return vfail('Invalid admin_id.', 400);
+    const filter = (key.store_id ? `id=eq.${key.store_id}&` : '') + (adminId ? `admin_id=eq.${adminId}&` : '');
+    const stores = await db(env, `stores?${filter}select=id,name,address,phone,shop_code,status,category&order=created_at.desc&limit=${limitOf(request, 200)}`);
     return vjson({ items: stores.map(publicShop) });
   }
   if (sub.match(/^shops\/[^/]+$/) && method === 'GET') {
@@ -424,15 +524,6 @@ export async function publicApiRoutes({ env, request, path, method }) {
       lastActivity: last[0]?.sent_at || last[0]?.created_at || null,
       shop: shop.store ? publicShop(shop.store) : null
     });
-  }
-
-  /* ---- SIM carrier catalog lookup (owner-managed USSD balance codes) ---- */
-  if (sub === 'sim-carrier' && method === 'GET') {
-    if (!hasScope(key.scopes, 'sms', 'read')) return deny('sms', 'read');
-    const qs = new URL(request.url).searchParams;
-    const result = await simCarrierLookup(env, qs.get('mccMnc'), qs.get('carrierName'));
-    if (result.error) return vfail(result.error, 400);
-    return vjson(result);
   }
 
   /* ---- SMS: gateway dispatch (write) — how the ConnectX app sends ---- */

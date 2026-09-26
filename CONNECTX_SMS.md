@@ -8,7 +8,7 @@ email history (read-only).
 > **ConnectX central service**, which connects to EMS **only** through the
 > **EMS Public API** (`/api/v1/*`) using a **platform API key** issued by the
 > EMS owner (Owner Console → **EMS API**) with granular scopes (`sms:read`,
-> `sms:write`). One platform-wide key covers **every shop** — the service
+> `sms:write`, plus `auth:login`/`admins:read` for its dashboard sign-in). One platform-wide key covers **every shop** — the service
 > claims queued SMS fleet-wide. The old device-token pairing (administrator
 > password login on the phone) has been **removed**; its endpoints return
 > `410 Gone`. Administrators never manage keys — they only enable SMS per
@@ -47,8 +47,10 @@ until claimed.
 1. Run `045_public_api_credentials.sql` on Supabase (SQL editor) — or
    `supabase/d1/migration_public_api_credentials.sql` on D1.
 2. Deploy Cloudflare Pages as usual.
-3. Owner Console → **EMS API**: create a platform key with `sms:read` +
-   `sms:write` and paste it into the ConnectX central service configuration.
+3. Owner Console → **EMS API**: create a platform key with the *ConnectX
+   Central Service* preset (`auth:login`, `admins:read`, `shops:read`,
+   `sms:read`, `sms:write`) and paste it into the ConnectX central service
+   configuration.
 4. Shop **Settings → Communication**: enable SMS and edit templates.
    Admin console → **ConnectX**: per-shop gateway toggles + read-only gateway
    status (admins never see API keys).

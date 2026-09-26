@@ -1,7 +1,6 @@
 /* Cloudflare Pages Function: custom auth + tenant-enforced EMS API */
 import {db,dbConfigured} from '../_lib/db.js';
 import {connectxSmsRoutes,enqueueAutoSms} from '../_lib/connectx_sms.js';
-import {simCarrierRoutes} from '../_lib/connectx_sim_carriers.js';
 import {publicAppStoreRoutes} from '../_lib/app_store.js';
 import {ownerAppStoreRoutes} from '../_lib/app_store_admin.js';
 import {publicApiRoutes,apiKeyOwnerRoutes,gatewayStatus} from '../_lib/public_api.js';
@@ -270,7 +269,6 @@ export async function onRequest(context){const {request,env,params}=context, pat
   return json({ok:true});
  }
 let s=await session(request,env.SESSION_SECRET);if(!s)return fail('Please sign in.',401);if(s.role==='connectx_device')return fail('ConnectX device tokens have been retired. Connect through the EMS Public API (/api/v1) with an API key — see API.md.',401);if(s.role==='staff'&&!s.adminAccess){let [currentStaff]=await db(env,`staff?id=eq.${s.id}&store_id=eq.${s.storeId}&select=active,permissions`);if(!currentStaff||!currentStaff.active)return fail('This user account is deactivated. Contact your shop administrator.',403);s.permissions=normalizePermissions(currentStaff.permissions||{})}if(s.storeId){let [sessionStore]=await db(env,`stores?id=eq.${s.storeId}&select=admin_id,status`);if(sessionStore){const ent=await enforceEntitlement(env,sessionStore.admin_id);s.readOnly=s.readOnly||sessionStore.status==='read_only'||!ent;s.licenseExpired=!ent}}
- {let carrier=await simCarrierRoutes({env,request,path,method,session:s,audit});if(carrier)return carrier;}
  {let cx=await connectxSmsRoutes({env,request,path,method,s,json,fail,body,audit,allowed});if(cx)return cx;}
  {let ak=await apiKeyOwnerRoutes({env,request,path,method,s,json,fail,body});if(ak)return ak;}
  if(path==='me')return json(s);
