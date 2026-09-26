@@ -16,6 +16,8 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 > Console guide (pages, workflow and a full explanation of how its Agent Bento
 > Grid CSS/theme system works) · [`admin.md`](admin.md) — the Administrator
 > Panel guide and its Agent Bento Grid CSS/theme documentation ·
+> [`API.md`](API.md) — EMS Public API: API keys, scopes, and endpoints for
+> external apps (incl. the ConnectX Android gateway) ·
 > [`ADDONS.md`](ADDONS.md) — Premium Add-Ons user guide ·
 > [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) — public App Store, release upload,
 > update checks, and deployment checklist · [`SIM_BALANCE_SETUP.md`](SIM_BALANCE_SETUP.md)
@@ -163,7 +165,13 @@ document keeps the shared print styles so paper output is unchanged.
   verification), **Vaultium** (file storage on Cloudflare R2). The owner sets
   pricing/limits; administrators purchase; staff use them if permitted.
   See [`ADDONS.md`](ADDONS.md).
-- **ConnectX Android companion (v1.6.0/build 17)** — branded **ConnectX: Central Communication Gateway powered by Dexter Studio**. The phone dispatches SMS from a selected SIM and reads the paired shop's **outgoing** EMS email history (read-only); incoming email and Android email composition are not included. Deploy the device email API before updating phones; the existing `connectx_messages` table needs no new email migration. See [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) and the sibling `ConnectX/README.md`.
+- **EMS Public API (`/api/v1`)** — the only connection surface for external
+  applications. API-key authentication (`emsk_…`, SHA-256 hashed at rest),
+  granular `read`/`write` scopes per resource, zero direct database access,
+  and a storage-agnostic contract that survives a future migration from
+  Supabase to a dedicated server. Administrators create, manage, and revoke
+  credentials in the console's **API Access** page. See [`API.md`](API.md).
+- **ConnectX Android companion** — branded **ConnectX: Central Communication Gateway powered by Dexter Studio**. The phone dispatches SMS from a selected SIM and reads the shop's **outgoing** EMS email history (read-only); incoming email and Android email composition are not included. The app connects through the **EMS Public API with an API key** (`sms:read` + `sms:write`) — the old device-token pairing has been removed. See [`API.md`](API.md), [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) and the sibling `ConnectX/README.md`.
 - **HelpDesk** — a continuous owner ↔ administrator conversation per
   administrator, with unread badges on both sides.
 - **Read-only mode** — when a store's license is inactive/expired, staff can

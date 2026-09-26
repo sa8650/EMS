@@ -117,6 +117,16 @@ seed defaults (branding, theme, public pages, add-on catalogue, AI settings).
 > in the SQL Editor. The API detects these columns automatically, so
 > recoveries keep working even before the migration is applied.
 
+> **Upgrading an existing database for the EMS Public API** (API keys with
+> granular scopes for external apps such as the ConnectX Android gateway;
+> also drops the retired `connectx_devices` pairing table) — run once:
+> ```bash
+> npx wrangler d1 execute ems-d1 --remote --file=supabase/d1/migration_public_api_credentials.sql
+> ```
+> Existing **Supabase** databases run the idempotent
+> [`supabase/migrations/045_public_api_credentials.sql`](supabase/migrations/045_public_api_credentials.sql)
+> in the SQL Editor. See [`API.md`](API.md) for the API reference.
+
 ### 2.4 Configure the Pages variables
 
 | Variable | Value |

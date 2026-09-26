@@ -67,37 +67,33 @@ function duplicate(rows, candidate) {
   return null;
 }
 
+/* Carrier lookup shared with the EMS Public API (/api/v1/sim-carrier).
+   API-key clients call this instead of the retired device-token route. */
+export async function simCarrierLookup(env, mccMncRaw, carrierNameRaw) {
+  const numeric = clean(mccMncRaw);
+  const identifier = sameName(carrierNameRaw);
+  if (numeric && !/^\d{5,6}$/.test(numeric)) return { error: 'Invalid MCC/MNC.' };
+  if (!numeric && (!identifier || identifier.length > 100)) return { supported: false };
+  const rows = await db(env, 'connectx_sim_carriers?select=*');
+  const exact = numeric ? rows.find(row => row.mcc_mnc === numeric) : null;
+  // Name fallback ONLY for catalog rows without MCC/MNC. Never override an
+  // inactive numeric match or guess a different carrier's USSD code.
+  const byName = !exact && identifier ? rows.filter(row => !row.mcc_mnc &&
+    sameName(row.carrier_identifier || row.carrier_name) === identifier) : [];
+  const match = exact || (byName.length === 1 ? byName[0] : null);
+  if (!match || !bool(match.active) || !match.balance_ussd_code) return { supported: false };
+  return { supported: true, carrier: {
+    carrier_name: match.carrier_name, mcc_mnc: match.mcc_mnc,
+    balance_ussd_code: match.balance_ussd_code, balance_pattern: match.balance_pattern
+  } };
+}
+
 export async function simCarrierRoutes({ env, request, path, method, session, audit }) {
   const ownerList = path === 'platform/sim-carriers';
   const ownerItem = path.startsWith('platform/sim-carriers/');
-  const deviceLookup = path === 'connectx/gateway/sim-carrier';
-  if (!ownerList && !ownerItem && !deviceLookup) return null;
-
-  if (deviceLookup) {
-    if (method !== 'GET') return fail('Method not allowed.', 405);
-    if (session.role !== 'connectx_device' || !session.deviceId || !session.storeId)
-      return fail('A connected ConnectX device is required.', 403);
-    const [device] = await db(env, `connectx_devices?id=eq.${encodeURIComponent(session.deviceId)}&store_id=eq.${encodeURIComponent(session.storeId)}&select=id,status`);
-    if (!device || device.status === 'revoked') return fail('This device is no longer connected.', 403);
-    const params = new URL(request.url).searchParams;
-    const numeric = clean(params.get('mccMnc'));
-    const identifier = sameName(params.get('carrierName'));
-    if (numeric && !/^\d{5,6}$/.test(numeric)) return fail('Invalid MCC/MNC.', 400);
-    if (!numeric && (!identifier || identifier.length > 100)) return json({ supported: false });
-    const rows = await db(env, 'connectx_sim_carriers?select=*');
-    const exact = numeric ? rows.find(row => row.mcc_mnc === numeric) : null;
-    // Name fallback ONLY for catalog rows without MCC/MNC. Never override an
-    // inactive numeric match or guess a different carrier's USSD code.
-    const byName = !exact && identifier ? rows.filter(row => !row.mcc_mnc &&
-      sameName(row.carrier_identifier || row.carrier_name) === identifier) : [];
-    const match = exact || (byName.length === 1 ? byName[0] : null);
-    if (!match || !bool(match.active) || !match.balance_ussd_code)
-      return json({ supported: false });
-    return json({ supported: true, carrier: {
-      carrier_name: match.carrier_name, mcc_mnc: match.mcc_mnc,
-      balance_ussd_code: match.balance_ussd_code, balance_pattern: match.balance_pattern
-    } });
-  }
+  if (path === 'connectx/gateway/sim-carrier')
+    return fail('This ConnectX device endpoint has been retired. Use GET /api/v1/sim-carrier with an API key — see API.md.', 410);
+  if (!ownerList && !ownerItem) return null;
 
   if (session.role !== 'owner') return fail('Only the EMS platform owner can manage SIM carriers.', 403);
   if (ownerList) {

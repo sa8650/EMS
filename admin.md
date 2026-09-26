@@ -148,7 +148,7 @@ body.adm-on
     ├── .adm-side                 sticky sidebar (full height)
     │   ├── .adm-mark             brand: sky 3D gradient square + EMS V1
     │   ├── .adm-nav              2 groups, 6 buttons [data-admin-page]
-    │   │   ├── group "Business"  Store manage · Licenses · Premium add-ons
+    │   │   ├── group "Business"  Store manage · ConnectX · API Access · Licenses · Premium add-ons
     │   │   └── group "Account"   My profile · Devices · HelpDesk (+#ahbBadge)
     │   └── .adm-user             avatar chip + administrator name
     ├── .adm-main
@@ -247,6 +247,20 @@ payment_number, transaction_id, coupon}`. Below: purchase history table.
 Single card with the profile form: name, phone, address, email, and a
 password field that is **omitted from the request when left blank** —
 `PATCH admin/profile`.
+
+### 5.4b API Access (`api-access`)
+
+Create, manage, and revoke **EMS Public API credentials** for external
+applications (the ConnectX Android SMS gateway, POS terminals, custom
+integrations). KPIs (active credentials, online now, SMS-capable, key limit),
+a credentials table (status/online, name, shop scope, `emsk_…` prefix,
+granular scopes, expiry, last used, revoke/delete), a create modal with
+scope presets ("ConnectX SMS Gateway", "Read-only", "Full access") and
+granular `read`/`write` per-resource checkboxes, a **show-once** key modal
+with copy button, and a developer quick reference (base URL, auth header,
+endpoint table). Backed by `admin/api-keys` routes; the external surface is
+`/api/v1/*` — see [`API.md`](API.md). External apps never receive database
+access; every response is a whitelisted projection.
 
 ### 5.5 Devices (`devices`)
 

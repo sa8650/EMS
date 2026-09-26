@@ -810,6 +810,27 @@ CREATE INDEX IF NOT EXISTS idx_app_store_pkg ON app_store_apps(package_name);
 CREATE INDEX IF NOT EXISTS idx_app_store_pub ON app_store_apps(published, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_store_pub_version ON app_store_apps(published, version_code DESC);
 
+-- --------------------------------------------------- EMS PUBLIC API CREDENTIALS
+-- External apps (incl. the ConnectX Android gateway) authenticate against
+-- /api/v1 with these keys. Only a SHA-256 hash of each key is stored.
+CREATE TABLE IF NOT EXISTS api_keys (
+  id            TEXT PRIMARY KEY,
+  admin_id      TEXT NOT NULL REFERENCES administrators(id) ON DELETE CASCADE,
+  store_id      TEXT REFERENCES stores(id) ON DELETE CASCADE,
+  name          TEXT NOT NULL,
+  key_prefix    TEXT NOT NULL,
+  key_hash      TEXT NOT NULL UNIQUE,
+  scopes        TEXT NOT NULL DEFAULT '["read"]',
+  status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked')),
+  expires_at    TEXT,
+  last_used_at  TEXT,
+  created_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  revoked_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_keys_admin ON api_keys(admin_id, status);
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash  ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_store ON api_keys(store_id);
+
 INSERT INTO zudo_settings(id, updated_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING;
 INSERT INTO business_health_settings(id, updated_at) VALUES (1, strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(id) DO NOTHING;
 -- End of EMS V1 D1 schema.
