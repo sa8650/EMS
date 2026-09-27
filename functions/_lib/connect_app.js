@@ -239,6 +239,7 @@ export async function dispatchSmsRecord(env, record) {
       request_id: requestId,
       recipient: record.to_phone,
       message: record.message_body,
+      shop_id: record.store_id || '',
       meta: {
         recipient_name: record.recipient_name || '',
         message_type: record.message_type || '',

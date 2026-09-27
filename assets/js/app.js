@@ -1070,38 +1070,33 @@ async function ownerConnectApp(){
   const dot=active.length?obConnected(true):obBadge('Not connected','zinc');
   $('#page').innerHTML=obHead('connect-app','',`<button id="cxAppRefresh" class="ob-btn ob-btn-ghost">${lucide('refresh')} Refresh</button>`)+`
     <div class="ob-grid ob-kpis">
-      ${obKpi('link',active.length?'emerald':'amber','Connection',active.length? 'Connected':'Not connected', active.length?active.map(c=>esc(c.remote_application_name)).join(', '):'Connect EMS to ConnectX once')}
-      ${obKpi('shield','sky','Application ID',`<span style="font-size:15px">${esc(idn.application_id||'—')}</span>`,'unique to this EMS')}
-      ${obKpi('smartphone','violet','SMS requests',sms.filter(s=>s.status==='SUCCESS').length+' success', sms.filter(s=>['PENDING','PROCESSING'].includes(s.status)).length+' still moving')}
+      ${obKpi('link',active.length?'emerald':'amber','ConnectX',active.length?'Connected':'Not connected', active.length?active.map(c=>esc(c.remote_application_name)).join(', '):'Paste the ConnectX endpoint below')}
+      ${obKpi('shield','sky','Application ID',`<span style="font-size:15px">${esc(idn.application_id||'—')}</span>`,'this EMS only')}
+      ${obKpi('mail','violet','SMS',sms.filter(s=>s.status==='SUCCESS').length+' sent', sms.filter(s=>['PENDING','PROCESSING','queued'].includes(s.status)).length+' pending')}
     </div>
     <section class="ob-panel">
-      <div class="ob-panel-head"><div><h3>1. This EMS Connect App</h3><p class="ob-desc">Give this Connect Endpoint to the other app only if they will connect to you. To connect EMS to ConnectX, you paste <b>their</b> endpoint in step 2. Neither app can see the other’s database.</p></div>${dot}</div>
+      <div class="ob-panel-head"><div><h3>Connect EMS to ConnectX</h3><p class="ob-desc">Copy the endpoint from ConnectX → Connect App, paste it here, then approve the pairing code there. The phone is not set up on this page.</p></div>${dot}</div>
       <div class="ob-kv">
-        <div><span>Application ID</span><b><code>${esc(idn.application_id||'')}</code></b></div>
-        <div><span>Connect Endpoint</span><b><code id="cxAppEndpoint">${esc(idn.connect_endpoint||'')}</code> <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" id="cxAppCopy">${lucide('copy')} Copy</button></b></div>
-        <div><span>Public URL</span><b>${data.endpoint_override?'Custom override saved':'Detected from this website'}</b></div>
+        <div><span>This EMS endpoint</span><b><code id="cxAppEndpoint">${esc(idn.connect_endpoint||'')}</code> <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" id="cxAppCopy">${lucide('copy')} Copy</button></b></div>
       </div>
-      <form class="ob-form" id="cxAppEndpointForm" style="margin-top:12px">
-        <label>Public Connect Endpoint override <span class="ob-desc">Leave blank unless this site is reached on a different address than the one above.</span>
-          <input name="endpoint" placeholder="https://your-ems.example.com/connect" value="${esc(data.endpoint_override||'')}">
-        </label>
-        <div><button class="ob-btn ob-btn-soft">Save endpoint</button></div>
-      </form>
-    </section>
-    <section class="ob-panel">
-      <div class="ob-panel-head"><div><h3>2. Connect to ConnectX</h3><p class="ob-desc">Open ConnectX → Connect App, copy its Connect Endpoint, and paste it here. ConnectX’s administrator approves the pairing code. Both sides then show Connected.</p></div></div>
-      <form class="ob-form" id="cxAppRequest">
+      <form class="ob-form" id="cxAppRequest" style="margin-top:12px">
         <div class="ob-grid2">
           <label>ConnectX Connect Endpoint<input name="remote_endpoint" required placeholder="https://connectxweb.pages.dev/connect"></label>
           <label>Name they will see<input name="display_name" value="EMS" maxlength="80"></label>
         </div>
         <div><button class="ob-btn ob-btn-primary">${lucide('link')} Send connection request</button></div>
       </form>
-      <div id="cxAppWait">${waiting.map(r=>`<div class="ob-callout"><b>Waiting for approval</b><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><p class="ob-desc">Tell the ${esc(r.remote_application_name||'ConnectX')} administrator this code, then refresh. Request goes to ${esc(r.remote_endpoint||'')}.</p><button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-cx-cancel="${esc(r.request_token)}">Cancel request</button></div>`).join('')}</div>
-      ${incoming.length?`<div class="ob-callout"><b>Incoming requests</b>${incoming.map(r=>`<div style="margin-top:10px"><div>${esc(r.display_name||r.remote_application_name)} · <code>${esc(r.remote_application_id||'')}</code></div><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><button type="button" class="ob-btn ob-btn-primary ob-btn-sm" data-cx-approve="${esc(r.request_token)}">Approve</button></div>`).join('')}</div>`:''}
+      <form class="ob-form" id="cxAppEndpointForm" style="margin-top:8px">
+        <label>Public URL override <span class="ob-desc">Leave blank unless this site is reached on a different address.</span>
+          <input name="endpoint" placeholder="https://your-ems.example.com/connect" value="${esc(data.endpoint_override||'')}">
+        </label>
+        <div><button class="ob-btn ob-btn-soft">Save endpoint</button></div>
+      </form>
+      <div id="cxAppWait">${waiting.map(r=>`<div class="ob-callout"><b>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></b><p class="ob-desc">Approve this code on ConnectX, then refresh.</p><button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-cx-cancel="${esc(r.request_token)}">Cancel</button></div>`).join('')}</div>
+      ${incoming.length?`<div class="ob-callout"><b>Incoming</b>${incoming.map(r=>`<div style="margin-top:10px"><div>${esc(r.display_name||r.remote_application_name)}</div><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><button type="button" class="ob-btn ob-btn-primary ob-btn-sm" data-cx-approve="${esc(r.request_token)}">Approve</button></div>`).join('')}</div>`:''}
     </section>
     <section class="ob-panel">
-      <div class="ob-panel-head"><div><h3>3. Connections</h3><p class="ob-desc">An active connection carries a Connection ID, permissions, the remote Application ID and the remote Connect Endpoint. Either side can disconnect.</p></div></div>
+      <div class="ob-panel-head"><div><h3>Connections</h3><p class="ob-desc">Either side can disconnect. SMS stays pending until the connection is active again.</p></div></div>
       ${conns.length?`<div class="ob-tw"><table><thead><tr><th>Status</th><th>App</th><th>Connection ID</th><th>Remote endpoint</th><th>Permissions</th><th></th></tr></thead><tbody>
         ${conns.map(c=>`<tr>
           <td>${c.status==='ACTIVE'?obConnected(true):obBadge(esc(c.status),'rose')}</td>
