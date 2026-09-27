@@ -274,7 +274,8 @@ export async function dispatchPendingSms(env) {
 }
 
 async function notifyRemote(env, conn, action, payload) {
-  if (!conn?.remote_endpoint || !conn.shared_secret || conn.status === 'DISCONNECTED' && action !== 'DISCONNECT') return { ok: false };
+  if (!conn?.remote_endpoint || !conn.shared_secret) return { ok: false };
+  if (conn.status === 'DISCONNECTED' && !['DISCONNECT', 'SET_STATUS'].includes(action)) return { ok: false };
   const ident = await ensureIdentity(env, { url: conn.remote_endpoint });
   const envelope = await signEnvelope({
     action,
@@ -368,11 +369,11 @@ async function handleHandshake(env, request, envelope) {
   });
 }
 
-async function signedConnection(env, envelope) {
+async function signedConnection(env, envelope, { allowPaused = false } = {}) {
   if (!envelope?.connection_id || !envelope?.application_id) return { error: failResponse('connection_id and application_id are required.', 401, 'unauthorized') };
   if (!freshTimestamp(envelope.timestamp)) return { error: failResponse('Request timestamp is outside the allowed window.', 401, 'stale') };
   const conn = await loadConnection(env, envelope.connection_id);
-  if (!conn || conn.status !== 'ACTIVE') return { error: failResponse('Connection is not active.', 403, 'not_connected') };
+  if (!conn || (conn.status !== 'ACTIVE' && !(allowPaused && conn.status === 'PAUSED'))) return { error: failResponse(conn?.status === 'PAUSED' ? 'Connection is paused.' : 'Connection is not active.', 403, 'not_connected') };
   if (conn.remote_application_id && conn.remote_application_id !== envelope.application_id) {
     return { error: failResponse('Application ID does not match this connection.', 403, 'application_id') };
   }
@@ -420,8 +421,10 @@ export async function handleConnect(request, env) {
   }
 
   if (action === 'HANDSHAKE') return handleHandshake(env, request, envelope);
+  if (action === 'SET_STATUS') return applyRemoteStatus(env, envelope);
 
-  const signed = await signedConnection(env, envelope);
+  const allowPaused = ['PING', 'SMS_RESULT', 'VERIFY_ADMIN', 'APP_SHOPS', 'APP_EMAILS', 'APP_SMS', 'DISCONNECT'].includes(action);
+  const signed = await signedConnection(env, envelope, { allowPaused });
   if (signed.error) return signed.error;
   const conn = signed.conn;
   const payload = envelope.payload || {};
@@ -434,6 +437,7 @@ export async function handleConnect(request, env) {
   if (action === 'VERIFY_ADMIN') return verifyAdminForPhone(env, payload);
   if (action === 'APP_SHOPS') return appShops(env, payload);
   if (action === 'APP_EMAILS') return appEmails(env, payload);
+  if (action === 'APP_SMS') return appSms(env, payload);
   if (action === 'DISCONNECT') {
     await db(env, `connect_connections?id=eq.${encodeURIComponent(conn.id)}`, {
       method: 'PATCH',
@@ -592,6 +596,79 @@ async function appEmails(env, payload) {
   });
 }
 
+function phoneSmsStatus(status) {
+  const s = String(status || '').toUpperCase();
+  if (s === 'SUCCESS' || s === 'SENT') return 'sent';
+  if (s === 'FAILED') return 'failed';
+  if (s === 'PROCESSING' || s === 'SENDING') return 'sending';
+  return 'queued';
+}
+
+function smsPublic(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    request_id: row.request_id || '',
+    to_phone: row.to_phone || '',
+    recipient_name: row.recipient_name || 'Recipient',
+    message_type: row.message_type || 'SMS',
+    event_type: row.message_type || 'SMS',
+    status: phoneSmsStatus(row.status),
+    error_message: row.error_message || '',
+    message_body: row.message_body || '',
+    created_at: row.created_at,
+    sent_at: row.sent_at || row.result_at || '',
+    invoice_id: row.invoice_id || null
+  };
+}
+
+async function appSms(env, payload) {
+  const adminId = String(payload?.admin_id || '').trim();
+  const shopId = String(payload?.shop_id || '').trim();
+  if (!await shopOwned(env, adminId, shopId)) return failResponse('This shop is not available for that administrator.', 403, 'shop');
+  const since = String(payload?.since || '1970-01-01T00:00:00.000Z');
+  const selects = [
+    'id,request_id,to_phone,recipient_name,message_type,message_body,status,error_message,created_at,sent_at,result_at,invoice_id',
+    'id,request_id,to_phone,recipient_name,message_type,message_body,status,error_message,created_at,sent_at',
+    'id,to_phone,message_body,status,error_message,created_at'
+  ];
+  let rows = [];
+  for (const select of selects) {
+    try {
+      rows = await db(env, `connectx_sms_messages?store_id=eq.${encodeURIComponent(shopId)}&created_at=gte.${encodeURIComponent(since)}&select=${select}&order=created_at.desc&limit=500`);
+      break;
+    } catch { rows = []; }
+  }
+  return jsonResponse({ ok: true, items: (rows || []).map(smsPublic).filter(Boolean) });
+}
+
+async function applyRemoteStatus(env, envelope) {
+  const conn = await loadConnection(env, envelope.connection_id);
+  if (!conn) return failResponse('Unknown connection.', 403, 'not_connected');
+  if (conn.remote_application_id && conn.remote_application_id !== envelope.application_id) return failResponse('Application ID does not match this connection.', 403, 'application_id');
+  if (!(await verifySignature(envelope, conn.shared_secret))) return failResponse('Signature check failed.', 401, 'bad_signature');
+  return applyConnectionStatus(env, conn.id, envelope.payload?.status, { notify: false });
+}
+
+async function applyConnectionStatus(env, id, status, { notify = true } = {}) {
+  const conn = await loadConnection(env, id);
+  if (!conn) return failResponse('Connection not found.', 404, 'not_found');
+  const next = String(status || '').toUpperCase();
+  if (!['ACTIVE', 'PAUSED', 'DISCONNECTED', 'DELETED'].includes(next)) return failResponse('Choose active, pause, disconnect, or delete.', 400, 'status');
+  if (notify) await notifyRemote(env, conn, 'SET_STATUS', { status: next }).catch(() => {});
+  if (next === 'DELETED') {
+    await db(env, `connect_connections?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE' });
+    return jsonResponse({ ok: true, status: 'DELETED' });
+  }
+  const patch = { status: next };
+  if (next === 'ACTIVE') patch.disconnected_at = null;
+  if (next === 'DISCONNECTED') patch.disconnected_at = nowIso();
+  await db(env, `connect_connections?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch)
+  });
+  return jsonResponse({ ok: true, status: next });
+}
+
 export async function connectGatewayStatus(env) {
   const rows = await db(env, 'connect_connections?status=eq.ACTIVE&select=id,permissions,last_seen_at').catch(() => []);
   const sms = (rows || []).filter(r => parsePerms(r.permissions).includes('sms:send'));
@@ -716,6 +793,12 @@ export async function connectOwnerRoutes(ctx) {
       body: JSON.stringify({ status: 'CANCELLED' })
     });
     return json({ ok: true });
+  }
+
+  const statusRoute = path.match(/^platform\/connect-app\/connections\/([^/]+)\/status$/);
+  if (statusRoute && method === 'POST') {
+    const b = await readJson(request);
+    return applyConnectionStatus(env, decodeURIComponent(statusRoute[1]), b.status);
   }
 
   const disc = path.match(/^platform\/connect-app\/connections\/([^/]+)\/disconnect$/);

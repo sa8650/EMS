@@ -1096,15 +1096,18 @@ async function ownerConnectApp(){
       ${incoming.length?`<div class="ob-callout"><b>Incoming</b>${incoming.map(r=>`<div style="margin-top:10px"><div>${esc(r.display_name||r.remote_application_name)}</div><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><button type="button" class="ob-btn ob-btn-primary ob-btn-sm" data-cx-approve="${esc(r.request_token)}">Approve</button></div>`).join('')}</div>`:''}
     </section>
     <section class="ob-panel">
-      <div class="ob-panel-head"><div><h3>Connections</h3><p class="ob-desc">Either side can disconnect. SMS stays pending until the connection is active again.</p></div></div>
-      ${conns.length?`<div class="ob-tw"><table><thead><tr><th>Status</th><th>App</th><th>Connection ID</th><th>Remote endpoint</th><th>Permissions</th><th></th></tr></thead><tbody>
+      <div class="ob-panel-head"><div><h3>Connections</h3><p class="ob-desc">Use the switch on each app: Active, Pause, Disconnect, or Delete. Pause holds new SMS. Disconnect or delete stops the link.</p></div></div>
+      ${conns.length?`<div class="ob-tw"><table><thead><tr><th>Status</th><th>App</th><th>Connection ID</th><th></th></tr></thead><tbody>
         ${conns.map(c=>`<tr>
-          <td>${c.status==='ACTIVE'?obConnected(true):obBadge(esc(c.status),'rose')}</td>
+          <td>${c.status==='ACTIVE'?obConnected(true):c.status==='PAUSED'?obBadge('Paused','amber'):obBadge(esc(c.status),'rose')}</td>
           <td><strong>${esc(c.display_name||c.remote_application_name)}</strong><small style="display:block;color:var(--ob-muted)">${esc(c.remote_application_id||'')}</small></td>
           <td><code>${esc(c.connection_id)}</code></td>
-          <td class="ob-wrap"><code>${esc(c.remote_endpoint||'')}</code></td>
-          <td>${(c.permissions||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'—'}</td>
-          <td style="text-align:right">${c.status==='ACTIVE'?`<button class="ob-btn ob-btn-soft ob-btn-sm" data-cx-ping="${esc(c.connection_id)}">Ping</button> <button class="ob-btn ob-btn-ghost ob-btn-sm" data-cx-off="${esc(c.connection_id)}">Disconnect</button>`:'—'}</td>
+          <td style="text-align:right"><select data-cx-status="${esc(c.connection_id)}" style="min-width:148px;padding:6px 8px;border-radius:8px;border:1px solid var(--ob-line);background:var(--ob-surface);color:inherit">
+            <option value="ACTIVE" ${c.status==='ACTIVE'?'selected':''}>Active</option>
+            <option value="PAUSED" ${c.status==='PAUSED'?'selected':''}>Pause</option>
+            <option value="DISCONNECTED" ${c.status==='DISCONNECTED'?'selected':''}>Disconnect</option>
+            <option value="DELETED">Delete</option>
+          </select></td>
         </tr>`).join('')}
       </tbody></table></div>`:obEmpty('No connection yet. Send a request to ConnectX, then approve it on the ConnectX Connect App page.')}
     </section>
@@ -1120,6 +1123,11 @@ async function ownerConnectApp(){
   $('#cxAppRequest').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));const btn=e.target.querySelector('button');btn.disabled=true;try{const r=await api('platform/connect-app/request',{method:'POST',body:JSON.stringify(b)});toast('Request sent. Pairing code '+(r.request?.pairing_code||'')+'. Approve it on ConnectX.');ownerConnectApp()}catch(err){toast(err.message);btn.disabled=false}};
   document.querySelectorAll('[data-cx-cancel]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/requests/'+encodeURIComponent(btn.dataset.cxCancel)+'/cancel',{method:'POST',body:'{}'});toast('Request cancelled.');ownerConnectApp()}catch(err){toast(err.message)}});
   document.querySelectorAll('[data-cx-approve]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/requests/'+encodeURIComponent(btn.dataset.cxApprove)+'/approve',{method:'POST',body:'{}'});toast('Connected.');ownerConnectApp()}catch(err){toast(err.message)}});
+  document.querySelectorAll('[data-cx-status]').forEach(sel=>sel.onchange=async()=>{
+    const status=sel.value, id=sel.dataset.cxStatus;
+    if((status==='DISCONNECTED'||status==='DELETED') && !confirm(status==='DELETED'?'Delete this connected app? This cannot be undone.':'Disconnect this app? SMS stays pending until it is active again.')){ownerConnectApp();return}
+    try{await api('platform/connect-app/connections/'+encodeURIComponent(id)+'/status',{method:'POST',body:JSON.stringify({status})});toast(status==='DELETED'?'Deleted.':'Updated.');ownerConnectApp()}catch(err){toast(err.message);ownerConnectApp()}
+  });
   document.querySelectorAll('[data-cx-off]').forEach(btn=>btn.onclick=async()=>{if(!confirm('Disconnect this Connect App? SMS will stay pending until you connect again.'))return;try{await api('platform/connect-app/connections/'+encodeURIComponent(btn.dataset.cxOff)+'/disconnect',{method:'POST',body:'{}'});toast('Disconnected.');ownerConnectApp()}catch(err){toast(err.message)}});
   document.querySelectorAll('[data-cx-ping]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/connections/'+encodeURIComponent(btn.dataset.cxPing)+'/ping',{method:'POST',body:'{}'});toast('Ping succeeded. Connection is active.');ownerConnectApp()}catch(err){toast(err.message)}});
   $('#cxAppDispatch').onclick=async()=>{try{await api('platform/connect-app/dispatch',{method:'POST',body:'{}'});toast('Pending SMS handed to ConnectX.');ownerConnectApp()}catch(err){toast(err.message)}};
