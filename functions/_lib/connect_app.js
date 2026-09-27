@@ -430,6 +430,9 @@ export async function handleConnect(request, env) {
     return jsonResponse({ ok: true, status: 'ACTIVE', application_id: ident.application_id, application_name: ident.application_name, connect_endpoint: ident.connect_endpoint });
   }
   if (action === 'SMS_RESULT') return applySmsResult(env, conn, payload);
+  if (action === 'VERIFY_ADMIN') return verifyAdminForPhone(env, payload);
+  if (action === 'APP_SHOPS') return appShops(env, payload);
+  if (action === 'APP_EMAILS') return appEmails(env, payload);
   if (action === 'DISCONNECT') {
     await db(env, `connect_connections?id=eq.${encodeURIComponent(conn.id)}`, {
       method: 'PATCH',
@@ -439,6 +442,153 @@ export async function handleConnect(request, env) {
     return jsonResponse({ ok: true, status: 'DISCONNECTED', connection_id: conn.id });
   }
   return failResponse('Unknown Connect action.', 400, 'action');
+}
+
+
+function b64u(bytes) {
+  const bin = String.fromCharCode(...new Uint8Array(bytes));
+  return btoa(bin).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+}
+
+/** Same PBKDF2 check EMS login uses. The password is never stored or returned. */
+async function passwordMatches(password, stored) {
+  const parts = String(stored || '').split('$');
+  if (parts.length !== 4 || parts[0] !== 'pbkdf2') return false;
+  const iterations = Number(parts[1]);
+  if (!iterations || iterations > 100000) return false;
+  const salt = parts[2];
+  const expected = parts[3];
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: new TextEncoder().encode(salt), iterations, hash: 'SHA-256' },
+    await crypto.subtle.importKey('raw', new TextEncoder().encode(String(password || '')), 'PBKDF2', false, ['deriveBits']),
+    256
+  );
+  const got = b64u(bits);
+  if (got.length !== expected.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ got.charCodeAt(i);
+  return diff === 0;
+}
+
+function publicAdmin(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    admin_code: row.admin_code || null,
+    name: row.name || '',
+    email: row.email || '',
+    phone: row.phone || '',
+    address: row.address || '',
+    active: row.active !== false && row.active !== 0,
+    created_at: row.created_at || null
+  };
+}
+
+async function shopsForAdmin(env, adminId) {
+  const rows = await db(env, `stores?admin_id=eq.${encodeURIComponent(adminId)}&select=id,name,address,phone,shop_code,category,status&order=name.asc`).catch(() => []);
+  return (rows || []).filter(s => s.status !== 'inactive').map(s => ({
+    id: s.id,
+    name: s.name,
+    address: s.address || '',
+    phone: s.phone || '',
+    shop_code: s.shop_code || '',
+    category: s.category || '',
+    status: s.status || 'active',
+    connected: false
+  }));
+}
+
+async function loadAdmin(env, login) {
+  const raw = String(login || '').trim();
+  if (!raw) return null;
+  if (raw.includes('@')) {
+    const rows = await db(env, `administrators?email=eq.${encodeURIComponent(raw.toLowerCase())}&select=*`).catch(() => []);
+    return rows?.[0] || null;
+  }
+  const rows = await db(env, `administrators?admin_code=eq.${encodeURIComponent(raw)}&select=*`).catch(() => []);
+  return rows?.[0] || null;
+}
+
+async function verifyAdminForPhone(env, payload) {
+  const login = String(payload?.email || payload?.user_id || payload?.userId || '').trim();
+  const password = String(payload?.password || '');
+  if (!login || !password) return failResponse('Email or Administrator ID, and a password, are required.', 400, 'credentials');
+  const admin = await loadAdmin(env, login);
+  if (!admin || !(await passwordMatches(password, admin.password_hash))) {
+    return failResponse('Wrong email, Administrator ID, or password.', 401, 'unauthorized');
+  }
+  if (admin.active === false || admin.active === 0) {
+    return failResponse('Your administrator account is deactivated. Contact EMS support.', 403, 'inactive');
+  }
+  const shops = await shopsForAdmin(env, admin.id);
+  return jsonResponse({ ok: true, administrator: publicAdmin(admin), shops });
+}
+
+async function appShops(env, payload) {
+  const adminId = String(payload?.admin_id || '').trim();
+  if (!adminId) return failResponse('admin_id is required.', 400, 'admin');
+  const rows = await db(env, `administrators?id=eq.${encodeURIComponent(adminId)}&select=id,admin_code,name,email,phone,address,active,created_at`).catch(() => []);
+  const admin = rows?.[0];
+  if (!admin || admin.active === false || admin.active === 0) return failResponse('Administrator not found.', 404, 'admin');
+  return jsonResponse({ ok: true, administrator: publicAdmin(admin), shops: await shopsForAdmin(env, admin.id) });
+}
+
+async function shopOwned(env, adminId, shopId) {
+  const rows = await db(env, `stores?id=eq.${encodeURIComponent(shopId)}&admin_id=eq.${encodeURIComponent(adminId)}&select=id,status`).catch(() => []);
+  return rows?.[0] && rows[0].status !== 'inactive' ? rows[0] : null;
+}
+
+function emailPublic(row, detail) {
+  if (!row) return null;
+  const list = v => {
+    if (Array.isArray(v)) return v.map(String);
+    try { const p = JSON.parse(v || '[]'); return Array.isArray(p) ? p.map(String) : []; } catch { return []; }
+  };
+  return {
+    id: row.id,
+    subject: row.subject || '',
+    from_email: row.from_email || '',
+    to_emails: list(row.to_emails),
+    cc_emails: list(row.cc_emails),
+    bcc_emails: detail ? list(row.bcc_emails) : undefined,
+    recipient_type: row.recipient_type || '',
+    status: row.status || 'queued',
+    error_message: row.error_message || null,
+    created_at: row.created_at,
+    sent_at: row.sent_at || null,
+    ...(detail ? { custom_body: row.custom_body || '', body_html: row.body_html || '' } : {})
+  };
+}
+
+async function appEmails(env, payload) {
+  const adminId = String(payload?.admin_id || '').trim();
+  const shopId = String(payload?.shop_id || '').trim();
+  if (!await shopOwned(env, adminId, shopId)) return failResponse('This shop is not available for that administrator.', 403, 'shop');
+  const op = String(payload?.op || 'stats');
+  if (op === 'detail') {
+    const id = String(payload?.email_id || '').trim();
+    const rows = await db(env, `connectx_messages?id=eq.${encodeURIComponent(id)}&store_id=eq.${encodeURIComponent(shopId)}&select=*`).catch(() => []);
+    if (!rows?.[0]) return failResponse('Email not found.', 404, 'email');
+    return jsonResponse({ ok: true, email: emailPublic(rows[0], true) });
+  }
+  if (op === 'page') {
+    const page = Math.max(0, Number(payload.page) || 0);
+    const limit = 30;
+    const rows = await db(env, `connectx_messages?store_id=eq.${encodeURIComponent(shopId)}&shop_deleted_at=is.null&select=id,subject,from_email,to_emails,cc_emails,recipient_type,status,error_message,created_at,sent_at&order=created_at.desc&limit=${limit + 1}&offset=${page * limit}`).catch(() => []);
+    const items = (rows || []).slice(0, limit).map(r => emailPublic(r, false));
+    return jsonResponse({ ok: true, items, page, hasMore: (rows || []).length > limit, snapshot: nowIso() });
+  }
+  const since = String(payload?.since || new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const rows = await db(env, `connectx_messages?store_id=eq.${encodeURIComponent(shopId)}&created_at=gte.${encodeURIComponent(since)}&select=id,status,sent_at,created_at&limit=500`).catch(() => []);
+  const latest = await db(env, `connectx_messages?store_id=eq.${encodeURIComponent(shopId)}&shop_deleted_at=is.null&select=id,subject,from_email,to_emails,cc_emails,recipient_type,status,error_message,created_at,sent_at&order=created_at.desc&limit=1`).catch(() => []);
+  const list = rows || [];
+  return jsonResponse({
+    ok: true,
+    sent: list.filter(r => r.status === 'sent').length,
+    failed: list.filter(r => r.status === 'failed').length,
+    pending: list.filter(r => r.status === 'queued' || r.status === 'sending').length,
+    latest: emailPublic(latest?.[0], false)
+  });
 }
 
 export async function connectGatewayStatus(env) {
