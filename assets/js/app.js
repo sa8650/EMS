@@ -191,6 +191,7 @@ sparkles:'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.
 user:'<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
 store:'<path d="m2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7"/><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><path d="M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4"/><path d="M2 7h20"/><path d="M22 7v3a2 2 0 0 1-2 2a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7"/>',
 key:'<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/>',
+link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 devices:'<path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3"/><path d="M7 19h5"/><rect x="16" y="12" width="6" height="10" rx="2"/>',
 'msg':'<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>',
 gem:'<path d="M6 3h12l4 6-10 13L2 9Z"/><path d="M11 3 8 9l4 13 4-13-3-6"/><path d="M2 9h20"/>',
@@ -282,7 +283,7 @@ const OB_NAV=[
   {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
-  {h:'Services',items:[['connectx','ConnectX','mail'],['api-access','EMS API','key'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
+  {h:'Services',items:[['connectx','ConnectX','mail'],['connect-app','Connect App','link'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
   {h:'System',items:[['factory-reset','Factory reset','refresh']]}
 ];
 const OB_LABEL=Object.fromEntries(OB_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -374,7 +375,7 @@ const OB_SKEL={
   administrators:()=>SKEL.kpis(4)+SKEL.table(6,6),shops:()=>SKEL.toolbar()+SKEL.table(6,7),
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
   blogs:()=>SKEL.toolbar()+SKEL.table(4,5),'contact-messages':()=>SKEL.toolbar()+SKEL.table(5,5),
-  connectx:()=>SKEL.panel(SKEL.table(4,5)),'api-access':()=>SKEL.kpis(4)+SKEL.panel(SKEL.table(5,5))+SKEL.panel(SKEL.kv(4)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
+  connectx:()=>SKEL.panel(SKEL.table(4,5)),'connect-app':()=>SKEL.kpis(3)+SKEL.panel(SKEL.form(3))+SKEL.panel(SKEL.table(4,5)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
   truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),
   helpdesk:()=>SKEL.grid('300px minmax(0,1fr)',SKEL.list(5),SKEL.panel(SKEL.msgs(4))),
   addons:()=>SKEL.toolbar()+SKEL.table(5,5),'factory-reset':()=>SKEL.panel(SKEL.form(4)),
@@ -482,7 +483,7 @@ async function ownerPage(p){
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
   try{
     if(p==='app-store')return await ownerAppStore();
-    if(p==='api-access')return await ownerApiAccess();
+    if(p==='connect-app')return await ownerConnectApp();
     let d=await api('platform/overview');
     if(p==='overview')return ownerOverview(d);
     if(p==='licenses')return ownerLicenses(d);
@@ -1053,6 +1054,83 @@ function appModal(app = null) {
 }
 
 /* Owner-only catalog. No USSD code is shipped by ConnectX. */
+
+/* ═══════════════ OWNER · Connect App ═══════════════ */
+function obConnected(on){return on?'<span class="ob-badge ob-t-emerald" style="display:inline-flex;align-items:center;gap:6px;"><span class="ob-live-dot"></span> Connected</span>':obBadge('Not connected','zinc')}
+async function ownerConnectApp(){
+  let data=await api('platform/connect-app');
+  if(data&&data.ready===false){
+    $('#page').innerHTML=`<section class="ob-panel"><div class="ob-panel-head"><div><h3>Connect App is not installed yet</h3><p class="ob-desc">${esc(data.error||'Apply the Connect App migration, then reload this page.')}</p></div></div><p class="ob-desc">Run <code>${esc(data.migration||'supabase/migrations/046_connect_app.sql')}</code> on the EMS database. On Cloudflare D1, use <code>supabase/d1/migration_connect_app.sql</code>.</p></section>`;
+    return;
+  }
+  const idn=data.identity||{}, conns=data.connections||[], reqs=data.requests||[], sms=data.recent_sms||[];
+  const active=conns.filter(c=>c.status==='ACTIVE');
+  const waiting=reqs.filter(r=>r.direction==='outbound'&&r.status==='PENDING_APPROVAL');
+  const incoming=reqs.filter(r=>r.direction==='inbound'&&r.status==='PENDING_APPROVAL');
+  const dot=active.length?obConnected(true):obBadge('Not connected','zinc');
+  $('#page').innerHTML=obHead('connect-app','',`<button id="cxAppRefresh" class="ob-btn ob-btn-ghost">${lucide('refresh')} Refresh</button>`)+`
+    <div class="ob-grid ob-kpis">
+      ${obKpi('link',active.length?'emerald':'amber','Connection',active.length? 'Connected':'Not connected', active.length?active.map(c=>esc(c.remote_application_name)).join(', '):'Connect EMS to ConnectX once')}
+      ${obKpi('shield','sky','Application ID',`<span style="font-size:15px">${esc(idn.application_id||'—')}</span>`,'unique to this EMS')}
+      ${obKpi('smartphone','violet','SMS requests',sms.filter(s=>s.status==='SUCCESS').length+' success', sms.filter(s=>['PENDING','PROCESSING'].includes(s.status)).length+' still moving')}
+    </div>
+    <section class="ob-panel">
+      <div class="ob-panel-head"><div><h3>1. This EMS Connect App</h3><p class="ob-desc">Give this Connect Endpoint to the other app only if they will connect to you. To connect EMS to ConnectX, you paste <b>their</b> endpoint in step 2. Neither app can see the other’s database.</p></div>${dot}</div>
+      <div class="ob-kv">
+        <div><span>Application ID</span><b><code>${esc(idn.application_id||'')}</code></b></div>
+        <div><span>Connect Endpoint</span><b><code id="cxAppEndpoint">${esc(idn.connect_endpoint||'')}</code> <button type="button" class="ob-btn ob-btn-soft ob-btn-sm" id="cxAppCopy">${lucide('copy')} Copy</button></b></div>
+        <div><span>Public URL</span><b>${data.endpoint_override?'Custom override saved':'Detected from this website'}</b></div>
+      </div>
+      <form class="ob-form" id="cxAppEndpointForm" style="margin-top:12px">
+        <label>Public Connect Endpoint override <span class="ob-desc">Leave blank unless this site is reached on a different address than the one above.</span>
+          <input name="endpoint" placeholder="https://your-ems.example.com/connect" value="${esc(data.endpoint_override||'')}">
+        </label>
+        <div><button class="ob-btn ob-btn-soft">Save endpoint</button></div>
+      </form>
+    </section>
+    <section class="ob-panel">
+      <div class="ob-panel-head"><div><h3>2. Connect to ConnectX</h3><p class="ob-desc">Open ConnectX → Connect App, copy its Connect Endpoint, and paste it here. ConnectX’s administrator approves the pairing code. Both sides then show Connected.</p></div></div>
+      <form class="ob-form" id="cxAppRequest">
+        <div class="ob-grid2">
+          <label>ConnectX Connect Endpoint<input name="remote_endpoint" required placeholder="https://connectxweb.pages.dev/connect"></label>
+          <label>Name they will see<input name="display_name" value="EMS" maxlength="80"></label>
+        </div>
+        <div><button class="ob-btn ob-btn-primary">${lucide('link')} Send connection request</button></div>
+      </form>
+      <div id="cxAppWait">${waiting.map(r=>`<div class="ob-callout"><b>Waiting for approval</b><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><p class="ob-desc">Tell the ${esc(r.remote_application_name||'ConnectX')} administrator this code, then refresh. Request goes to ${esc(r.remote_endpoint||'')}.</p><button type="button" class="ob-btn ob-btn-ghost ob-btn-sm" data-cx-cancel="${esc(r.request_token)}">Cancel request</button></div>`).join('')}</div>
+      ${incoming.length?`<div class="ob-callout"><b>Incoming requests</b>${incoming.map(r=>`<div style="margin-top:10px"><div>${esc(r.display_name||r.remote_application_name)} · <code>${esc(r.remote_application_id||'')}</code></div><p>Pairing code <code class="ob-pair">${esc(r.pairing_code||'')}</code></p><button type="button" class="ob-btn ob-btn-primary ob-btn-sm" data-cx-approve="${esc(r.request_token)}">Approve</button></div>`).join('')}</div>`:''}
+    </section>
+    <section class="ob-panel">
+      <div class="ob-panel-head"><div><h3>3. Connections</h3><p class="ob-desc">An active connection carries a Connection ID, permissions, the remote Application ID and the remote Connect Endpoint. Either side can disconnect.</p></div></div>
+      ${conns.length?`<div class="ob-tw"><table><thead><tr><th>Status</th><th>App</th><th>Connection ID</th><th>Remote endpoint</th><th>Permissions</th><th></th></tr></thead><tbody>
+        ${conns.map(c=>`<tr>
+          <td>${c.status==='ACTIVE'?obConnected(true):obBadge(esc(c.status),'rose')}</td>
+          <td><strong>${esc(c.display_name||c.remote_application_name)}</strong><small style="display:block;color:var(--ob-muted)">${esc(c.remote_application_id||'')}</small></td>
+          <td><code>${esc(c.connection_id)}</code></td>
+          <td class="ob-wrap"><code>${esc(c.remote_endpoint||'')}</code></td>
+          <td>${(c.permissions||[]).map(x=>`<code>${esc(x)}</code>`).join(' ')||'—'}</td>
+          <td style="text-align:right">${c.status==='ACTIVE'?`<button class="ob-btn ob-btn-soft ob-btn-sm" data-cx-ping="${esc(c.connection_id)}">Ping</button> <button class="ob-btn ob-btn-ghost ob-btn-sm" data-cx-off="${esc(c.connection_id)}">Disconnect</button>`:'—'}</td>
+        </tr>`).join('')}
+      </tbody></table></div>`:obEmpty('No connection yet. Send a request to ConnectX, then approve it on the ConnectX Connect App page.')}
+    </section>
+    <section class="ob-panel">
+      <div class="ob-panel-head"><div><h3>Recent SMS requests</h3><p class="ob-desc">Each shop SMS gets a Request ID. ConnectX returns SUCCESS or FAILED on that same ID. Pending jobs are retried while the connection is active.</p></div><button type="button" class="ob-btn ob-btn-soft ob-btn-sm" id="cxAppDispatch">Retry pending</button></div>
+      ${sms.length?`<div class="ob-tw"><table><thead><tr><th>Request</th><th>To</th><th>Status</th><th>SIM</th><th>When</th></tr></thead><tbody>
+        ${sms.map(r=>`<tr><td><code>${esc(r.request_id||'—')}</code></td><td>${esc(r.to_phone||'')}</td><td>${obBadge(esc(r.status),r.status==='SUCCESS'?'emerald':r.status==='FAILED'?'rose':r.status==='PROCESSING'?'sky':'amber')}</td><td>${esc(r.sim_used||'—')}</td><td class="ob-num">${r.created_at?new Date(r.created_at).toLocaleString():''}</td></tr>`).join('')}
+      </tbody></table></div>`:obEmpty('No SMS requests yet. Shops can send as soon as ConnectX shows Connected.')}
+    </section>`;
+  $('#cxAppRefresh').onclick=()=>ownerConnectApp();
+  $('#cxAppCopy').onclick=()=>navigator.clipboard?.writeText(idn.connect_endpoint||'').then(()=>toast('Connect Endpoint copied.')).catch(()=>toast('Copy failed.'));
+  $('#cxAppEndpointForm').onsubmit=async e=>{e.preventDefault();try{await api('platform/connect-app/endpoint',{method:'POST',body:JSON.stringify({endpoint:new FormData(e.target).get('endpoint')})});toast('Endpoint saved.');ownerConnectApp()}catch(err){toast(err.message)}};
+  $('#cxAppRequest').onsubmit=async e=>{e.preventDefault();const b=Object.fromEntries(new FormData(e.target));const btn=e.target.querySelector('button');btn.disabled=true;try{const r=await api('platform/connect-app/request',{method:'POST',body:JSON.stringify(b)});toast('Request sent. Pairing code '+(r.request?.pairing_code||'')+'. Approve it on ConnectX.');ownerConnectApp()}catch(err){toast(err.message);btn.disabled=false}};
+  document.querySelectorAll('[data-cx-cancel]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/requests/'+encodeURIComponent(btn.dataset.cxCancel)+'/cancel',{method:'POST',body:'{}'});toast('Request cancelled.');ownerConnectApp()}catch(err){toast(err.message)}});
+  document.querySelectorAll('[data-cx-approve]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/requests/'+encodeURIComponent(btn.dataset.cxApprove)+'/approve',{method:'POST',body:'{}'});toast('Connected.');ownerConnectApp()}catch(err){toast(err.message)}});
+  document.querySelectorAll('[data-cx-off]').forEach(btn=>btn.onclick=async()=>{if(!confirm('Disconnect this Connect App? SMS will stay pending until you connect again.'))return;try{await api('platform/connect-app/connections/'+encodeURIComponent(btn.dataset.cxOff)+'/disconnect',{method:'POST',body:'{}'});toast('Disconnected.');ownerConnectApp()}catch(err){toast(err.message)}});
+  document.querySelectorAll('[data-cx-ping]').forEach(btn=>btn.onclick=async()=>{try{await api('platform/connect-app/connections/'+encodeURIComponent(btn.dataset.cxPing)+'/ping',{method:'POST',body:'{}'});toast('Ping succeeded. Connection is active.');ownerConnectApp()}catch(err){toast(err.message)}});
+  $('#cxAppDispatch').onclick=async()=>{try{await api('platform/connect-app/dispatch',{method:'POST',body:'{}'});toast('Pending SMS handed to ConnectX.');ownerConnectApp()}catch(err){toast(err.message)}};
+  if(waiting.length||incoming.length){clearTimeout(window.__cxAppWait);window.__cxAppWait=setTimeout(()=>{if(document.getElementById('cxAppWait'))ownerConnectApp()},4000)}
+}
+
 /* ═══════════════ OWNER · EMS API (platform service credentials) ═══════════════ */
 const API_SCOPE_INFO=[
   ['read','Global read — every resource, read-only'],
@@ -2841,7 +2919,7 @@ async function adminConnectX(){
             <span class="adm-num" style="font-size:12px;font-weight:700;">${gw.lastSeen?ago(gw.lastSeen):'Never'}</span>
           </div>
           <p class="adm-desc" style="font-size:11px;margin:0;line-height:1.45;">
-            SMS is dispatched by the central ConnectX service through the secure EMS Public API. The connection is provisioned and managed by the EMS platform owner — you only enable SMS and choose the automatic triggers per shop below.
+            SMS is delivered through the Connect App link between EMS and ConnectX. The platform owner connects the two apps once. You only enable SMS and choose the automatic triggers per shop below.
           </p>
         </div>
         <div style="background:var(--adm-inset);border:1px solid var(--adm-line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px;">
@@ -3830,12 +3908,13 @@ async function connectX(){
         // Status: Queued
         let banner=$('#smsFeedbackBanner');
         banner.style.display='block';
+        const smsState=res.status||'PENDING';
         banner.innerHTML=`
           <div class="shp-sms-queued-banner">
-            <span class="badge">Queued</span>
+            <span class="badge">${esc(smsState)}</span>
             <div style="flex:1;">
-              <b>✓ SMS queued for ConnectX</b>
-              <p>Status: Queued · The message has been stored in the dispatch queue and will be transmitted through the ConnectX Android SMS Gateway.</p>
+              <b>✓ ${esc(res.request_id||'SMS')} accepted</b>
+              <p>Status: ${esc(smsState)} · ConnectX will send it from the selected SIM and return SUCCESS or FAILED automatically.</p>
             </div>
             <button type="button" class="shp-btn shp-btn-soft shp-btn-sm" id="viewInHistoryBtn">View History</button>
           </div>
@@ -3846,7 +3925,7 @@ async function connectX(){
           renderSmsPortal();
         };
 
-        toast('✓ SMS queued for ConnectX (Status: Queued)');
+        toast('✓ '+(res.request_id||'SMS')+' · '+(res.status||'PENDING'));
 
         // Clear message
         bodyArea.value='';
@@ -3875,10 +3954,10 @@ async function connectX(){
           <input id="smsSearch" class="shp-search" placeholder="Search recipient, phone, type, invoice, status, or message text…" style="flex:1;min-width:220px;">
           <select id="smsStatusFilter" style="min-width:130px;">
             <option value="">All Statuses</option>
-            <option value="queued">Queued</option>
-            <option value="sending">Sending</option>
-            <option value="sent">Sent</option>
-            <option value="failed">Failed</option>
+            <option value="PENDING">PENDING</option>
+            <option value="PROCESSING">PROCESSING</option>
+            <option value="SUCCESS">SUCCESS</option>
+            <option value="FAILED">FAILED</option>
           </select>
           <button type="button" class="shp-btn shp-btn-soft" id="smsRefreshBtn">${lucide('refresh-cw')} Refresh</button>
         </div>
@@ -3889,9 +3968,10 @@ async function connectX(){
 
     function filterAndRender(){
       let q=($('#smsSearch').value||'').trim().toLowerCase();
+      const smsCanon=s=>({queued:'PENDING',sending:'PROCESSING',sent:'SUCCESS',failed:'FAILED'}[s]||s||'PENDING');
       let st=$('#smsStatusFilter').value;
       let filtered=rows.filter(r=>{
-        if(st && r.status!==st)return false;
+        if(st && smsCanon(r.status)!==st)return false;
         if(q){
           let hay=`${r.recipient_name||''} ${r.to_phone||''} ${r.recipient_type||''} ${r.message_type||''} ${r.message_body||''} ${r.status||''} ${r.invoice_number||''} ${r.invoice_id||''}`.toLowerCase();
           if(!hay.includes(q))return false;
@@ -3938,7 +4018,7 @@ async function connectX(){
           </thead>
           <tbody>
             ${rows.map(r=>{
-              let statusTone=r.status==='sent'?'emerald':(r.status==='failed'?'rose':(r.status==='sending'?'sky':'amber'));
+              const smsCanonRow=s=>({queued:'PENDING',sending:'PROCESSING',sent:'SUCCESS',failed:'FAILED'}[s]||s||'PENDING');let statusLabel=smsCanonRow(r.status);let statusTone=statusLabel==='SUCCESS'?'emerald':(statusLabel==='FAILED'?'rose':(statusLabel==='PROCESSING'?'sky':'amber'));
               let recTone=r.recipient_type==='customer'?'violet':(r.recipient_type==='supplier'?'amber':'blue');
               let docCode=formatSmsInvoiceCode(r);
               return `
@@ -3963,13 +4043,13 @@ async function connectX(){
                     ${docCode?`<code>${esc(docCode)}</code>`:'<span style="color:var(--shp-muted);">—</span>'}
                   </td>
                   <td>
-                    ${shpBadge(r.status==='queued'?'Queued':r.status,statusTone)}
+                    ${shpBadge(statusLabel,statusTone)}
                     ${r.error_message?`<br><small class="shp-desc" title="${esc(r.error_message)}" style="color:var(--shp-rose);">${esc(r.error_message)}</small>`:''}
                   </td>
                   <td style="text-align:right;">
                     <span style="display:inline-flex;gap:4px;">
                       <button class="shp-btn shp-btn-soft shp-btn-sm" data-sms-view="${r.id}">View</button>
-                      ${r.status==='queued'?`<button class="shp-icobtn shp-danger" data-sms-cancel="${r.id}" title="Cancel queued SMS" aria-label="Cancel queued SMS">${lucide('x')}</button>`:''}
+                      ${statusLabel==='PENDING'?`<button class="shp-icobtn shp-danger" data-sms-cancel="${r.id}" title="Cancel pending SMS" aria-label="Cancel pending SMS">${lucide('x')}</button>`:''}
                     </span>
                   </td>
                 </tr>
@@ -4004,7 +4084,7 @@ async function connectX(){
   }
 
   function smsInspectModal(msg){
-    let statusTone=msg.status==='sent'?'emerald':(msg.status==='failed'?'rose':(msg.status==='sending'?'sky':'amber'));
+    const smsCanonMsg=s=>({queued:'PENDING',sending:'PROCESSING',sent:'SUCCESS',failed:'FAILED'}[s]||s||'PENDING');let statusLabel=smsCanonMsg(msg.status);let statusTone=statusLabel==='SUCCESS'?'emerald':(statusLabel==='FAILED'?'rose':(statusLabel==='PROCESSING'?'sky':'amber'));
     let stats=getSmsStats(msg.message_body);
     let docCode=formatSmsInvoiceCode(msg);
 
@@ -4031,7 +4111,7 @@ async function connectX(){
 
           <div style="background:var(--shp-inset);border:1px solid var(--shp-line);border-radius:10px;padding:10px;">
             <small style="font-family:var(--shp-mono);font-size:9px;text-transform:uppercase;color:var(--shp-muted);display:block;">Queue Status</small>
-            <div style="margin-top:4px;">${shpBadge(msg.status==='queued'?'Queued':msg.status,statusTone)}</div>
+            <div style="margin-top:4px;">${shpBadge(statusLabel,statusTone)}</div>
             <small style="color:var(--shp-muted);font-size:10px;display:block;margin-top:3px;">${msg.attempts||0} attempts</small>
           </div>
 
@@ -6512,7 +6592,7 @@ async function renderConnectXSmsSettings(el){
       `:''}
 
       <div class="shp-kv" style="margin-bottom:12px">
-        <div><span>Gateway</span><b>ConnectX Android</b></div>
+        <div><span>Gateway</span><b>Connect App</b></div>
         <div><span>Gateway Status</span><b>${d.enabled?'Enabled by Admin':'Disabled by Admin'}</b></div>
         <div><span>Sent today</span><b>${today.sent||0}</b></div>
         <div><span>Pending in queue</span><b>${today.pending||0}</b></div>

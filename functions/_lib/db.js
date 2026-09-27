@@ -479,7 +479,7 @@ async function d1Rpc(env, name, bodyRaw) {
 
   if (name === 'factory_reset_ems') {
     const children = ['api_keys', 'invoice_lines', 'staff_salary_invoices', 'attendance', 'device_logins', 'activity_logs', 'error_logs',
-      'due_recoveries', 'business_health_reports', 'zudo_messages', 'zudo_conversations', 'connectx_messages', 'connectx_sms_messages', 'helpdesk_messages',
+      'due_recoveries', 'business_health_reports', 'zudo_messages', 'zudo_conversations', 'connectx_messages', 'connectx_sms_messages', 'connect_connections', 'connect_requests', 'connect_identity', 'helpdesk_messages',
       'truebill_scans', 'vaultium_files', 'invoices', 'inventory_items', 'expenses', 'staff', 'suppliers', 'customers', 'stores',
       'addon_purchases', 'addon_coupons', 'addon_settings', 'addon_checkout_settings', 'blog_posts', 'contact_messages', 'public_pages',
       'current_entitlements', 'licenses', 'license_plans', 'platform_activity_logs', 'platform_settings',

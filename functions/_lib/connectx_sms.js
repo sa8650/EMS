@@ -1,11 +1,10 @@
 /* ConnectX SMS subsystem — per-shop settings, templates and the outgoing
    SMS job queue. Imported by functions/api/[[path]].js.
 
-   NOTE: The legacy ConnectX Android "device token" connection has been
-   removed. External apps (including the ConnectX Android app) now connect
-   exclusively through the EMS Public API (/api/v1/*) with an API key —
-   see functions/_lib/public_api.js and API.md. */
+   SMS leaves EMS only through the Connect App connection to ConnectX.
+   The Android app is never contacted from EMS. */
 import { db } from './db.js';
+import { nextSmsRequestId, insertSmsRow, dispatchSmsRecord } from './connect_app.js';
 
 const DEFAULT_TEMPLATES = {
   SALE: 'Hi {name}, thanks for your purchase at {shop}. Invoice {invoice}: total BDT {total}, paid BDT {paid}, due BDT {due}.',
@@ -57,27 +56,26 @@ export async function enqueueSmsJob(env, {
     if (dup) return { skipped: 'duplicate', id: dup.id };
   }
   try {
-    let [record] = await db(env, 'connectx_sms_messages', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        store_id: storeId,
-        user_id: userId || null,
-        recipient_type: recipientType || 'customer',
-        recipient_id: recipientId || null,
-        recipient_name: name || null,
-        to_phone: to,
-        message_type: messageType || eventType || 'SMS',
-        event_type: eventType || messageType || null,
-        invoice_id: invoiceId || null,
-        message_body: messageBody,
-        status: 'queued',
-        attempts: 0,
-        idempotency_key: idempotencyKey || null,
-        created_at: new Date().toISOString()
-      })
+    const requestId = await nextSmsRequestId(env);
+    const record = await insertSmsRow(env, {
+      store_id: storeId,
+      user_id: userId || null,
+      recipient_type: recipientType || 'customer',
+      recipient_id: recipientId || null,
+      recipient_name: name || null,
+      to_phone: to,
+      message_type: messageType || eventType || 'SMS',
+      event_type: eventType || messageType || null,
+      invoice_id: invoiceId || null,
+      message_body: messageBody,
+      status: 'PENDING',
+      request_id: requestId,
+      attempts: 0,
+      idempotency_key: idempotencyKey || null,
+      created_at: new Date().toISOString()
     });
-    return { ok: true, id: record?.id, status: 'queued' };
+    const dispatched = await dispatchSmsRecord(env, record).catch(() => null);
+    return { ok: true, id: record?.id, request_id: requestId, status: dispatched?.status || 'PENDING' };
   } catch (e) {
     if (/duplicate|unique|idempotency/i.test(String(e.message || ''))) return { skipped: 'duplicate' };
     console.error('enqueueSmsJob', e);
@@ -144,10 +142,9 @@ export async function connectxSmsRoutes(ctx) {
   const { env, request, path, method, s, json, fail, body, audit, allowed } = ctx;
   if (!s) return null;
 
-  /* Legacy ConnectX Android app endpoints — retired. The app now connects
-     through the EMS Public API (/api/v1/*) with an API key. */
+  /* Legacy device-token routes. The phone connects to ConnectX, not to EMS. */
   if (path.startsWith('connectx/gateway/') || path.startsWith('connectx/devices')) {
-    return fail('This ConnectX Android endpoint has been retired. Connect through the EMS Public API (/api/v1) with an API key — see API.md.', 410);
+    return fail('This endpoint has been removed. SMS is delivered through Connect App. The Android app talks only to ConnectX.', 410);
   }
 
   /* ---- Shop session: SMS settings ---- */
@@ -160,9 +157,9 @@ export async function connectxSmsRoutes(ctx) {
       return json({
         ...settings,
         today: {
-          sent: jobs.filter(j => j.status === 'sent').length,
-          failed: jobs.filter(j => j.status === 'failed').length,
-          pending: jobs.filter(j => j.status === 'queued' || j.status === 'sending').length
+          sent: jobs.filter(j => j.status === 'sent' || j.status === 'SUCCESS').length,
+          failed: jobs.filter(j => j.status === 'failed' || j.status === 'FAILED').length,
+          pending: jobs.filter(j => ['queued','sending','PENDING','PROCESSING'].includes(j.status)).length
         }
       });
     }

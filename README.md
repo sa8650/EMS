@@ -16,8 +16,8 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 > Console guide (pages, workflow and a full explanation of how its Agent Bento
 > Grid CSS/theme system works) · [`admin.md`](admin.md) — the Administrator
 > Panel guide and its Agent Bento Grid CSS/theme documentation ·
-> [`API.md`](API.md) — EMS Public API: API keys, scopes, and endpoints for
-> external apps (incl. the ConnectX Android gateway) ·
+> [`CONNECT_APP.md`](CONNECT_APP.md) — Connect App: connect EMS to ConnectX without API keys ·
+> [`API.md`](API.md) — the old public API is removed ·
 > [`ADDONS.md`](ADDONS.md) — Premium Add-Ons user guide ·
 > [`APP_STORE_RELEASE.md`](APP_STORE_RELEASE.md) — public App Store, release upload,
 > update checks, and deployment checklist

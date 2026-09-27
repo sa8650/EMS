@@ -1,3 +1,7 @@
+> **Current method:** Connect App. EMS does not store a ConnectX API key and does not
+> talk to the Android app. Connect EMS and ConnectX from Owner Console → Connect App.
+> See [CONNECT_APP.md](CONNECT_APP.md). The device-token steps below are retired.
+
 # ConnectX SMS subsystem (EMS)
 
 **ConnectX: Central Communication Gateway powered by Dexter Studio** dispatches
