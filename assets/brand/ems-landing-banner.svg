@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="620" viewBox="0 0 860 620" role="img" aria-labelledby="title desc">
+<title id="title">EMS retail operations dashboard</title>
+<desc id="desc">A bento dashboard preview showing sales, inventory, a weekly chart, and four connected shop consoles.</desc>
+<circle cx="686" cy="121" r="148" fill="#DDF4EF"/>
+<circle cx="160" cy="499" r="82" fill="#EAF6F3"/>
+<rect x="120" y="100" width="660" height="444" rx="28" fill="#D9E9E5"/>
+<rect x="100" y="76" width="660" height="444" rx="28" fill="#FFFFFF" stroke="#D9E6E2" stroke-width="2"/>
+<rect x="128" y="104" width="38" height="38" rx="12" fill="#0F766E"/>
+<g transform="translate(132 108) scale(.1171875)"><g fill="#FFFFFF" fill-rule="nonzero"><path d="M52 28H100A16 16 0 0 1 116 44V68H68V100A16 16 0 0 1 52 116H28V52A24 24 0 0 1 52 28Z"/><path d="M204 28H156A16 16 0 0 0 140 44V68H188V100A16 16 0 0 0 204 116H228V52A24 24 0 0 0 204 28Z"/><path d="M52 228H100A16 16 0 0 0 116 212V188H68V156A16 16 0 0 0 52 140H28V204A24 24 0 0 0 52 228Z"/><path d="M204 228H156A16 16 0 0 1 140 212V188H188V156A16 16 0 0 1 204 140H228V204A24 24 0 0 1 204 228Z"/><path d="M52 78L78 52L122 104L104 122Z"/><path d="M204 78L178 52L134 104L152 122Z"/><path d="M52 178L78 204L122 152L104 134Z"/><path d="M204 178L178 204L134 152L152 134Z"/></g><rect x="109" y="109" width="38" height="38" rx="6.84" transform="rotate(45 128 128)" fill="#A7F3D0"/></g>
+<text x="180" y="123" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="800" letter-spacing="-0.5">EMS</text>
+<text x="180" y="140" fill="#70827E" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" letter-spacing="1.3">RETAIL CONTROL</text>
+<circle cx="660" cy="122" r="5" fill="#13A981"/>
+<text x="674" y="126" fill="#55706A" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="700" letter-spacing="0.3">ALL SHOPS ONLINE</text>
+<path d="M128 162H732" stroke="#E9EFED" stroke-width="2"/>
+<text x="132" y="194" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="19" font-weight="750" letter-spacing="-0.4">Today at a glance</text>
+<text x="132" y="214" fill="#7A8A86" font-family="Arial, Helvetica, sans-serif" font-size="11">Your shop operations, brought together.</text>
+<!-- KPI Bento cards -->
+<rect x="128" y="236" width="190" height="102" rx="17" fill="#F1F8F6" stroke="#E1EEEA"/>
+<text x="148" y="260" fill="#71837F" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="650">Sales today</text>
+<text x="148" y="293" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" letter-spacing="-0.8">BDT 24,860</text>
+<rect x="148" y="309" width="52" height="16" rx="8" fill="#D9F3E9"/>
+<text x="158" y="321" fill="#14785F" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="750">+12.8%</text>
+<text x="205" y="321" fill="#82928E" font-family="Arial, Helvetica, sans-serif" font-size="9">vs yesterday</text>
+<rect x="330" y="236" width="190" height="102" rx="17" fill="#FFFFFF" stroke="#E1EEEA"/>
+<text x="350" y="260" fill="#71837F" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="650">Items in stock</text>
+<text x="350" y="293" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" letter-spacing="-0.8">1,284</text>
+<text x="350" y="319" fill="#82928E" font-family="Arial, Helvetica, sans-serif" font-size="10">Across four shop types</text>
+<rect x="532" y="236" width="200" height="102" rx="17" fill="#F7F9F7" stroke="#E1EEEA"/>
+<text x="552" y="260" fill="#71837F" font-family="Arial, Helvetica, sans-serif" font-size="11" font-weight="650">Low stock</text>
+<text x="552" y="293" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="25" font-weight="800" letter-spacing="-0.8">18 items</text>
+<rect x="552" y="307" width="9" height="9" rx="4.5" fill="#E6A746"/>
+<text x="568" y="316" fill="#82928E" font-family="Arial, Helvetica, sans-serif" font-size="10">Review reorder list</text>
+<!-- Weekly chart -->
+<rect x="128" y="356" width="376" height="132" rx="17" fill="#FFFFFF" stroke="#E1EEEA"/>
+<text x="148" y="381" fill="#132A27" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="750">Sales performance</text>
+<text x="148" y="398" fill="#879590" font-family="Arial, Helvetica, sans-serif" font-size="9">This week</text>
+<path d="M148 455H482" stroke="#EDF2F0"/>
+<path d="M148 431H482" stroke="#F0F4F2"/>
+<path d="M148 407H482" stroke="#F0F4F2"/>
+<rect x="175" y="437" width="20" height="18" rx="5" fill="#A9DCD3"/>
+<rect x="218" y="423" width="20" height="32" rx="5" fill="#8BCFC3"/>
+<rect x="261" y="430" width="20" height="25" rx="5" fill="#9ED8CE"/>
+<rect x="304" y="405" width="20" height="50" rx="5" fill="#0D9488"/>
+<rect x="347" y="416" width="20" height="39" rx="5" fill="#72C4B7"/>
+<rect x="390" y="396" width="20" height="59" rx="5" fill="#0F766E"/>
+<rect x="433" y="410" width="20" height="45" rx="5" fill="#63B9AB"/>
+<text x="173" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">M</text>
+<text x="216" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">T</text>
+<text x="259" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">W</text>
+<text x="302" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">T</text>
+<text x="345" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">F</text>
+<text x="388" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">S</text>
+<text x="431" y="475" fill="#94A19D" font-family="Arial, Helvetica, sans-serif" font-size="8">S</text>
+<!-- Connected console card -->
+<rect x="516" y="356" width="216" height="132" rx="17" fill="#132A27"/>
+<text x="536" y="381" fill="#B7D3CC" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="750" letter-spacing="1">SHARED CORE</text>
+<text x="536" y="404" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="750">Every shop, in sync.</text>
+<circle cx="544" cy="433" r="5" fill="#2DD4BF"/>
+<text x="558" y="437" fill="#D6E5E1" font-family="Arial, Helvetica, sans-serif" font-size="10">Electronics</text>
+<circle cx="650" cy="433" r="5" fill="#5ED1C0"/>
+<text x="664" y="437" fill="#D6E5E1" font-family="Arial, Helvetica, sans-serif" font-size="10">Clothing</text>
+<circle cx="544" cy="462" r="5" fill="#74D9C8"/>
+<text x="558" y="466" fill="#D6E5E1" font-family="Arial, Helvetica, sans-serif" font-size="10">Pharmacy</text>
+<circle cx="650" cy="462" r="5" fill="#9CE7D7"/>
+<text x="664" y="466" fill="#D6E5E1" font-family="Arial, Helvetica, sans-serif" font-size="10">Supershop</text>
+</svg>

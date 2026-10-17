@@ -1,0 +1,40 @@
+{
+  "brand": "EMS",
+  "tagline": "Every shop, in sync.",
+  "brief": "EMS brings electronics, clothing, pharmacy and supershop workflows into one practical, dependable retail platform. The approved provider line is Powered by Dexter Studio and stays separate from the logo lockup.",
+  "adjectives": ["clear", "capable", "practical", "connected"],
+  "criteria": "Selected direction B — Shared Core. The mark should remain legible at small icon sizes, work in one colour and reverse cleanly, and avoid literal storefront imagery.",
+  "industry": "ecommerce-retail",
+  "brand_color": "#0F766E",
+  "tile_color": "#0F766E",
+  "greyscale": false,
+  "final": true,
+  "designer": "EMS identity refresh",
+  "round": 2,
+  "concepts": [
+    {
+      "name": "Shared Core",
+      "symbol": "../assets/brand/ems-mark.svg",
+      "lockup": "../assets/brand/ems-logo-horizontal.svg",
+      "stacked": "../assets/brand/ems-logo-stacked.svg",
+      "avatar": "../assets/brand/variants/ems-mark-app-icon.svg",
+      "symbol_on_tile": "../assets/brand/variants/ems-mark-app-icon.svg",
+      "stacked_on_tile": "../assets/brand/variants/ems-mark-app-icon.svg",
+      "symbol_on_dark": "../assets/brand/variants/ems-mark-white.svg",
+      "lockup_on_dark": "../assets/brand/variants/ems-logo-horizontal-white.svg",
+      "stacked_on_dark": "../assets/brand/variants/ems-logo-stacked-white.svg",
+      "idea": "Four modular corner forms link diagonally into one shared core, joining distinct shop workflows under one platform.",
+      "rationale": [
+        "The four outer modules echo EMS's different shop types; the central hub signals a shared operational core.",
+        "Rounded outer corners and diagonal links soften the first sketch's focus-frame reading.",
+        "A two-colour teal palette stays practical in print, while one-colour and reverse versions preserve the form."
+      ]
+    }
+  ],
+  "recommendation": "The Shared Core mark is the approved identity. Use the full-colour horizontal lockup on light surfaces, the reverse lockup on dark surfaces, and the small-size cut for favicons and app icons.",
+  "next_steps": [
+    "Apply the included Postgres or D1 migration to update legacy stored brand defaults.",
+    "Run the final browser and device verification before deployment.",
+    "No files have been pushed to GitHub."
+  ]
+}

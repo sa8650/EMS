@@ -1,0 +1,9 @@
+# Cloudflare D1 schema files
+
+`001_ems_schema.sql` is the one-file D1 baseline for a **new database**. It mirrors `schema.sql` and includes the complete EMS, Clothing, and Pharmacy schema. Legacy Pharmacy batch/return tables remain in the baseline for historical compatibility; the current Pharmacy workflows use aggregate stock and weighted-average base cost.
+
+The `migration_*.sql` files are one-time upgrades for existing D1 databases. Do not replay them on a database created from the full baseline. `migration_pharmacy_console.sql` is additive and expects the previous Clothing `shop_type` / `invoice_lines.cost_price` fields plus the item-category and line-tax migrations. It preserves the old `shop_type` CHECK by adding a separate, constrained `business_type` field with exactly Electronics, Clothing, and Pharmacy. Apply `migration_pharmacy_sealed_restock.sql` only if it is still outstanding, then apply `migration_pharmacy_aggregate_stock.sql` once.
+
+The aggregate-stock migration adds/backfills `average_cost_base` and disables new batch/expiry tracking without dropping legacy rows or tables. New purchase receipts and POS sales change the aggregate `inventory_items.total_stock`; COGS uses weighted-average base cost. Customer returns are recorded in quarantine only and do not restock aggregate inventory or change invoice settlement. New purchases continue to support partial payment, discount, tax, and due.
+
+For an **existing** D1 Pharmacy database, apply `migration_pharmacy_catalog_details.sql` once after `migration_pharmacy_aggregate_stock.sql` before deploying the updated Pharmacy code. It adds the pack-size and wholesale-price fields and a per-store manufacturer directory, backfilled from existing medicine manufacturer/brand names. Rack / Shelf labels reuse the existing `pharmacy_shelves` table; this does not reinstate batch or shelf-based stock accounting.

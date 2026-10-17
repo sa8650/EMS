@@ -1,0 +1,5 @@
+-- Run after 009 for existing deployments. Prevents previewing an invoice number from consuming it.
+select setval('public.sale_invoice_code_seq',greatest(1,coalesce((select max(nullif(regexp_replace(invoice_number,'[^0-9]','','g'),'')::bigint) from public.invoices where kind='sale'),0)),exists(select 1 from public.invoices where kind='sale'));
+select setval('public.purchase_invoice_code_seq',greatest(1,coalesce((select max(nullif(regexp_replace(invoice_number,'[^0-9]','','g'),'')::bigint) from public.invoices where kind='purchase'),0)),exists(select 1 from public.invoices where kind='purchase'));
+create or replace function public.peek_ems_invoice_number(p_kind text) returns text language plpgsql security definer set search_path=public as $$ declare n bigint; begin select coalesce(max(nullif(regexp_replace(invoice_number,'[^0-9]','','g'),'')::bigint),0)+1 into n from public.invoices where kind=p_kind; if p_kind='sale' then return 'SAL-'||lpad(n::text,6,'0'); elsif p_kind='purchase' then return 'PUR-'||lpad(n::text,6,'0'); else raise exception 'Unknown invoice type'; end if; end $$;
+revoke all on function public.peek_ems_invoice_number(text) from public;

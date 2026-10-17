@@ -1,0 +1,7 @@
+# Legacy Supabase upgrade migrations
+
+These incremental migrations are retained to preserve upgrade history for existing Supabase deployments. They are not the new-database baseline. New databases should use `supabase/baseline/001_ems_complete_schema.sql` instead of replaying this migration chain.
+
+For an existing database, apply only migration(s) that have not already been applied; do not run a consolidated baseline on top of live data. The Pharmacy upgrade follows CShop: apply `047_clothing_business_console.sql`, `048_pharmacy_console.sql`, `049_pharmacy_return_intake.sql`, `050_pharmacy_sealed_restock.sql`, and `051_pharmacy_aggregate_stock.sql` once and in order. Migration `051` is additive/backward-compatible: it keeps batch and return history, adds/backfills weighted-average base cost, and switches future Pharmacy receipts/sales to aggregate stock. Customer returns stay quarantined with no stock restock or settlement change.
+
+For an **existing** Supabase Pharmacy database, apply `057_pharmacy_catalog_details.sql` after `056_pharmacy_product_delete.sql` (and the earlier Pharmacy migrations) before deploying the updated code. It adds pack size and wholesale price, backfills the manufacturer directory from existing products, and allows clearing an optional Rack / Shelf label. Aggregate stock accounting remains unchanged. Fresh databases use the updated complete baseline instead.
