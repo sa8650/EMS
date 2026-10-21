@@ -1,0 +1,25 @@
+# Cloudflare D1 schema files
+
+`001_ems_schema.sql` is the one-file D1 baseline for a **new database**. It mirrors `schema.sql` and includes the complete EMS, Clothing, and Pharmacy schema. Legacy Pharmacy batch/return tables remain in the baseline for historical compatibility; the current Pharmacy workflows use aggregate stock and weighted-average base cost.
+
+The `migration_*.sql` files are one-time upgrades for existing D1 databases. Do not replay them on a database created from the full baseline. `migration_pharmacy_console.sql` is additive and expects the previous Clothing `shop_type` / `invoice_lines.cost_price` fields plus the item-category and line-tax migrations. It preserves the old `shop_type` CHECK by adding a separate, constrained `business_type` field with exactly Electronics, Clothing, and Pharmacy. Apply `migration_pharmacy_sealed_restock.sql` only if it is still outstanding, then apply `migration_pharmacy_aggregate_stock.sql` once.
+
+The aggregate-stock migration adds/backfills `average_cost_base` and disables new batch/expiry tracking without dropping legacy rows or tables. New purchase receipts and POS sales change the aggregate `inventory_items.total_stock`; COGS uses weighted-average base cost. Customer returns are recorded in quarantine only and do not restock aggregate inventory or change invoice settlement. New purchases continue to support partial payment, discount, tax, and due.
+
+For an **existing** D1 Pharmacy database, apply `migration_pharmacy_catalog_details.sql` once after `migration_pharmacy_aggregate_stock.sql` before deploying the updated Pharmacy code. It adds the pack-size and wholesale-price fields and a per-store manufacturer directory, backfilled from existing medicine manufacturer/brand names. Rack / Shelf labels reuse the existing `pharmacy_shelves` table; this does not reinstate batch or shelf-based stock accounting.
+
+For an **existing** D1 Pharmacy database, apply `migration_pharmacy_owner_catalog.sql` once **after** `migration_pharmacy_catalog_details.sql`, before deploying the updated application. This adds global master templates and manufacturers without changing existing shops. The Owner's bulk delete affects only master templates. The updated D1 driver serializes template units and clears owner catalog tables on factory reset. Fresh D1 databases already include these tables in both one-file baseline schemas; do not replay the upgrade there.
+
+For the **Supplier Return** page on an existing Pharmacy D1 database, apply `migration_pharmacy_supplier_return.sql` **after** `migration_pharmacy_owner_catalog.sql`, then deploy the updated application. It adds an invoice-line return ledger and an atomic stock/due reversal; historical batch-linked supplier-return records are left untouched. The fresh one-file schemas already contain these tables. Do not apply this migration again on a fresh database.
+
+For supplier returns of quarantined customer-returned medicines, apply `migration_pharmacy_quarantine_supplier_return.sql` **after** `migration_pharmacy_supplier_return.sql`. The return links to a verified quarantine record for the same medicine and purchase line, tracks the remaining quarantine quantity, and never deducts saleable inventory twice. Existing return and purchase workflows are preserved.
+
+The Pharmacy Reports tab reads current aggregate inventory and historic Pharmacy invoice, return, movement, expense and due-recovery records; it does not create report transactions. Legacy batch expiry is shown separately because the aggregate-stock Pharmacy workflow no longer tracks expiry for new stock.
+
+For Mobile Scanner on an **existing** Pharmacy D1 installation, apply `migration_mobile_scanner.sql` once after the Pharmacy migrations, before deploying the scanner code. Fresh `schema.sql` and `001_ems_schema.sql` already contain its four temporary tables; do not replay the migration on them. D1 serializes enqueue and the save barrier with conditional SQL statements. No official invoice, stock or report tables change.
+
+For Scanner support on both Pharmacy and Electronics sales and purchases, apply `migration_mobile_scanner_purchase_login.sql` after `migration_mobile_scanner.sql`, then `migration_mobile_scanner_electronics.sql` before deploying the matching code. The latter adds separate Electronics events, atomic invoice retry keys, a negative-stock guard, and removes the retired `scanner_pairs` table. Fresh `schema.sql` / `001_ems_schema.sql` already include the final state; do not replay upgrades there.
+
+For per-shop ConnectX email settings, apply `migration_connectx_shop_email_settings.sql` to an existing D1 database after its ConnectX gateway migrations, before deploying the updated code. Fresh complete D1 schemas already include it and the existing SMS preference table.
+
+For an **existing** D1 App Store, apply `migration_app_store_presentation.sql` once after `migration_app_store.sql` (and any storage-key upgrade already due). It adds presentation metadata only; signed APK availability and download authorization are unchanged. Fresh one-file baselines already contain these columns; do not replay on fresh databases.

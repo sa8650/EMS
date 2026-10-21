@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">EMS concept B — Shared Core</title>
+  <desc id="desc">Four modular corners meet around one shared central core.</desc>
+  <g fill="#111111">
+    <path d="M48 48H104V78H78V104H48Z"/>
+    <path d="M152 48H208V104H178V78H152Z"/>
+    <path d="M48 152H78V178H104V208H48Z"/>
+    <path d="M178 152H208V208H152V178H178Z"/>
+    <rect x="116" y="116" width="24" height="24" rx="4"/>
+  </g>
+</svg>

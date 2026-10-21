@@ -1,0 +1,23 @@
+{
+  "id": "/?source=pwa",
+  "name": "EMS — Multi-shop management",
+  "short_name": "EMS",
+  "description": "Multi-shop retail management for inventory, sales, purchases, expenses and staff. Powered by Dexter Studio.",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "lang": "en",
+  "dir": "ltr",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "categories": ["business", "productivity", "finance"],
+  "theme_color": "#0F766E",
+  "background_color": "#F4F8F7",
+  "icons": [
+    { "src": "/assets/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/assets/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/assets/android-chrome-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/android-chrome-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/assets/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

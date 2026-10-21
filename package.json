@@ -1,0 +1,16 @@
+{
+  "name": "ems-v1",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npx wrangler pages dev . --compatibility-date=2026-05-03",
+    "deploy": "wrangler pages deploy . --project-name=ems-v1",
+    "test": "node --test test/*.test.js"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^12.11.1",
+    "jsdom": "^24.1.3",
+    "wrangler": "^4.86.0"
+  }
+}

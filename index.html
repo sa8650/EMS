@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="EMS brings inventory, sales, purchases, expenses, and shop operations together. Powered by Dexter Studio.">
+<meta name="theme-color" content="#0F766E">
+<title>EMS | Dexter Studio</title>
+
+<!-- Installable PWA (Android & iOS) -->
+<link rel="manifest" href="/assets/site.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="EMS">
+
+<link rel="icon" href="/assets/favicon.ico" sizes="32x32">
+<link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16.png">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<!-- iOS static launch screens -->
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1242x2688.png" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1125x2436.png" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1668x2388.png" media="(device-width: 834px) and (device-height: 1194px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-1620x2160.png" media="(device-width: 810px) and (device-height: 1080px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="apple-touch-startup-image" href="/assets/apple-splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)">
+<link rel="stylesheet" href="assets/css/app.css">
+<link rel="stylesheet" href="assets/css/owner.css">
+<link rel="stylesheet" href="assets/css/admin.css">
+<link rel="stylesheet" href="assets/css/app_store_view.css">
+<link rel="stylesheet" href="assets/css/shop.css">
+<link rel="stylesheet" href="assets/css/cshop.css">
+<link rel="stylesheet" href="assets/css/pshop.css">
+<link rel="stylesheet" href="assets/css/sshop.css">
+
+</head>
+<body>
+<div id="app"></div>
+<div id="toast" class="haloHost" aria-live="polite"></div>
+<script>
+(function(){
+  const root=document.getElementById('app');
+  function showFailure(message){
+    if(!root||(root.childNodes.length&&!root.querySelector('.ems-boot-surface')))return;
+    console.error('EMS startup failure:',message);
+    root.innerHTML=`<main role="alert" style="min-height:60vh;display:grid;place-items:center;padding:24px;background:#f3f7f6;color:#172538;font:15px/1.5 system-ui,sans-serif"><section style="width:min(560px,100%);padding:28px;border:1px solid #dce5eb;border-radius:18px;background:#fff;box-shadow:0 12px 36px #173d4b12;text-align:center"><h1 style="margin:0 0 8px;font-size:1.25rem">EMS could not finish starting</h1><pre id="emsBootReason" style="margin:12px 0 0;padding:12px;border-radius:9px;background:#f3f7f6;color:#425466;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.45 ui-monospace,monospace"></pre><button id="emsBootReload" style="margin-top:18px;padding:9px 14px;border:0;border-radius:9px;background:#087f72;color:white;font-weight:700;cursor:pointer">Reload app</button></section></main>`;
+    document.getElementById('emsBootReason').textContent=String(message||'Unknown startup error').slice(0,3000);
+    document.getElementById('emsBootReload')?.addEventListener('click',()=>location.reload());
+  }
+  addEventListener('error',event=>{
+    if(event.target?.tagName==='SCRIPT')showFailure(`Script load failed: ${event.target.src||'inline app script'}`);
+    else if(event.error||event.message)showFailure(event.error?.stack||`${event.message||'Runtime error'}\n${event.filename||''}:${event.lineno||0}:${event.colno||0}`);
+  },true);
+  addEventListener('unhandledrejection',event=>{const reason=event.reason;showFailure(reason?.stack||reason?.message||String(reason||'Unhandled startup rejection'))});
+  setTimeout(()=>showFailure('Startup is taking longer than expected. Check your connection and reload.'),15000);
+})();
+</script>
+<script type="module" src="assets/js/app.js"></script>
+</body>
+</html>
