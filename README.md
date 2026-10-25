@@ -250,6 +250,16 @@ document keeps the shared print styles so paper output is unchanged.
 
 Passwords and sessions are handled only by `/functions/api/[[path]].js`. The browser never receives the Supabase service role key. Do **not** put any secret in `assets/js/config.js` or a Cloudflare `PUBLIC_*` variable. Custom auth tables are used; Supabase Auth is not required.
 
+### Persora Connections
+
+EMS administrators can connect their account from **Persora → Connections** and browse their Vaultium files read-only there. Persora's backend calls the dedicated `/api/persora/*` endpoints. Every request must:
+
+- be enabled in the Owner Console (**Services → Persora Connections**);
+- be HMAC-signed with a shared secret of at least 32 characters, within a ±300-second window;
+- carry a per-administrator grant, which Persora can only obtain with that administrator's own EMS credentials.
+
+Access also requires that the administrator purchased Vaultium at least once. The secret is set in the console or in the encrypted Pages secret `PERSORA_INTEGRATION_SECRET`, and is never exposed to the browser. Apply migration `067_persora_integration.sql`, or `supabase/d1/migration_persora_integration.sql` on D1. See [`PERSORA_INTEGRATION.md`](PERSORA_INTEGRATION.md).
+
 ## Local start
 
 1. Install Node 20+ and `npm install`.

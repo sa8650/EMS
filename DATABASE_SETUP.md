@@ -67,7 +67,9 @@ Do **not** set `DB_DRIVER` (leave it blank). Supabase is selected automatically
 when `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are present.
 
 Optional secrets for the premium features: `BREVO_API_KEY` (ConnectX),
-`GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY` (alternative Zudo models).
+`GEMINI_API_KEY`, `GROQ_API_KEY`, `CEREBRAS_API_KEY` (alternative Zudo models),
+`PERSORA_INTEGRATION_SECRET` (optional Persora Connections shared secret; it can
+instead be set in the Owner Console).
 
 ---
 
@@ -136,6 +138,12 @@ replay them on a database created from the baseline.
 > recoveries keep working even before the migration is applied.
 
 > **Historical migration 045:** this introduced the now-retired EMS API-key/Control relay era and removed the old `connectx_devices` table. Do not run it for a new SMS integration. For current direct EMS ↔ Android delivery, back up the existing database and apply migration 066 once: PostgreSQL [`supabase/migrations/066_connectx_direct_sms.sql`](supabase/migrations/066_connectx_direct_sms.sql) or D1 [`supabase/d1/migration_connectx_direct_sms.sql`](supabase/d1/migration_connectx_direct_sms.sql). Migration 066 recreates the device table before adding direct-auth fields. See [`CONNECT_APP.md`](CONNECT_APP.md) and [`CONNECTX_SMS.md`](CONNECTX_SMS.md); the old `/api/v1` surface remains retired (`410 Gone`).
+
+> **Persora Connections (migration 067):** to enable the read-only Persora ↔ Vaultium integration on an existing database, apply it once:
+> - Supabase: [`supabase/migrations/067_persora_integration.sql`](supabase/migrations/067_persora_integration.sql), which is idempotent;
+> - D1: `npx wrangler d1 execute ems-d1 --remote --file=supabase/d1/migration_persora_integration.sql`.
+>
+> It creates the `persora_grants` table. New databases built from the baselines already include it. Optional secret: `PERSORA_INTEGRATION_SECRET` (at least 32 characters, server-only). See [`PERSORA_INTEGRATION.md`](PERSORA_INTEGRATION.md).
 
 ### 2.4 Configure the Pages variables
 

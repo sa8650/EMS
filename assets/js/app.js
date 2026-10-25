@@ -530,7 +530,7 @@ const OB_NAV=[
   {h:'Platform',items:[['overview','Overview','grid'],['app-store','App Store','package']]},
   {h:'Business',items:[['pharmacy-settings','Pharmacy Settings','pill'],['licenses','License control','shield'],['plans','License plans','list'],['administrators','Administrators','users'],['shops','Shops','store']]},
   {h:'Website',items:[['branding','Website branding','palette'],['website-pages','Website pages','file'],['blogs','Blogs','rss'],['contact-messages','Contact messages','inbox']]},
-  {h:'Services',items:[['connectx','ConnectX Email','mail'],['sms-delivery','SMS delivery','smartphone'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
+  {h:'Services',items:[['connectx','ConnectX Email','mail'],['sms-delivery','SMS delivery','smartphone'],['zudo','Zudo AI','sparkles'],['truebill','TrueBill','qr'],['vaultium','Vaultium','package'],['persora','Persora Connections','link'],['helpdesk','HelpDesk','help'],['addons','Premium Add-Ons','gem']]},
   {h:'System',items:[['factory-reset','Factory reset','refresh']]}
 ];
 const OB_LABEL=Object.fromEntries(OB_NAV.flatMap(g=>g.items.map(([p,l])=>[p,l])));
@@ -624,7 +624,7 @@ const OB_SKEL={
   branding:()=>SKEL.panel(SKEL.form(6)),'website-pages':()=>SKEL.toolbar()+SKEL.table(4,4),
   blogs:()=>SKEL.toolbar()+SKEL.table(4,5),'contact-messages':()=>SKEL.toolbar()+SKEL.table(5,5),
   connectx:()=>SKEL.panel(SKEL.table(4,5)),'sms-delivery':()=>SKEL.kpis(3)+SKEL.panel(SKEL.table(4,5))+SKEL.panel(SKEL.table(4,5)),zudo:()=>SKEL.panel(SKEL.table(4,5)),
-  truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),
+  truebill:()=>SKEL.panel(SKEL.table(4,5)),vaultium:()=>SKEL.panel(SKEL.table(4,5)),persora:()=>SKEL.kpis(4)+SKEL.panel(SKEL.form(3)),
   helpdesk:()=>SKEL.grid('300px minmax(0,1fr)',SKEL.list(5),SKEL.panel(SKEL.msgs(4))),
   addons:()=>SKEL.toolbar()+SKEL.table(5,5),'factory-reset':()=>SKEL.panel(SKEL.form(4)),
 };
@@ -724,6 +724,7 @@ async function ownerPage(p){
   try{
     if(p==='app-store')return await ownerAppStore();
     if(p==='sms-delivery')return await ownerSmsDelivery();
+    if(p==='persora')return await ownerPersora();
     if(p==='pharmacy-settings')return await ownerPharmacySettings({api,toast,esc,money,lucide,ownerId:state.user?.id,root:$('#page')});
     let d=await api('platform/overview');
     if(p==='overview')return ownerOverview(d);
@@ -1565,6 +1566,46 @@ async function ownerConnectX(){
   async function loadLogs(){try{let logs=await api('platform/connectx/logs');$('#cxOwnerLogs').innerHTML=logs.length?`<div class="ob-tw"><table><thead><tr><th>Time</th><th>Recipient</th><th>Subject</th><th>Status</th><th>Provider result</th></tr></thead><tbody>${logs.map(l=>`<tr><td class="ob-num">${new Date(l.created_at).toLocaleString()}</td><td>${esc(l.to_emails.join(', '))}</td><td>${esc(l.subject)}</td><td>${obBadge(esc(l.status)+(l.shop_deleted_at?' · hidden':''),l.status==='sent'?'emerald':'rose')}</td><td class="ob-wrap">${esc(l.error_message||l.provider_message_id||'Accepted')}</td></tr>`).join('')}</tbody></table></div>`:obEmpty('No ConnectX send attempts yet.')}catch(e){$('#cxOwnerLogs').textContent=e.message}}loadLogs();
   $('#cxConfig').onsubmit=async e=>{e.preventDefault();let b=Object.fromEntries(new FormData(e.target));b.enabled=b.enabled==='true';b.global_daily_limit=+b.global_daily_limit;try{await api('platform/connectx',{method:'PATCH',body:JSON.stringify(b)});toast('ConnectX configuration saved.');ownerConnectX()}catch(err){toast(err.message)}};
   $('#cxTest').onclick=async()=>{let b=$('#cxTest');b.disabled=true;$('#cxTestResult').textContent='Testing Brevo…';try{let r=await api('platform/connectx/test',{method:'POST',body:JSON.stringify({to:$('#cxTestTo').value})});$('#cxTestResult').innerHTML='<p class="ob-test-ok">✓ Brevo accepted the test email. Message ID: '+esc(r.messageId||'received')+'</p>'}catch(e){$('#cxTestResult').innerHTML='<p class="ob-test-err">✕ '+esc(e.message)+'</p>'}finally{b.disabled=false}}
+}
+/* ═══════════ OWNER · Persora Connections (server-to-server Vaultium read access) ═══════════
+   The shared secret is write-only from this page: the API returns only a masked
+   hint (last 4 characters) and never the stored value. */
+async function ownerPersora(){
+  let x=await api('platform/persora-integration');
+  const when=v=>v?new Date(v).toLocaleString():'Never';
+  const envManaged=x.secretSource==='environment';
+  const state=x.ready?['Ready','emerald']:!x.secretConfigured?['Needs secret','amber']:['Disabled','zinc'];
+  $('#page').innerHTML=obHead('persora','')+`
+  <div class="ob-grid ob-kpis">
+    <section class="ob-card ob-kpi"><div class="ob-kpi-top">${obChip('link',x.ready?'emerald':'zinc')}<span class="ob-kicker">Integration</span></div><strong class="ob-kpi-val" style="font-size:15px">${obBadge(state[0],state[1])}</strong><span class="ob-kpi-foot">${x.enabled?'enabled in EMS':'disabled in EMS'}</span></section>
+    <section class="ob-card ob-kpi"><div class="ob-kpi-top">${obChip('key','amber')}<span class="ob-kicker">Shared secret</span></div><strong class="ob-kpi-val" style="font-size:15px;font-family:var(--ob-mono)">${x.secretConfigured?esc(x.secretHint||'configured'):'Not set'}</strong><span class="ob-kpi-foot">${!x.secretReadable?'stored secret unreadable — replace it':envManaged?'from environment variable':x.secretConfigured?'encrypted at rest':'required before enabling'}</span></section>
+    <section class="ob-card ob-kpi"><div class="ob-kpi-top">${obChip('users','sky')}<span class="ob-kicker">Active connections</span></div><strong class="ob-kpi-val">${x.activeGrants||0}</strong><span class="ob-kpi-foot">last used ${esc(when(x.lastUsedAt))}</span></section>
+    <section class="ob-card ob-kpi"><div class="ob-kpi-top">${obChip('shield','violet')}<span class="ob-kicker">Last verified request</span></div><strong class="ob-kpi-val" style="font-size:13px">${esc(when(x.lastVerifiedAt))}</strong><span class="ob-kpi-foot">signed by Persora</span></section>
+  </div>
+  <section class="ob-panel">
+    <div class="ob-panel-head"><div><h3>Integration settings</h3><p class="ob-desc">Persora can read an EMS administrator's Vaultium files only after that administrator signs in with their own EMS credentials inside Persora. Access is read-only and requires Vaultium to have been purchased at least once.</p></div></div>
+    <form class="ob-form" id="psConfig" autocomplete="off">
+      <div class="ob-grid2">
+        <label>Persora integration<select name="enabled"><option value="true" ${x.enabled?'selected':''}>Enabled</option><option value="false" ${!x.enabled?'selected':''}>Disabled</option></select></label>
+        <label>EMS API base URL (enter this in Persora)<input readonly value="${esc(location.origin)}"></label>
+        <label>${x.secretConfigured?'Replace shared secret':'Shared secret'}<input name="secret" id="psSecret" type="password" autocomplete="new-password" spellcheck="false" minlength="${x.minSecretLength||32}" ${envManaged?'disabled':''} placeholder="${envManaged?'Managed by PERSORA_INTEGRATION_SECRET':x.secretConfigured?'Leave blank to keep the current secret':'At least '+(x.minSecretLength||32)+' characters'}"></label>
+        <div class="ob-form-actions">${envManaged?'':'<button type="button" id="psGen" class="ob-btn ob-btn-soft">Generate secret</button><button type="button" id="psCopy" class="ob-btn ob-btn-soft" hidden>Copy</button>'}</div>
+      </div>
+      <p class="ob-note">The secret must be identical in <b>Persora Admin Console → Integrations → EMS</b>. It is encrypted before it is stored and is never shown again after saving. Replacing it immediately blocks requests signed with the old secret until Persora is updated. Disabling here blocks all Persora access, even for connected users.</p>
+      <div><button class="ob-btn ob-btn-primary">Save Persora settings</button></div>
+    </form>
+    <div id="psResult" class="ob-testresult"></div>
+  </section>
+  <section class="ob-panel">
+    <div class="ob-panel-head"><div><h3>Connected Persora accounts</h3><p class="ob-desc">Revoking ends every active Persora connection. Each Persora user will see “Reconnect EMS” and must sign in with their EMS administrator credentials again.</p></div></div>
+    <div class="ob-form"><div><button type="button" id="psRevokeAll" class="ob-btn ob-btn-soft" ${x.activeGrants?'':'disabled'}>Revoke all connections</button></div></div>
+  </section>`;
+  const gen=$('#psGen');
+  if(gen)gen.onclick=()=>{const b=crypto.getRandomValues(new Uint8Array(36));const v=btoa(String.fromCharCode(...b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');const i=$('#psSecret');i.value=v;i.type='text';$('#psCopy').hidden=false;$('#psResult').innerHTML='<p class="ob-test-ok">New secret generated. Copy it into Persora, then save here.</p>'};
+  const copy=$('#psCopy');
+  if(copy)copy.onclick=async()=>{try{await navigator.clipboard.writeText($('#psSecret').value);toast('Secret copied.')}catch{toast('Copy failed — select the text and copy it manually.')}};
+  $('#psConfig').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.target);const b={enabled:f.get('enabled')==='true'};const sec=String(f.get('secret')||'').trim();if(sec)b.secret=sec;try{await api('platform/persora-integration',{method:'PATCH',body:JSON.stringify(b)});toast('Persora settings saved.');ownerPersora()}catch(err){$('#psResult').innerHTML='<p class="ob-test-err">✕ '+esc(err.message)+'</p>'}};
+  $('#psRevokeAll').onclick=async()=>{if(!confirm('Revoke every Persora connection? Users must reconnect with their EMS credentials.'))return;try{const r=await api('platform/persora-integration/revoke-all',{method:'POST',body:'{}'});toast(`Revoked ${r.revoked||0} connection(s).`);ownerPersora()}catch(err){toast(err.message)}};
 }
 /* ═══════════ SHOP · Business reports + Business AI Health ═══════════ */
 async function report(defaultTab='summary'){

@@ -876,7 +876,7 @@ async function d1Rpc(env, name, bodyRaw) {
       'exchange_items', 'exchanges', 'return_items', 'returns', 'inventory_stock_movements',
       'api_keys', 'invoice_lines', 'staff_salary_invoices', 'attendance', 'device_logins', 'activity_logs', 'error_logs',
       'due_recoveries', 'business_health_reports', 'zudo_messages', 'zudo_conversations', 'connectx_messages', 'connectx_sms_messages', 'connectx_shop_email_settings', 'connect_connections', 'connect_requests', 'connect_identity', 'helpdesk_messages',
-      'truebill_scans', 'vaultium_files', 'invoices', 'inventory_items', 'expenses', 'staff', 'suppliers', 'customers', 'stores',
+      'truebill_scans', 'vaultium_files', 'persora_grants', 'invoices', 'inventory_items', 'expenses', 'staff', 'suppliers', 'customers', 'stores',
       'addon_purchases', 'addon_coupons', 'addon_settings', 'addon_checkout_settings', 'blog_posts', 'contact_messages', 'public_pages',
       'current_entitlements', 'licenses', 'license_plans', 'platform_activity_logs', 'platform_settings',
       'business_health_settings', 'zudo_settings', 'connectx_settings', 'administrators', 'ems_owners'];

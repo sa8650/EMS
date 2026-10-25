@@ -585,6 +585,23 @@ create table if not exists public.vaultium_files (
   created_at     timestamptz not null default now()
 );
 
+-- ---------------------------------------------------- PERSORA CONNECTIONS
+create table if not exists public.persora_grants (
+  id                uuid primary key default gen_random_uuid(),
+  admin_id          uuid not null references public.administrators(id) on delete cascade,
+  token_hash        text not null unique,
+  credential_marker text not null,
+  persora_user_ref  text not null,
+  label             text,
+  created_at        timestamptz not null default now(),
+  last_used_at      timestamptz,
+  expires_at        timestamptz not null,
+  revoked_at        timestamptz,
+  revoked_reason    text
+);
+create index if not exists idx_persora_grants_admin on public.persora_grants(admin_id, revoked_at);
+create index if not exists idx_persora_grants_ref   on public.persora_grants(persora_user_ref, revoked_at);
+
 -- ---------------------------------------------------- RETURNS & REFUNDS
 create table if not exists public.returns (
   id                  uuid primary key default gen_random_uuid(),
@@ -1052,7 +1069,7 @@ begin
     'connectx_settings','connectx_messages','zudo_settings','zudo_conversations','zudo_messages',
     'business_health_settings','business_health_reports',
     'public_pages','blog_posts','contact_messages','truebill_scans',
-    'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files',
+    'addon_settings','addon_purchases','addon_checkout_settings','addon_coupons','vaultium_files','persora_grants',
     'returns','return_items','inventory_stock_movements','exchanges','exchange_items','app_store_apps','api_keys']
   loop
     execute format('revoke all on table public.%I from anon, authenticated', t);

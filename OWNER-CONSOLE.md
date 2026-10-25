@@ -183,6 +183,15 @@ log (who verified which invoice, when).
 **Vaultium** — total storage used, file count, and per-shop usage table
 (limit / used / period / status) plus the exact Cloudflare R2 binding steps.
 
+**Persora Connections** — the server-to-server link that lets EMS administrators browse their Vaultium files read-only inside Persora. The page shows:
+
+- KPIs: integration state, the masked secret (last 4 characters), active connections, and the last verified signed request;
+- an Enabled/Disabled selector and the EMS API base URL to enter in Persora;
+- a write-only shared-secret field with **Generate secret** and **Copy**, locked when `PERSORA_INTEGRATION_SECRET` is set;
+- **Revoke all connections**.
+
+Routes: `GET/PATCH platform/persora-integration` and `POST platform/persora-integration/revoke-all`. See [`PERSORA_INTEGRATION.md`](PERSORA_INTEGRATION.md).
+
 **HelpDesk** — two-pane workspace: administrator list with unread badges and
 search on the left, continuous conversation with a composer on the right.
 

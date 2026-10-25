@@ -13,3 +13,9 @@ The API is not a generic public API and must not be proxied through ConnectX Con
 ## ConnectX Control monitoring relationship
 
 ConnectX Control does not call EMS. The Android app sends SMS queue, send, and delivery results directly to EMS as before, and separately posts app heartbeats and a monitoring copy of SMS status to ConnectX Control using a distinct Control-issued device token. Control stores that copy in its own D1 database. A Control outage must never block or delay SMS reporting to EMS.
+
+## Persora Connections API
+
+`/api/persora/*` is a dedicated server-to-server API for Persora's backend only; browsers never call it. Every request must be enabled in the Owner Console and HMAC-signed with the shared secret (±300 s window). Data routes also need a per-administrator `pg1_…` grant, issued only after the administrator's own EMS credentials are checked.
+
+The API is strictly read-only: `account`, `files` and `files/:id/content`. Every other verb returns `405 read_only`. All queries are scoped to the grant's administrator. See [`PERSORA_INTEGRATION.md`](PERSORA_INTEGRATION.md).
