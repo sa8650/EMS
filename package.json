@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "npx wrangler pages dev . --compatibility-date=2026-05-03",
     "deploy": "wrangler pages deploy . --project-name=ems-v1",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "links": "node test/check-links.mjs",
+    "serve": "node test/server.mjs 8788",
+    "audit:browser": "node test/browser/audit-public.mjs && node test/browser/audit-interactions.mjs && node test/browser/audit-signin-flow.mjs && node test/browser/audit-console-refresh.mjs"
   },
   "devDependencies": {
     "better-sqlite3": "^12.11.1",

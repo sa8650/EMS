@@ -103,7 +103,7 @@ Supabase PostgreSQL
 
 | Role | Who they are | Where they sign in | What they get |
 |---|---|---|---|
-| **Owner** | The platform owner (you, hosting EMS) | `/owner` (nav "Owner login" link, drawer, footer) | The **Owner Console** — platform-wide control (see [`OWNER-CONSOLE.md`](OWNER-CONSOLE.md)) |
+| **Owner** | The platform owner (you, hosting EMS) | `/owner` — **direct URL only, never linked from the public site** | The **Owner Console** — platform-wide control (see [`OWNER-CONSOLE.md`](OWNER-CONSOLE.md)) |
 | **Administrator** | A business using your platform | `Administrator login` | Administrator Panel: profile, stores, licenses, devices, HelpDesk, Premium Add-Ons |
 | **Staff** | An employee of a store | `Shop login` (Store ID + User ID + password) | Shop Panel: only the modules their permissions allow |
 
@@ -136,18 +136,32 @@ Every route above is a real path: refreshing keeps you on the page you were on,
 and the address bar follows the console page you open (`/administratorconsole`
 → `/administratorconsole/licenses`). `_redirects` rewrites each one to the app
 shell so Cloudflare Pages never answers with a 404 — `/api/*` is untouched
-because Pages Functions run before the rewrite rules.
+because Pages Functions run before the rewrite rules, and a `/*  /index.html  200`
+catch-all at the end of the file covers every other path (a mistyped URL, or a
+shallow one like `/pricing`). `/assets/*` is explicitly pinned to `404` so a
+missing file never comes back as HTML.
+
+**Subresources are always root-absolute** (`/assets/js/app.js`, never
+`assets/js/app.js`). The shell is served at nested paths such as
+`/ownerconsole/licenses`, where a relative URL resolves to
+`/ownerconsole/assets/js/app.js` and fails. `test/styles.test.js` fails the build
+if a relative asset path is reintroduced.
 
 - **Invoice verification** — a scanned TrueBill QR code opens the public
   verification route and renders the authentic EMS record (verified, loading and
   failure states are all designed).
-- **Sign-in is always a link** — `Administrator login` → `/administrator`,
-  `Shop login` → `/shop`, `Owner login` → `/owner`. They appear in the primary
-  navigation, the mobile drawer, the footer's "Access & legal" column and the
-  access-levels card. Nothing on the public site is a sign-in *button*: the links
-  work without JavaScript, are shareable, and the click is intercepted to open
-  the modal in place. Closing a modal gives the URL back; opening one with a
-  session already active goes straight to that console instead of asking again.
+- **Sign-in is always a link** — `Administrator login` → `/administrator` and
+  `Shop login` → `/shop`, in the primary navigation, the mobile drawer, the
+  footer's "Access & legal" column and the access-levels card. Nothing on the
+  public site is a sign-in *button*: the links work without JavaScript, are
+  shareable, and the click is intercepted to open the modal in place. Closing a
+  modal gives the URL back; opening one with a session already active goes
+  straight to that console instead of asking again.
+- **The owner console is not advertised.** `/owner` still opens the platform
+  owner's sign-in and `/ownerconsole` still works, but no link, button or piece
+  of copy on the public site points at them. The team running the deployment
+  bookmarks the URL. `test/public-site.test.js` fails if an owner entry point
+  ever reappears in the markup.
 - **One auth layer for every surface** — sign-in and registration modals render
   into `#authlayer`, which `authLayer()` in `app.js` creates on demand, so any
   panel or public page can open the same modal. It is hidden and emptied the
