@@ -249,6 +249,9 @@ test('public pages have their own paths and work on refresh', async () => {
   try {
     assert.match(unknown.doc.querySelector('h1').textContent, /Manage every store/i, 'unknown paths fall back to the landing page');
     assert.equal(unknown.win.location.pathname, '/', 'and the URL is corrected');
+    // The fallback is explained rather than silent: a visitor who mistyped a
+    // URL should be told the page does not exist.
+    assert.match(unknown.doc.body.textContent, /That page does not exist/i, 'the 404 fallback says so');
   } finally { unknown.restore(); }
 });
 

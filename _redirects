@@ -28,3 +28,16 @@
 /administratorconsole/* /   200
 /shopconsole           /    200
 /shopconsole/*         /    200
+
+# SPA catch-all — MUST stay last.
+#
+# A shallow path such as /pricing or a mistyped link has no explicit rule above,
+# so without this Pages answers with its own 404 page and the visitor never sees
+# the app (and loses the site chrome). Cloudflare evaluates _redirects top to
+# bottom and stops at the first match, and real files win over rules, so static
+# assets are unaffected by this line.
+#
+# Assets keep honest 404s: a missing /assets/* file must not be answered with
+# HTML, or the browser reports "Unexpected token '<'" instead of a clear 404.
+/assets/*    /assets/:splat   404
+/*           /index.html      200

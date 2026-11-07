@@ -59,6 +59,13 @@ function matches(rule, pathname) {
   return pathname === rule.from || pathname === rule.from + '/';
 }
 
+/** Substitute `:splat` with whatever the `/*` matched. */
+function applySplat(to, from, pathname) {
+  if (!to.includes(':splat')) return to;
+  const prefix = from.slice(0, -2);
+  return to.replace(':splat', pathname.slice(prefix.length).replace(/^\//, ''));
+}
+
 async function serveFile(res, filePath, extraHeaders) {
   try {
     const bytes = await readFile(filePath);
@@ -150,12 +157,19 @@ createServer(async (req, res) => {
   if (await serveFile(res, join(ROOT, safe))) return;
   if (await serveFile(res, join(ROOT, safe, 'index.html'))) return;
 
-  // 2. _redirects rewrite (status 200 keeps the URL, swaps the body)
+  // 2. _redirects — top to bottom, first match wins (Pages semantics)
+  const bare = pathname.replace(/\/+$/, '') || '/';
   for (const rule of rules) {
-    if (rule.status === 200 && matches(rule, pathname.replace(/\/+$/, '') || '/')) {
-      const target = rule.to.endsWith('/') ? join(ROOT, rule.to, 'index.html') : join(ROOT, rule.to);
-      if (await serveFile(res, target)) return;
+    if (!matches(rule, bare)) continue;
+    if (rule.status === 404) {
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('404 Not Found');
+      return;
     }
+    if (rule.status !== 200) continue; // 301/302 are navigations; not used here
+    const to = applySplat(rule.to, rule.from, bare);
+    const target = to.endsWith('/') ? join(ROOT, to, 'index.html') : join(ROOT, to);
+    if (await serveFile(res, target)) return;
   }
 
   // 3. nothing matched -> Pages answers 404

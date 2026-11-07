@@ -126,7 +126,14 @@ function bootView() {
     scheduleLogout();
     return home();
   }
-  if (route.kind === 'unknown' && currentPath() !== '/') setPath('/', true);
+  if (route.kind === 'unknown' && currentPath() !== '/') {
+    /* No such page. Send the visitor back to the landing page, but say what
+       happened instead of silently showing the marketing page — a silent
+       fallback reads as a broken link. */
+    const explain = !state;
+    setPath('/', true);
+    if (explain) return publicSite().renderLanding({ notFound: true });
+  }
   if (state) {
     // Signed in: the console is what renders, so the address bar says so.
     setPath(consolePath(state.role, ''), true);

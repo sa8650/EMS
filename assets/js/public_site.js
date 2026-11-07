@@ -829,13 +829,20 @@ export function createPublicSite(deps) {
   /* -------------------------------------------------------------------
      Landing entry point
   ------------------------------------------------------------------- */
-  async function renderLanding() {
+  /* Shown above the landing page when the requested URL does not exist. */
+  function notFoundBannerHtml() {
+    return `<div class="pub-shell" style="padding-top:28px">
+      <div class="pub-note" role="status">${GLYPH.info}<span><b>That page does not exist.</b> The address you followed does not point to anything on this site, so here is the home page instead. Every real page is reachable from the menu above.</span></div>
+    </div>`;
+  }
+
+  async function renderLanding(options = {}) {
     bindShell();
     let b = { ...DEFAULT_BRAND };
     app.innerHTML = `<div class="pubsite"><div class="pub-shell" style="padding-block:80px"><div class="pub-skel"><div class="pub-skel-line w40"></div><div class="pub-skel-line w70"></div><div class="pub-skel-line"></div></div></div></div>`;
     try { b = await brand(); } catch { b = { ...DEFAULT_BRAND }; }
     applyBranding(b);
-    app.innerHTML = shellHtml(b, 'home', `${heroHtml()}${operationsHtml()}${howItWorksHtml()}${rolesHtml()}${multiStoreHtml()}${servicesHtml()}${pricingSectionHtml()}${faqHtml()}${ctaHtml()}`);
+    app.innerHTML = shellHtml(b, 'home', `${options.notFound ? notFoundBannerHtml() : ''}${heroHtml()}${operationsHtml()}${howItWorksHtml()}${rolesHtml()}${multiStoreHtml()}${servicesHtml()}${pricingSectionHtml()}${faqHtml()}${ctaHtml()}`);
     const hashTarget = location.hash ? document.getElementById(location.hash.slice(1)) : null;
     if (hashTarget) hashTarget.scrollIntoView({ block: 'start' });
     else { try { window.scrollTo({ top: 0, behavior: 'auto' }); } catch { /* non-visual environment */ } }
