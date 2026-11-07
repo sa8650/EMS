@@ -1047,7 +1047,23 @@
   border-top: 1px solid var(--pub-line);
 }
 .pub-role li svg { width: 14px; height: 14px; color: var(--pub-primary); flex: none; margin-top: 2px; }
+/* Role cards: the secondary/ghost CTAs sit at the bottom of tall cards, so a
+   plain text-coloured ghost button reads as a label rather than an action.
+   Give them the outlined treatment so all three cards look equally clickable. */
 .pub-role-foot { margin-top: auto; padding-top: 4px; }
+.pub-role .pub-btn--ghost,
+.pub-role .pub-btn--secondary {
+  background: var(--pub-surface);
+  color: var(--pub-text);
+  box-shadow: var(--pub-ring);
+}
+.pub-role .pub-btn--ghost:hover,
+.pub-role .pub-btn--secondary:hover {
+  background: var(--pub-inset2);
+  color: var(--pub-ink);
+  box-shadow: var(--pub-ring-lift);
+  transform: none;
+}
 
 .pub-note {
   display: flex;
