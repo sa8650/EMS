@@ -74,6 +74,63 @@ async function serveFile(res, filePath, extraHeaders) {
   }
 }
 
+/**
+ * Minimal read-only API fixtures so the marketing pages render their populated
+ * state (pricing table, blog list, CMS pages) instead of their offline
+ * fallbacks. Only `public/*` paths answer; everything else stays a 503 so the
+ * console shell still exercises its error handling.
+ */
+function mockApi(path) {
+  const pathname = path.split('?')[0];
+  if (pathname === 'public/branding') {
+    return { product_name: 'EMS', powered_by: 'Dexter Studio', website_name: 'EMS' };
+  }
+  if (pathname === 'public/license-plans') {
+    return [
+      { id: 'starter', title: 'Starter', price: 0, duration_months: 1, max_stores: 1, connectx_enabled: false, zudo_enabled: false, business_health_enabled: false, truebill_enabled: false, vaultium_gb: 0 },
+      { id: 'growth', title: 'Growth — 6 months', price: 4500, duration_months: 6, max_stores: 3, connectx_enabled: true, zudo_enabled: true, business_health_enabled: false, truebill_enabled: true, vaultium_gb: 2 },
+      { id: 'scale', title: 'Scale — 12 months', price: 9000, duration_months: 12, max_stores: 8, connectx_enabled: true, zudo_enabled: true, business_health_enabled: true, truebill_enabled: true, vaultium_gb: 10 }
+    ];
+  }
+  if (pathname === 'public/blogs') {
+    return [
+      { id: '1', title: 'Closing the month without guessing', excerpt: 'A short routine for a clean close.', body: 'Body one.', published_at: '2026-10-02T00:00:00Z' },
+      { id: '2', title: 'Why dues kill small retail', excerpt: 'Credit sales need a rule.', body: 'Body two.', published_at: '2026-09-18T00:00:00Z' }
+    ];
+  }
+  if (pathname === 'app-store/apps') {
+    // Mirrors functions/_lib/app_store.js: the scanner PWA is always published.
+    return [{
+      id: 'ems-mobile-scanner-pwa', package_name: 'com.ems.mobile_scanner',
+      title: 'EMS Mobile Scanner', description: 'Installable Pharmacy and Electronics billing companion.',
+      version: '1.0.0', version_code: 1, icon_url: '/assets/android-chrome-192.png',
+      kind: 'pwa', featured: true, category: 'Business tools', developer: 'Dexter Studio',
+      web_url: '/scanner/', screenshot_urls: [], created_at: null,
+      install_url: '/scanner/', download_available: true,
+      release_notes: 'Pharmacy and Electronics sale/purchase scanning; Android and iPhone installation.'
+    }];
+  }
+  /* Session bootstrap for the three consoles (a refresh re-runs these). */
+  if (pathname === 'me') {
+    // Full permissions: a deep link is expected to survive a refresh, and the
+    // console correctly refuses pages the staff member cannot access.
+    const allow = ['view', 'add', 'edit', 'delete'];
+    const sections = ['dashboard', 'supplier', 'customer', 'inventory', 'purchase', 'sales', 'expense', 'due_recover', 'returns_refunds', 'staff', 'report', 'settings', 'audit-log', 'connectx', 'zudo', 'vaultium', 'attendance', 'salary'];
+    const permissions = Object.fromEntries(sections.map(s => [s, allow]));
+    return { id: 's1', name: 'Counter Staff', role: 'staff', permissions, store: { id: 'st1', shop_id: 1001, name: 'Main Branch', shop_type: 'electronics' }, readOnly: false, licenseExpired: false };
+  }
+  if (pathname === 'admin/entitlement') {
+    return { hasActivatedLicense: true, active: true };
+  }
+  if (pathname === 'public/page') {
+    const slug = new URLSearchParams(path.split('?')[1] || '').get('slug');
+    const titles = { about: 'About EMS', terms: 'Terms of Service', privacy: 'Privacy Policy', contact: 'Contact us' };
+    if (titles[slug]) return { slug, title: titles[slug], body: `Content for ${slug}.` };
+    return undefined;
+  }
+  return undefined;
+}
+
 const rules = await loadRules();
 const port = Number(process.argv[2] || 8788);
 
@@ -82,8 +139,9 @@ createServer(async (req, res) => {
   const pathname = decodeURIComponent(url.pathname);
 
   if (pathname.startsWith('/api/')) {
-    res.writeHead(503, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'API not available in the static harness' }));
+    const body = mockApi(pathname.slice(5) + (url.search || ''));
+    res.writeHead(body === undefined ? 503 : 200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify(body === undefined ? { error: 'No mock for this API path' } : body));
     return;
   }
 
