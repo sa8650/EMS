@@ -246,16 +246,6 @@
   box-shadow: none;
 }
 .pubsite .pub-btn--ghost:hover { background: var(--pub-inset2); color: var(--pub-text); transform: none; box-shadow: none; }
-.pubsite .pub-btn--quiet {
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--pub-text2);
-  font-size: 13px;
-  box-shadow: none;
-}
-.pubsite .pub-btn--quiet:hover { background: var(--pub-inset2); color: var(--pub-text); transform: none; box-shadow: none; }
 .pubsite .pub-btn--sm { min-height: 38px; padding: 0 15px; font-size: 13px; border-radius: 10px; }
 .pubsite .pub-btn--block { width: 100%; }
 
@@ -274,6 +264,15 @@
 }
 .pub-link svg { width: 15px; height: 15px; transition: transform 0.16s ease; }
 .pub-link:hover svg { transform: translateX(2px); }
+.pub-link--block {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  padding: 9px 2px;
+  font-size: 13.5px;
+  color: var(--pub-muted);
+}
+.pub-link--block:hover { color: var(--pub-ink); }
 
 /* ---------------------------------------------------------------------
    Chips, badges, tones
@@ -425,9 +424,24 @@
 .pubsite .pubnav-links a:hover { color: var(--pub-ink); background: var(--pub-inset2); }
 .pubsite .pubnav-links a[aria-current="page"] { color: var(--pub-ink); background: var(--pub-inset2); }
 
-.pubnav-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+/* Sign-in entry points are links (never buttons): /administrator, /shop, /owner */
+.pubnav-signin { display: flex; align-items: center; gap: 4px; }
+.pubsite .pubnav-signin a {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 9px;
+  border-radius: 9px;
+  font-size: 12.6px;
+  font-weight: 600;
+  color: var(--pub-muted);
+  white-space: nowrap;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.pubsite .pubnav-signin a:hover { color: var(--pub-ink); background: var(--pub-inset2); }
+.pubsite .pubnav-signin a:last-child { color: var(--pub-muted2); }
+
+.pubnav-actions { display: flex; align-items: center; gap: 10px; flex: none; }
 .pubsite .pubnav-actions .pub-btn { min-height: 36px; padding: 0 13px; font-size: 13px; border-radius: 10px; }
-.pubsite .pubnav-actions .pub-btn--quiet { padding: 0 10px; }
 
 .pub-burger {
   display: none;
@@ -1889,6 +1903,7 @@
   .pubnav-links { display: none; }
   .pub-burger { display: inline-flex; }
   .pubsite .pubnav-actions .pub-btn--hide-sm { display: none; }
+  .pubnav-signin { display: none; }
   .pub-roles { grid-template-columns: minmax(0, 1fr); }
   .pub-split, .pub-faq { grid-template-columns: minmax(0, 1fr); gap: 26px; }
   .pub-blog-featured { grid-template-columns: minmax(0, 1fr); }

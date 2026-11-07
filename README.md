@@ -120,28 +120,40 @@ retail business management platform**.
 | Route | Page |
 |---|---|
 | `/` | Landing: hero + live product preview, business operations bento, how EMS works, access levels, multi-store, premium services, live pricing from `public/license-plans`, FAQ, final CTA |
-| `/?page=about` | Editorial About page (CMS body from Owner Console → Website pages) |
-| `/?page=terms` | Long-form Terms of Service (CMS body, with a built-in summary when empty) |
-| `/?page=privacy` | Built-in Privacy Policy page |
-| `/?page=blog` · `/?page=blog-post&id=…` | Blog listing and article |
-| `/?page=contact` | Contact page + message form (`public/contact`) |
-| `/?page=app-store` | Public App Store (no login) |
-| `/owner` · `/admin` · `/shop` | Sign-in links — render the landing with the matching sign-in modal already open |
-| `/?verify=<token>` · `/verify/<token>` · `/?invoice/<token>` | TrueBill verification for invoices, return slips and exchange invoices |
+| `/about` | Editorial About page (CMS body from Owner Console → Website pages) |
+| `/terms` | Long-form Terms of Service (CMS body, with a built-in summary when empty) |
+| `/privacy` | Built-in Privacy Policy page |
+| `/blog` · `/blog/<id>` | Blog listing and article |
+| `/contact` | Contact page + message form (`public/contact`) |
+| `/app-store` | Public App Store (no login) |
+| `/owner` · `/administrator` · `/shop` | Sign-in links — render the landing with the matching sign-in modal already open (aliases `/admin`, `?page=…`, `?verify=…` still resolve) |
+| `/verify/<token>` · `/invoice/<token>` | TrueBill verification for invoices, return slips and exchange invoices |
+| `/ownerconsole/<page>` | Owner Console |
+| `/administratorconsole/<page>` | Administrator Panel |
+| `/shopconsole/<page>` | Shop Panel |
+
+Every route above is a real path: refreshing keeps you on the page you were on,
+and the address bar follows the console page you open (`/administratorconsole`
+→ `/administratorconsole/licenses`). `_redirects` rewrites each one to the app
+shell so Cloudflare Pages never answers with a 404 — `/api/*` is untouched
+because Pages Functions run before the rewrite rules.
 
 - **Invoice verification** — a scanned TrueBill QR code opens the public
   verification route and renders the authentic EMS record (verified, loading and
   failure states are all designed).
-- **Sign-in paths** — **Administrator login** and **Shop login** are buttons in
-  the primary navigation that open the shared auth modal. The **platform owner
-  signs in through a link, not a button**: `https://your-domain/owner` (also in
-  the drawer, footer and access-levels card) so platform access is never
-  confused with customer registration. `/admin` and `/shop` work the same way.
-  These paths are rewritten to the app shell by `_redirects`, which Cloudflare
-  Pages and `wrangler pages dev` both apply automatically.
+- **Sign-in is always a link** — `Administrator login` → `/administrator`,
+  `Shop login` → `/shop`, `Owner login` → `/owner`. They appear in the primary
+  navigation, the mobile drawer, the footer's "Access & legal" column and the
+  access-levels card. Nothing on the public site is a sign-in *button*: the links
+  work without JavaScript, are shareable, and the click is intercepted to open
+  the modal in place. Closing a modal gives the URL back; opening one with a
+  session already active goes straight to that console instead of asking again.
 - **One auth layer for every surface** — sign-in and registration modals render
   into `#authlayer`, which `authLayer()` in `app.js` creates on demand, so any
-  panel or public page can open the same modal.
+  panel or public page can open the same modal. It is hidden and emptied the
+  moment authentication succeeds, and its controls are styled under `.authlayer`
+  rather than by the theme-scoped element rules, so it looks the same over the
+  public site and over a dark Owner Console.
 - **Plans are read from the API.** The pricing section renders whatever
   `public/license-plans` returns — no hardcoded prices — and its CTA enters the
   existing administrator licence flow.

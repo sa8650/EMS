@@ -1,7 +1,30 @@
-# Cloudflare Pages rewrites — these paths are handled by the client-side router in
-# assets/js/app.js, so they must serve the app shell instead of a 404.
+# Cloudflare Pages rewrites — every path below is a client-side route handled by
+# assets/js/app.js, so each one has to serve the app shell instead of a 404.
+# `/api/*` is untouched: Pages Functions run before these rules.
 
-# Sign-in entry points (path-based links, e.g. https://your-domain/owner)
-/owner    /    200
-/admin    /    200
-/shop     /    200
+# Public pages
+/about        /    200
+/terms        /    200
+/privacy      /    200
+/blog         /    200
+/blog/*       /    200
+/contact      /    200
+/app-store    /    200
+
+# TrueBill verification
+/verify/*     /    200
+/invoice/*    /    200
+
+# Sign-in entry points (e.g. https://your-domain/owner)
+/owner            /    200
+/administrator    /    200
+/admin            /    200
+/shop             /    200
+
+# Consoles — the page is the last URL segment
+/ownerconsole          /    200
+/ownerconsole/*        /    200
+/administratorconsole  /    200
+/administratorconsole/* /   200
+/shopconsole           /    200
+/shopconsole/*         /    200

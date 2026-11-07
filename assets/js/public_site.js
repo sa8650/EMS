@@ -34,9 +34,9 @@ const NAV_LINKS = [
   ['/#operations', 'Features', 'features'],
   ['/#how-it-works', 'How it works', 'how'],
   ['/#pricing', 'Pricing', 'pricing'],
-  ['/?page=about', 'About', 'about'],
-  ['/?page=blog', 'Blog', 'blog'],
-  ['/?page=contact', 'Contact', 'contact']
+  ['/about', 'About', 'about'],
+  ['/blog', 'Blog', 'blog'],
+  ['/contact', 'Contact', 'contact']
 ];
 
 /* Sample rows used by the product previews. Everything is labelled. */
@@ -53,9 +53,10 @@ const SAMPLE_STORES = [
 ];
 
 export function createPublicSite(deps) {
-  const { api, esc, lucide, getQrSvg, mountAppStore, toast, showAuth, showEmsLogin, register, app } = deps;
+  const { api, esc, lucide, getQrSvg, mountAppStore, toast, showAuth, showEmsLogin, register, navigate, app } = deps;
 
   const icon = name => lucide(name);
+  const go = typeof navigate === 'function' ? navigate : () => {};
   const brand = () => api('public/branding').catch(() => ({ ...DEFAULT_BRAND }));
 
   /* -------------------------------------------------------------------
@@ -81,9 +82,11 @@ export function createPublicSite(deps) {
         ${brandBlock(b)}
         <nav class="pubnav-links" aria-label="Primary">${navLinks(active)}</nav>
         <div class="pubnav-actions">
-          <button type="button" class="pub-btn pub-btn--quiet pub-btn--hide-sm" data-pub-auth="admin">Administrator login</button>
-          <button type="button" class="pub-btn pub-btn--quiet pub-btn--hide-sm" data-pub-auth="shop">Shop login</button>
-          <a class="pub-btn pub-btn--quiet pub-btn--hide-sm" href="/owner">Owner login</a>
+          <span class="pubnav-signin">
+            <a href="/administrator" data-pub-auth="admin">Administrator login</a>
+            <a href="/shop" data-pub-auth="shop">Shop login</a>
+            <a href="/owner">Owner login</a>
+          </span>
           <button type="button" class="pub-btn pub-btn--sm" data-pub-register>Create account</button>
           <button type="button" class="pub-burger" data-pub-burger aria-label="Open navigation menu" aria-expanded="false" aria-controls="pubDrawer">${icon('menu')}</button>
         </div>
@@ -94,13 +97,13 @@ export function createPublicSite(deps) {
       <div class="pub-drawer-panel" role="dialog" aria-modal="true" aria-label="Site navigation">
         <div class="pub-drawer-head">${brandBlock(b)}<button type="button" class="pub-burger" data-pub-close aria-label="Close navigation menu">${icon('x')}</button></div>
         <nav class="pub-drawer-links" aria-label="Primary mobile">${navLinks(active)}
-          <a href="/?page=app-store">App Store</a>
+          <a href="/app-store">App Store</a>
         </nav>
         <div class="pub-drawer-group">
           <span>Sign in</span>
-          <button type="button" class="pub-btn pub-btn--secondary pub-btn--block" data-pub-auth="admin">Administrator login</button>
-          <button type="button" class="pub-btn pub-btn--secondary pub-btn--block" data-pub-auth="shop">Shop login</button>
-          <a class="pub-btn pub-btn--ghost pub-btn--block" href="/owner">EMS owner login</a>
+          <a class="pub-btn pub-btn--secondary pub-btn--block" href="/administrator" data-pub-auth="admin">Administrator login</a>
+          <a class="pub-btn pub-btn--secondary pub-btn--block" href="/shop" data-pub-auth="shop">Shop login</a>
+          <a class="pub-link pub-link--block" href="/owner">EMS owner login</a>
         </div>
         <div class="pub-drawer-foot">
           <button type="button" class="pub-btn pub-btn--block" data-pub-register>Create your business account</button>
@@ -130,26 +133,26 @@ export function createPublicSite(deps) {
               <li><a href="/#how-it-works">How it works</a></li>
               <li><a href="/#pricing">Pricing &amp; licenses</a></li>
               <li><a href="/#services">Premium services</a></li>
-              <li><a href="/?page=app-store">App Store</a></li>
+              <li><a href="/app-store">App Store</a></li>
             </ul>
           </div>
           <div class="pub-foot-col">
             <h4>Company</h4>
             <ul>
-              <li><a href="/?page=about">About ${esc(b.product_name || 'EMS')}</a></li>
-              <li><a href="/?page=blog">Blog</a></li>
-              <li><a href="/?page=contact">Contact</a></li>
+              <li><a href="/about">About ${esc(b.product_name || 'EMS')}</a></li>
+              <li><a href="/blog">Blog</a></li>
+              <li><a href="/contact">Contact</a></li>
               <li><a href="/#faq">FAQ</a></li>
             </ul>
           </div>
           <div class="pub-foot-col">
             <h4>Access &amp; legal</h4>
             <ul>
-              <li><button type="button" data-pub-auth="admin">Administrator login</button></li>
-              <li><button type="button" data-pub-auth="shop">Shop login</button></li>
+              <li><a href="/administrator" data-pub-auth="admin">Administrator login</a></li>
+              <li><a href="/shop" data-pub-auth="shop">Shop login</a></li>
               <li><a href="/owner">EMS owner login</a></li>
-              <li><a href="/?page=terms">Terms of Service</a></li>
-              <li><a href="/?page=privacy">Privacy Policy</a></li>
+              <li><a href="/terms">Terms of Service</a></li>
+              <li><a href="/privacy">Privacy Policy</a></li>
             </ul>
           </div>
         </div>
@@ -182,6 +185,14 @@ export function createPublicSite(deps) {
       const auth = event.target.closest('[data-pub-auth]');
       if (auth) {
         openDrawer(false);
+        /* Sign-in controls are links to /administrator or /shop so the URL is
+           shareable and survives a refresh; intercept the click to open the
+           modal in place and keep the address bar in step. */
+        const href = auth.getAttribute('href');
+        if (href) {
+          event.preventDefault();
+          try { go(href); } catch { /* non-visual environment */ }
+        }
         const mode = auth.dataset.pubAuth;
         if (mode === 'owner') showEmsLogin();
         else showAuth(mode === 'shop' ? 'shop' : 'admin');
@@ -198,6 +209,16 @@ export function createPublicSite(deps) {
           target.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'start' });
           return;
         }
+      }
+      /* The platform-owner link stays a plain navigation semantically, but it is
+         intercepted like the others so the modal opens without a reload. */
+      const ownerLink = event.target.closest('a[href="/owner"]');
+      if (ownerLink) {
+        event.preventDefault();
+        openDrawer(false);
+        try { go('/owner'); } catch { /* non-visual environment */ }
+        showEmsLogin();
+        return;
       }
       const anchor = event.target.closest('[data-pub-plan]');
       if (anchor) { openDrawer(false); showAuth('admin'); }
@@ -561,7 +582,7 @@ export function createPublicSite(deps) {
             <div class="pub-role-foot">${cta === 'register'
               ? '<button type="button" class="pub-btn pub-btn--secondary pub-btn--sm" data-pub-register>Create your business account</button>'
               : name === 'Shop staff'
-                ? '<button type="button" class="pub-btn pub-btn--ghost pub-btn--sm" data-pub-auth="shop">Shop login</button>'
+                ? '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/shop" data-pub-auth="shop">Shop login</a>'
                 : '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/owner">EMS owner login</a>'}</div>
           </article>`).join('')}
         </div>
@@ -778,7 +799,7 @@ export function createPublicSite(deps) {
               <div class="pub-feature-title"><h3>Still deciding?</h3><span>Talk to the team</span></div>
             </div>
             <p class="pub-small">Send a question through the contact form and the EMS team will answer with specifics for your business.</p>
-            <a class="pub-link" href="/?page=contact">Open the contact form${GLYPH.arrow}</a>
+            <a class="pub-link" href="/contact">Open the contact form${GLYPH.arrow}</a>
           </div>
         </div>
         <div class="pub-faq-list">
@@ -905,7 +926,7 @@ export function createPublicSite(deps) {
     const title = (data && data.title) || `About ${b.product_name || 'EMS'}`;
     const updated = data ? dateLong(data.updated_at) : '';
     return `${pageHead({
-      crumbs: [['/', 'Home'], ['/?page=about', 'About']],
+      crumbs: [['/', 'Home'], ['/about', 'About']],
       kicker: 'About EMS',
       title,
       sub: 'A complete multi-store retail business management platform — built so that the numbers a shop runs on are recorded once, in one place.'
@@ -923,7 +944,7 @@ export function createPublicSite(deps) {
             ${updated ? `<li><b>Page updated</b>${esc(updated)}</li>` : ''}
           </ul>
           <div class="pub-aside-meta">
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=contact">Contact the team</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/contact">Contact the team</a>
           </div>
         </aside>
       </div>
@@ -944,7 +965,7 @@ export function createPublicSite(deps) {
     <h2>4 · Payments</h2>
     <p>License and add-on payments are made through the payment methods published in the product (bKash or Nagad) and are activated after manual verification. Rejected claims can be reviewed with the platform owner through the support channels provided in the product.</p>
     <h2>5 · Data</h2>
-    <p>Business records belong to the administrator account that created them. The platform owner operates the infrastructure and can access platform-level data required to run, secure and support the service. See the <a href="/?page=privacy">Privacy Policy</a> for how the software handles data.</p>
+    <p>Business records belong to the administrator account that created them. The platform owner operates the infrastructure and can access platform-level data required to run, secure and support the service. See the <a href="/privacy">Privacy Policy</a> for how the software handles data.</p>
     <h2>6 · Support</h2>
     <p>Support is handled through the HelpDesk built into the panels and through the contact form on this website. Questions about this document should be sent through the contact form.</p>`;
   }
@@ -968,8 +989,8 @@ export function createPublicSite(deps) {
             <li><b>Applies to</b>The website, the administrator panel and shop panels of this deployment</li>
           </ul>
           <div class="pub-aside-meta">
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=contact">Ask a question</a>
-            <a class="pub-btn pub-btn--ghost pub-btn--sm" href="/?page=privacy">Privacy Policy</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/contact">Ask a question</a>
+            <a class="pub-btn pub-btn--ghost pub-btn--sm" href="/privacy">Privacy Policy</a>
           </div>
         </aside>
       </div>
@@ -986,7 +1007,7 @@ export function createPublicSite(deps) {
       sub: 'The rules that govern an EMS account: what a license covers, how stores operate and what each role may do.',
       updated,
       bodyHtml,
-      crumbs: [['/', 'Home'], ['/?page=terms', 'Terms']]
+      crumbs: [['/', 'Home'], ['/terms', 'Terms']]
     });
   }
 
@@ -1015,13 +1036,13 @@ export function createPublicSite(deps) {
     <h2>5 · Your choices</h2>
     <p>Business records are managed by the administrator account that created them: an administrator can correct, export or delete records through the panels. Deleting a store or account removes its data from the active system, subject to the backups and retention the platform owner keeps for support, security and legal reasons.</p>
     <h2>6 · Questions</h2>
-    <p>For a question about this policy, or about the data held for your business, use the <a href="/?page=contact">contact form</a>. Signed-in administrators and staff can also reach the platform owner through HelpDesk inside the panels.</p>`;
+    <p>For a question about this policy, or about the data held for your business, use the <a href="/contact">contact form</a>. Signed-in administrators and staff can also reach the platform owner through HelpDesk inside the panels.</p>`;
     return legalLayout(b, {
       title: 'Privacy Policy',
       sub: 'What the EMS application stores, what it never sends anywhere, and how optional services change that.',
       updated: '',
       bodyHtml,
-      crumbs: [['/', 'Home'], ['/?page=privacy', 'Privacy']]
+      crumbs: [['/', 'Home'], ['/privacy', 'Privacy']]
     });
   }
 
@@ -1046,9 +1067,9 @@ export function createPublicSite(deps) {
           ${coverHtml(featured.cover_image_url)}
           <div class="pub-blog-featured-body">
             <div class="pub-blog-meta"><span>Latest</span><span>·</span><span>${esc(dateLong(featured.published_at))}</span></div>
-            <h2><a href="/?page=blog-post&amp;id=${encodeURIComponent(featured.id)}">${esc(featured.title)}</a></h2>
+            <h2><a href="/blog/${encodeURIComponent(featured.id)}">${esc(featured.title)}</a></h2>
             <p>${esc(featured.excerpt || 'Read the full article.')}</p>
-            <a class="pub-link" href="/?page=blog-post&amp;id=${encodeURIComponent(featured.id)}">Read article${GLYPH.arrow}</a>
+            <a class="pub-link" href="/blog/${encodeURIComponent(featured.id)}">Read article${GLYPH.arrow}</a>
           </div>
         </article>` : ''}
         ${rest.length ? `<div class="pub-blog-grid">
@@ -1056,14 +1077,14 @@ export function createPublicSite(deps) {
             ${coverHtml(post.cover_image_url)}
             <div class="pub-post-body">
               <div class="pub-blog-meta"><span>${esc(dateLong(post.published_at))}</span></div>
-              <h3><a href="/?page=blog-post&amp;id=${encodeURIComponent(post.id)}">${esc(post.title)}</a></h3>
+              <h3><a href="/blog/${encodeURIComponent(post.id)}">${esc(post.title)}</a></h3>
               <p>${esc(post.excerpt || 'Read the full article.')}</p>
-              <a class="pub-link" href="/?page=blog-post&amp;id=${encodeURIComponent(post.id)}">Read article${GLYPH.arrow}</a>
+              <a class="pub-link" href="/blog/${encodeURIComponent(post.id)}">Read article${GLYPH.arrow}</a>
             </div>
           </article>`).join('')}
         </div>` : ''}`;
     return `${pageHead({
-      crumbs: [['/', 'Home'], ['/?page=blog', 'Blog']],
+      crumbs: [['/', 'Home'], ['/blog', 'Blog']],
       kicker: 'Insights',
       title: `${b.product_name || 'EMS'} Insights`,
       sub: 'Notes on running retail operations with better records — product changes, workflow advice and how shops use EMS day to day.'
@@ -1075,7 +1096,7 @@ export function createPublicSite(deps) {
 
   function blogPostPage(b, post) {
     return `${pageHead({
-      crumbs: [['/', 'Home'], ['/?page=blog', 'Blog']],
+      crumbs: [['/', 'Home'], ['/blog', 'Blog']],
       kicker: 'Article',
       title: post.title || 'Article',
       meta: `<div class="pub-blog-meta"><span>${esc(dateLong(post.published_at))}</span>${post.author ? `<span>·</span><span>${esc(post.author)}</span>` : ''}</div>`
@@ -1087,8 +1108,8 @@ export function createPublicSite(deps) {
           ${post.excerpt ? `<p class="pub-article-excerpt">${esc(post.excerpt)}</p>` : ''}
           <div class="pub-article-body pub-prose" style="margin-top:22px">${paras(post.body)}</div>
           <div class="pub-article-foot">
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=blog">All articles</a>
-            <a class="pub-link" href="/?page=contact">Ask about EMS${GLYPH.arrow}</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/blog">All articles</a>
+            <a class="pub-link" href="/contact">Ask about EMS${GLYPH.arrow}</a>
           </div>
         </article>
       </div>
@@ -1102,7 +1123,7 @@ export function createPublicSite(deps) {
       ? paras(data.body)
       : `<p>Send a message and the team operating this EMS deployment will reply. Include your business name if you already have an account, so the answer can be specific.</p>`;
     return `${pageHead({
-      crumbs: [['/', 'Home'], ['/?page=contact', 'Contact']],
+      crumbs: [['/', 'Home'], ['/contact', 'Contact']],
       kicker: 'Contact',
       title,
       sub: 'Questions about licensing, multi-store setup or a plan that fits your business — send them here.'
@@ -1169,7 +1190,7 @@ export function createPublicSite(deps) {
   /* --- App Store ----------------------------------------------------- */
   function appStorePage(b) {
     return `${pageHead({
-      crumbs: [['/', 'Home'], ['/?page=app-store', 'App Store']],
+      crumbs: [['/', 'Home'], ['/app-store', 'App Store']],
       kicker: 'App Store',
       title: `${b.product_name || 'EMS'} apps`,
       sub: 'Official applications published for this EMS deployment. Download an available APK, or open an installable web app from a verified release. No account is needed to browse.'
@@ -1384,7 +1405,7 @@ export function createPublicSite(deps) {
           <p class="pub-small">TrueBill verifies invoices, return slips and exchange invoices. A record that cannot be verified may be mistyped, withdrawn, or issued by a system other than EMS.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap">
             <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/">Back to ${esc(b.product_name || 'EMS')}</a>
-            <a class="pub-btn pub-btn--ghost pub-btn--sm" href="/?page=contact">Contact the team</a>
+            <a class="pub-btn pub-btn--ghost pub-btn--sm" href="/contact">Contact the team</a>
           </div>
         </div>
       </div></div></section>`;
@@ -1395,7 +1416,7 @@ export function createPublicSite(deps) {
   /* =====================================================================
      GENERIC PUBLIC PAGE ROUTER
      ===================================================================== */
-  async function renderPage(page) {
+  async function renderPage(page, options) {
     bindShell();
     const slug = String(page || '').toLowerCase();
     if (slug === 'verify') { toast('A verification link is required to check a record.'); }
@@ -1420,16 +1441,16 @@ export function createPublicSite(deps) {
         return;
       }
       if (slug === 'blog-post') {
-        const id = new URLSearchParams(location.search).get('id');
+        const id = (options && options.id) || new URLSearchParams(location.search).get('id');
         let post;
         try { post = await api('public/blogs?id=' + encodeURIComponent(id || '')); }
         catch (error) {
-          app.innerHTML = shellHtml(b, 'blog', `${pageHead({ crumbs: [['/', 'Home'], ['/?page=blog', 'Blog']], kicker: 'Article', title: 'Article not found' })}
+          app.innerHTML = shellHtml(b, 'blog', `${pageHead({ crumbs: [['/', 'Home'], ['/blog', 'Blog']], kicker: 'Article', title: 'Article not found' })}
             <section class="pub-section"><div class="pub-shell"><div class="pub-empty">
               <span class="pub-empty-ic">${icon('file')}</span>
               <h2>This article is not available</h2>
               <p>${esc(error.message || 'The article may have been unpublished or the link may be incomplete.')}</p>
-              <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=blog">Back to all articles</a>
+              <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/blog">Back to all articles</a>
             </div></div></section>`);
           return;
         }
@@ -1464,24 +1485,24 @@ export function createPublicSite(deps) {
       const data = await cmsPage(slug);
       if (data) {
         document.title = `${data.title} · ${b.website_name || 'EMS'}`;
-        app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/?page=' + encodeURIComponent(slug), data.title]], kicker: 'Page', title: data.title })}
+        app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/' + encodeURIComponent(slug), data.title]], kicker: 'Page', title: data.title })}
           <section class="pub-section"><div class="pub-shell pub-legal"><div class="pub-legal-body">${paras(data.body) || '<p class="pub-muted">This page has no content yet.</p>'}</div></div></section>${ctaHtml()}`);
         return;
       }
-      app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/?page=' + encodeURIComponent(slug), 'Not found']], kicker: 'Not found', title: 'This page is not published' })}
+      app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/' + encodeURIComponent(slug), 'Not found']], kicker: 'Not found', title: 'This page is not published' })}
         <section class="pub-section"><div class="pub-shell"><div class="pub-empty">
           <span class="pub-empty-ic">${icon('file')}</span>
           <h2>Nothing lives at this address</h2>
           <p>The page you asked for is not published on this EMS deployment. The main pages below are all available.</p>
           <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
             <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/">Home</a>
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=about">About</a>
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=blog">Blog</a>
-            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/?page=contact">Contact</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/about">About</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/blog">Blog</a>
+            <a class="pub-btn pub-btn--secondary pub-btn--sm" href="/contact">Contact</a>
           </div>
         </div></div></section>`);
     } catch (error) {
-      app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/?page=' + encodeURIComponent(slug), 'Unavailable']], kicker: 'Error', title: 'This page could not be loaded' })}
+      app.innerHTML = shellHtml(b, '', `${pageHead({ crumbs: [['/', 'Home'], ['/' + encodeURIComponent(slug), 'Unavailable']], kicker: 'Error', title: 'This page could not be loaded' })}
         <section class="pub-section"><div class="pub-shell"><div class="pub-empty">
           <span class="pub-empty-ic">${icon('alert-triangle')}</span>
           <h2>The page is temporarily unavailable</h2>

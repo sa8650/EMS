@@ -66,6 +66,27 @@ test('public site scopes its theme to .pubsite and defines the documented tokens
   assert.match(css, /\.pubsite\s*\{[^}]*--pub-primary/);
 });
 
+test('the auth modal is styled independently of the active theme', () => {
+  const css = read('assets/css/app.css');
+  // Console themes put body.ob-on / .adm-on / .shp-on on the document, and the
+  // public element rules stop applying at that point. Anything the sign-in modal
+  // needs must therefore be declared under .authlayer as well.
+  for (const selector of ['.authlayer input', '.authlayer label', '.authlayer button', '.authlayer .tabs button']) {
+    assert.ok(css.includes(selector), `${selector} must be styled inside the layer`);
+  }
+  // and no auth-layer rule may sit behind the public-only :where() guard
+  const guarded = [...css.matchAll(/:where\(body:not[^{]*\{[^}]*\}/g)].map(m => m[0]).join('\n');
+  assert.doesNotMatch(guarded, /\.authlayer/, 'auth-layer rules must not be theme-gated');
+});
+
+test('_redirects covers every client-side route', () => {
+  const redirects = read('_redirects');
+  for (const path of ['/about', '/terms', '/privacy', '/blog', '/blog/*', '/contact', '/app-store', '/verify/*', '/invoice/*', '/owner', '/administrator', '/shop', '/ownerconsole', '/ownerconsole/*', '/administratorconsole', '/administratorconsole/*', '/shopconsole', '/shopconsole/*']) {
+    assert.ok(new RegExp(`^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+/\\s+200`, 'm').test(redirects), `_redirects is missing ${path}`);
+  }
+  assert.doesNotMatch(redirects, /^\/api/m, 'API routes are served by Pages Functions, not rewrites');
+});
+
 test('DESIGN_SYSTEM.md documents all twelve sections', () => {
   const doc = read('DESIGN_SYSTEM.md');
   for (let i = 1; i <= 12; i += 1) {

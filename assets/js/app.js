@@ -59,7 +59,7 @@ function toast(x,variant){const host=$('#toast');if(!host)return;const msg=Strin
  card.addEventListener('mouseenter',()=>clearTimeout(timer));card.addEventListener('mouseleave',arm);
  card.querySelector('.haloClose').onclick=dismiss;arm();return card}
 
-function sessionExpiry(token){try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp*1000}catch{return 0}}function scheduleLogout(){clearTimeout(sessionTimer);if(!state?.token)return;let ms=sessionExpiry(state.token)-Date.now();if(ms<=0)return logout();sessionTimer=setTimeout(()=>{toast('Your session has expired. Please sign in again.');setTimeout(logout,900)},ms)}function save(s){const scope=makeCshopCacheScope(s);if(cshopApiCacheScope!==scope){clearCshopApiCache();cshopApiCacheScope=scope}state=s;localStorage.setItem('ems.session',JSON.stringify(s));scheduleLogout()}function logout(){clearTimeout(sessionTimer);clearCshopApiCache();localStorage.removeItem('ems.session');localStorage.removeItem('ems.admin.return');state=null;location.reload()}
+function sessionExpiry(token){try{return JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).exp*1000}catch{return 0}}function scheduleLogout(){clearTimeout(sessionTimer);if(!state?.token)return;let ms=sessionExpiry(state.token)-Date.now();if(ms<=0)return logout();sessionTimer=setTimeout(()=>{toast('Your session has expired. Please sign in again.');setTimeout(logout,900)},ms)}function save(s){const scope=makeCshopCacheScope(s);if(cshopApiCacheScope!==scope){clearCshopApiCache();cshopApiCacheScope=scope}state=s;localStorage.setItem('ems.session',JSON.stringify(s));scheduleLogout()}function logout(){clearTimeout(sessionTimer);clearCshopApiCache();localStorage.removeItem('ems.session');localStorage.removeItem('ems.admin.return');state=null;setPath('/',true);location.reload()}
 function getVerifyToken(){
   let p=new URLSearchParams(location.search).get('verify');
   if(p)return p.trim();
@@ -79,20 +79,63 @@ function getVerifyToken(){
 --------------------------------------------------------------------------- */
 let publicSiteInstance = null;
 function publicSite() {
-  if (!publicSiteInstance) publicSiteInstance = createPublicSite({ api, esc, lucide, getQrSvg, mountAppStore, toast, showAuth, showEmsLogin, register, app });
+  if (!publicSiteInstance) publicSiteInstance = createPublicSite({ api, esc, lucide, getQrSvg, mountAppStore, toast, showAuth, showEmsLogin, register, navigate: (path) => setPath(path, false), app });
   return publicSiteInstance;
 }
 async function verificationPage(token) { return publicSite().renderVerification(token); }
-async function publicPage(page) { return publicSite().renderPage(page); }
+async function publicPage(page, options) { return publicSite().renderPage(page, options); }
 function login() {
+  closeAuthLayer();
   const verifyToken = getVerifyToken();
   const publicRoute = new URLSearchParams(location.search).get('page');
   if (verifyToken) return verificationPage(verifyToken);
   if (publicRoute) return publicPage(publicRoute);
-  const signIn = signInRoute();
-  if (signIn) return publicSite().renderLanding().then(() => { signIn(); });
+  const mode = signInRoute();
+  const route = routeFromPath();
+  if (route.kind === 'page') return publicPage(route.page, { id: route.id });
+  if (route.kind === 'verify') return verificationPage(route.token);
+  if (mode) return publicSite().renderLanding().then(() => { showSignIn(mode); });
   return publicSite().renderLanding();
 }
+/* Single entry point used at boot and by history navigation. */
+function bootView() {
+  const route = routeFromPath();
+  // A page requested by a console URL is consumed by that console only.
+  if (route.kind !== 'console') pendingConsolePage = '';
+  if (route.kind === 'page') return publicPage(route.page, { id: route.id });
+  if (route.kind === 'verify') return verificationPage(route.token);
+  if (route.kind === 'signin') {
+    // Already signed in as that role? Go straight to the console instead of
+    // asking again — this is what made a refresh re-open the sign-in modal.
+    const role = route.mode === 'shop' ? 'staff' : route.mode;
+    if (state && state.role === role) { setPath(consolePath(role, ''), true); scheduleLogout(); return home(); }
+    return publicSite().renderLanding().then(() => showSignIn(route.mode));
+  }
+  if (route.kind === 'console') {
+    if (!state) {
+      setPath(SIGN_IN_PATH[route.role] || '/', true);
+      return publicSite().renderLanding().then(() => showSignIn(roleSignInMode(route.role)));
+    }
+    if (state.role !== route.role) {
+      // Signed in as someone else: show them their own console.
+      setPath(consolePath(state.role, ''), true);
+      scheduleLogout();
+      return home();
+    }
+    pendingConsolePage = route.page;
+    scheduleLogout();
+    return home();
+  }
+  if (route.kind === 'unknown' && currentPath() !== '/') setPath('/', true);
+  if (state) {
+    // Signed in: the console is what renders, so the address bar says so.
+    setPath(consolePath(state.role, ''), true);
+    scheduleLogout();
+    return home();
+  }
+  return login();
+}
+window.addEventListener('popstate', () => { pendingConsolePage = ''; bootView(); });
 /* Every sign-in modal renders into #authlayer. It is created on demand so the
    modal works on any surface — the public pages and all three panels — without
    each renderer having to include the element. */
@@ -101,14 +144,91 @@ function authLayer(){
   if(!layer){layer=document.createElement('div');layer.id='authlayer';layer.className='authlayer';layer.hidden=true;document.body.append(layer)}
   return layer;
 }
-/* Path-based sign-in entry points: /owner, /admin and /shop render the public
-   page with the matching modal already open, so a link such as
-   https://your-domain/owner always lands on the owner sign-in. */
-const SIGN_IN_ROUTES={'/owner':()=>showEmsLogin(),'/admin':()=>showAuth('admin'),'/shop':()=>showAuth('shop')};
-function signInRoute(){
-  const path=String(location.pathname||'/').toLowerCase().replace(/\/+$/,'')||'/';
-  return SIGN_IN_ROUTES[path]||null;
+/* ═══════════════════════════════════════════════════════════════════════════
+   URL ROUTES
+   Every surface owns a real path, so a refresh — or a link pasted into a chat —
+   lands on the same page instead of falling back to the public landing page:
+
+     /                                          public landing page
+     /about /terms /privacy /blog /contact /app-store
+     /blog/<id>                                 blog article
+     /verify/<token> · /invoice/<token>          TrueBill verification (?verify= still works)
+     /owner · /administrator · /shop             sign-in modals for each role
+     /ownerconsole/<page>                        Owner Console
+     /administratorconsole/<page>                 Administrator Panel
+     /shopconsole/<page>                          Shop Panel
+
+   `consolePath()` writes the path back with history.replaceState whenever a
+   panel page changes, and `_redirects` rewrites every path to the app shell so
+   Cloudflare Pages never answers with a 404.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const PUBLIC_ROUTES={'/about':'about','/terms':'terms','/privacy':'privacy','/blog':'blog','/contact':'contact','/app-store':'app-store'};
+const SIGN_IN_ROUTES={'/owner':'owner','/administrator':'admin','/admin':'admin','/shop':'shop'};
+const SIGN_IN_PATH={owner:'/owner',admin:'/administrator',staff:'/shop'};
+const CONSOLES={'/ownerconsole':{role:'owner',fallback:'overview'},'/administratorconsole':{role:'admin',fallback:'stores'},'/shopconsole':{role:'staff',fallback:''}};
+/* Page requested by the URL and consumed by the panel's first render. */
+let pendingConsolePage='';
+
+function currentPath(){return String(location.pathname||'/').replace(/\/+/g,'/').replace(/\/+$/,'').toLowerCase()||'/'}
+function setPath(path,replace){
+  if(!path)return;
+  try{
+    const same=path===currentPath()+((location.search&&path==='/')?location.search:'');
+    if(same)return;
+    if(replace===false)history.pushState({},'',path);else history.replaceState({},'',path);
+  }catch{/* sandboxed or file:// contexts */ }
 }
+function consoleBase(role){return role==='owner'?'/ownerconsole':role==='admin'?'/administratorconsole':role==='staff'?'/shopconsole':''}
+function consolePath(role,page){
+  const base=consoleBase(role);
+  if(!base)return '/';
+  const entry=CONSOLES[base];
+  // The default page of a console lives at the bare console path.
+  if(!page||page===entry.fallback||page==='dashboard')return base;
+  return `${base}/${page}`;
+}
+function syncConsoleUrl(role,page){if(!state)return;setPath(consolePath(role,page),true)}
+function showSignIn(mode){if(mode==='owner')showEmsLogin();else showAuth(mode==='shop'?'shop':'admin')}
+function roleSignInMode(role){return role==='owner'?'owner':role==='staff'?'shop':'admin'}
+/* Resolve location.pathname to a view. */
+function routeFromPath(){
+  const p=currentPath();
+  if(p==='/')return{kind:'landing'};
+  const verify=p.match(/^\/(?:invoice|verify)\/([a-z0-9_-]+)$/);
+  if(verify)return{kind:'verify',token:verify[1]};
+  const post=p.match(/^\/blog\/([a-z0-9_%-]+)$/);
+  if(post)return{kind:'page',page:'blog-post',id:decodeURIComponent(post[1])};
+  if(PUBLIC_ROUTES[p])return{kind:'page',page:PUBLIC_ROUTES[p]};
+  if(SIGN_IN_ROUTES[p])return{kind:'signin',mode:SIGN_IN_ROUTES[p]};
+  const consoleMatch=p.match(/^\/(ownerconsole|administratorconsole|shopconsole)(?:\/([a-z0-9-]+))?$/);
+  if(consoleMatch){
+    const entry=CONSOLES['/'+consoleMatch[1]];
+    return{kind:'console',role:entry.role,page:consoleMatch[2]||''};
+  }
+  return{kind:'unknown',path:p};
+}
+function signInRoute(){const r=routeFromPath();return r.kind==='signin'?SIGN_IN_ROUTES[currentPath()]:null}
+/* Keep the address bar honest whenever a panel renders a page. */
+/* Shop slugs differ per business type, so validate a URL page against all of them. */
+function shopLabel(slug){
+  if(!slug)return '';
+  return SHP_LABEL[slug]||PSHOP_LABEL[slug]||CSHOP_LABEL[slug]||SSSHOP_LABEL[slug]||'';
+}
+function syncConsolePage(role,page){if(!state)return;if(state.role!==role)return;setPath(consolePath(role,page),true)}
+function closeAuthLayer(){const layer=$('#authlayer');if(!layer)return;layer.hidden=true;layer.innerHTML=''}
+/* Closing a sign-in modal also gives the URL back, so a refresh does not
+   re-open the dialog the visitor already dismissed. */
+function dismissSignIn(){
+  closeAuthLayer();
+  if(SIGN_IN_ROUTES[currentPath()])setPath('/',true);
+}
+try{
+  document.addEventListener('keydown',event=>{
+    if(event.key!=='Escape')return;
+    const layer=$('#authlayer');
+    if(layer&&!layer.hidden)dismissSignIn();
+  });
+}catch{/* no document (tests) */}
 function forgotPassword(type){
   const label=type==='owner'?'EMS Owner':type==='admin'?'Administrator':'Shop staff';
   const back=()=>{if(type==='owner')showEmsLogin();else if(type==='admin')showAuth('admin');else showAuth('shop')};
@@ -143,10 +263,10 @@ function forgotPassword(type){
 }
 
 
-function showAuth(mode){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">EMS ACCESS</p><div class="tabs"><button class="${mode==='admin'?'on':''}" id="tabAdmin">Administrator</button><button class="${mode==='shop'?'on':''}" id="tabShop">Shop staff</button></div><form id="authform" class="fields">${mode==='admin'?`<h2>Administrator sign in</h2><label>Email<input name="email" type="email" required></label><label>Password<input name="password" type="password" minlength="10" required></label><button>Sign in</button><button class="linkbutton" type="button" id="forgotAdmin">Forgot password?</button><button class="linkbutton" type="button" id="register">Create administrator account</button>`:`<h2>Shop sign in</h2><label>4-digit Shop ID<input name="storeId" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="Example: 1234" required></label><label>Staff User ID or Administrator Email<input name="userId" required></label><label>Password<input name="password" type="password" required></label><button>Sign in to shop</button><button class="linkbutton" type="button" id="forgotShop">Forgot password?</button>`}</form></div>`;$('#closeAuth').onclick=()=>{layer.hidden=true};$('#tabAdmin').onclick=()=>showAuth('admin');$('#tabShop').onclick=()=>showAuth('shop');let reg=$('#register');if(reg)reg.onclick=register;let fa=$('#forgotAdmin');if(fa)fa.onclick=()=>forgotPassword('admin');let fs=$('#forgotShop');if(fs)fs.onclick=()=>forgotPassword('staff');$('#authform').onsubmit=async e=>{e.preventDefault();try{let b=Object.fromEntries(new FormData(e.target));let r=await api('auth/'+(mode==='admin'?'admin/login':'shop/login'),{method:'POST',body:JSON.stringify(b)});if(r.adminReturn)localStorage.setItem('ems.admin.return',JSON.stringify(r.adminReturn));save(r);home()}catch(x){toast(x.message)}}}
-function showEmsLogin(){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">PRIVATE PLATFORM ACCESS</p><form class="fields" id="emsform"><h2>EMS login</h2><p class="muted">For the EMS platform owner only.</p><label>Email<input name="email" type="email" required></label><label>Password<input name="password" type="password" required></label><button>Sign in to EMS control</button><button class="linkbutton" type="button" id="forgotOwner">Forgot password?</button><button class="linkbutton" type="button" id="initializeOwner">Initialize first EMS owner</button></form></div>`;$('#closeAuth').onclick=()=>layer.hidden=true;$('#initializeOwner').onclick=()=>emsRegister();$('#forgotOwner').onclick=()=>forgotPassword('owner');$('#emsform').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/ems/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));home()}catch(x){toast(x.message)}}}
-function emsRegister(){let layer=authLayer();layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">ONE-TIME INITIALIZATION</p><form class="fields" id="ownerform"><h2>Create EMS owner</h2><p class="muted">This is available only while no EMS owner exists. Use a private, strong password.</p><label>Name<input name="name" required></label><label>Email<input name="email" type="email" required></label><label>Password <span class="muted">(12+ characters)</span><input name="password" type="password" minlength="12" required></label><button>Initialize EMS owner</button><button class="linkbutton" type="button" id="backEms">Back to EMS login</button></form></div>`;$('#closeAuth').onclick=()=>layer.hidden=true;$('#backEms').onclick=showEmsLogin;$('#ownerform').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/ems/register',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));home()}catch(x){toast(x.message)}}}
-function register(){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">START WITH EMS</p><form class="fields" id="reg"><h2>Create administrator account</h2><div class="grid2"><label>Full name<input name="name" required></label><label>Phone<input name="phone" required></label></div><label>Address<textarea name="address"></textarea></label><label>Email<input name="email" type="email" required></label><label>Password <span class="muted">(10+ characters)</span><input name="password" type="password" minlength="10" required></label><button>Create account</button><button type="button" class="linkbutton" id="backLogin">Back to sign in</button></form></div>`;$('#closeAuth').onclick=()=>layer.hidden=true;$('#backLogin').onclick=()=>showAuth('admin');$('#reg').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/admin/register',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));home()}catch(x){toast(x.message)}}}
+function showAuth(mode){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">EMS ACCESS</p><div class="tabs"><button class="${mode==='admin'?'on':''}" id="tabAdmin">Administrator</button><button class="${mode==='shop'?'on':''}" id="tabShop">Shop staff</button></div><form id="authform" class="fields">${mode==='admin'?`<h2>Administrator sign in</h2><label>Email<input name="email" type="email" required></label><label>Password<input name="password" type="password" minlength="10" required></label><button>Sign in</button><button class="linkbutton" type="button" id="forgotAdmin">Forgot password?</button><button class="linkbutton" type="button" id="register">Create administrator account</button>`:`<h2>Shop sign in</h2><label>4-digit Shop ID<input name="storeId" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="Example: 1234" required></label><label>Staff User ID or Administrator Email<input name="userId" required></label><label>Password<input name="password" type="password" required></label><button>Sign in to shop</button><button class="linkbutton" type="button" id="forgotShop">Forgot password?</button>`}</form></div>`;$('#closeAuth').onclick=dismissSignIn;$('#tabAdmin').onclick=()=>showAuth('admin');$('#tabShop').onclick=()=>showAuth('shop');let reg=$('#register');if(reg)reg.onclick=register;let fa=$('#forgotAdmin');if(fa)fa.onclick=()=>forgotPassword('admin');let fs=$('#forgotShop');if(fs)fs.onclick=()=>forgotPassword('staff');$('#authform').onsubmit=async e=>{e.preventDefault();try{let b=Object.fromEntries(new FormData(e.target));let r=await api('auth/'+(mode==='admin'?'admin/login':'shop/login'),{method:'POST',body:JSON.stringify(b)});if(r.adminReturn)localStorage.setItem('ems.admin.return',JSON.stringify(r.adminReturn));save(r);closeAuthLayer();home()}catch(x){toast(x.message)}}}
+function showEmsLogin(){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">PRIVATE PLATFORM ACCESS</p><form class="fields" id="emsform"><h2>EMS login</h2><p class="muted">For the EMS platform owner only.</p><label>Email<input name="email" type="email" required></label><label>Password<input name="password" type="password" required></label><button>Sign in to EMS control</button><button class="linkbutton" type="button" id="forgotOwner">Forgot password?</button><button class="linkbutton" type="button" id="initializeOwner">Initialize first EMS owner</button></form></div>`;$('#closeAuth').onclick=dismissSignIn;$('#initializeOwner').onclick=()=>emsRegister();$('#forgotOwner').onclick=()=>forgotPassword('owner');$('#emsform').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/ems/login',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));closeAuthLayer();home()}catch(x){toast(x.message)}}}
+function emsRegister(){let layer=authLayer();layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">ONE-TIME INITIALIZATION</p><form class="fields" id="ownerform"><h2>Create EMS owner</h2><p class="muted">This is available only while no EMS owner exists. Use a private, strong password.</p><label>Name<input name="name" required></label><label>Email<input name="email" type="email" required></label><label>Password <span class="muted">(12+ characters)</span><input name="password" type="password" minlength="12" required></label><button>Initialize EMS owner</button><button class="linkbutton" type="button" id="backEms">Back to EMS login</button></form></div>`;$('#closeAuth').onclick=dismissSignIn;$('#backEms').onclick=showEmsLogin;$('#ownerform').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/ems/register',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));closeAuthLayer();home()}catch(x){toast(x.message)}}}
+function register(){let layer=authLayer();layer.hidden=false;layer.innerHTML=`<div class="authmodal"><button class="close" id="closeAuth">×</button><p class="eyebrow">START WITH EMS</p><form class="fields" id="reg"><h2>Create administrator account</h2><div class="grid2"><label>Full name<input name="name" required></label><label>Phone<input name="phone" required></label></div><label>Address<textarea name="address"></textarea></label><label>Email<input name="email" type="email" required></label><label>Password <span class="muted">(10+ characters)</span><input name="password" type="password" minlength="10" required></label><button>Create account</button><button type="button" class="linkbutton" id="backLogin">Back to sign in</button></form></div>`;$('#closeAuth').onclick=dismissSignIn;$('#backLogin').onclick=()=>showAuth('admin');$('#reg').onsubmit=async e=>{e.preventDefault();try{save(await api('auth/admin/register',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))}));closeAuthLayer();home()}catch(x){toast(x.message)}}}
 const LUCIDE={
 search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
 trash:'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/>',
@@ -303,6 +423,7 @@ function playCshopStartupMotion(){
 function pshopContext(isCurrent=()=>true){return {api,state,esc,money,toast,canAccess,navigate:page,$,lucide,isCurrent,shpModal,openItemPicker,invoiceFormHTML,wireInvoiceForm,invoiceView}}
 function sshopContext(isCurrent=()=>true){return {api,state,esc,money,toast,canAccess,navigate:page,$,lucide,isCurrent}}
 async function page(p){
+  syncConsolePage('staff',p);
   leaveBillingScanner();
   const requestId=++cshopPageRequestId,isCurrent=()=>requestId===cshopPageRequestId;
   /* Console report pages are tabs of the sidebar "Report" entry, so the shared
@@ -600,11 +721,14 @@ function adminHome(){stopCshopMotion(true);document.body.classList.remove('shp-o
   document.querySelectorAll('[data-admin-page]').forEach(x=>x.onclick=()=>adminPage(x.dataset.adminPage));
   $('#admTheme').onclick=()=>{const next=document.body.dataset.admTheme==='dark'?'light':'dark';document.body.dataset.admTheme=next;localStorage.setItem('ems.admTheme',next);$('#admTheme').innerHTML=next==='dark'?ADM_SUN:ADM_MOON};
   if(state.licenseExpired)readOnlyNotice();
-  adminPage('stores')
+  const wanted=pendingConsolePage;pendingConsolePage='';
+  const start=ADM_LABEL[wanted]?wanted:'';
+  adminPage(start||'stores')
 }
 
 async function adminPage(p){
   if(p==='connectx')return adminPage('stores');
+  syncConsolePage('admin',p);
   document.body.classList.toggle('adm-fixed-page', p==='helpdesk');
   document.querySelectorAll('[data-admin-page]').forEach(x=>x.classList.toggle('on',x.dataset.adminPage===p));
   const t=$('#admTopTitle');if(t)t.textContent=ADM_LABEL[p]||p;
@@ -651,10 +775,12 @@ function ownerHome(){resumeOwnerCatalogImport(api,state.user?.id);stopCshopMotio
   document.querySelectorAll('[data-owner-page]').forEach(x=>x.onclick=()=>ownerPage(x.dataset.ownerPage));
   api('platform/helpdesk').then(list=>{const n=list.reduce((t,a)=>t+(a.unread||0),0),b=$('#ohbBadge');if(b){b.textContent=n;b.hidden=n===0}}).catch(()=>{});
   $('#obTheme').onclick=()=>{const next=document.body.dataset.obTheme==='dark'?'light':'dark';document.body.dataset.obTheme=next;localStorage.setItem('ems.obTheme',next);$('#obTheme').innerHTML=next==='dark'?OB_SUN:OB_MOON};
-  ownerPage('overview')
+  const wantedOwner=pendingConsolePage;pendingConsolePage='';
+  ownerPage(OB_LABEL[wantedOwner]?wantedOwner:'overview')
 }
 
 async function ownerPage(p){
+  syncConsolePage('owner',p);
   document.querySelectorAll('[data-owner-page]').forEach(x=>x.classList.toggle('on',x.dataset.ownerPage===p));
   const t=$('#obTopTitle');if(t)t.textContent=OB_LABEL[p]||p;
   let el=$('#page');el.innerHTML=skelFor(OB_SKEL,p);
@@ -2402,7 +2528,9 @@ function shopHome(){
   if($('#shpScannerLogin'))$('#shpScannerLogin').onclick=()=>openScannerSignIn(api);
   if($('#returnAdmin'))$('#returnAdmin').onclick=()=>{let r=JSON.parse(localStorage.getItem('ems.admin.return')||'null');if(r){save(r);localStorage.removeItem('ems.admin.return');home()}};
   document.querySelectorAll('[data-page]').forEach(x=>x.onclick=()=>page(x.dataset.page));
-  page(isClothing?'clothing-dashboard':isPharmacy?'pharmacy-dashboard':isSupershop?'supershop-dashboard':(visible[0]?.[3]||(visible[0]?.[0]||'dashboard').toLowerCase().replaceAll(' ','-')));
+  const wantedShop=pendingConsolePage;pendingConsolePage='';
+  const defaultShopPage=isClothing?'clothing-dashboard':isPharmacy?'pharmacy-dashboard':isSupershop?'supershop-dashboard':(visible[0]?.[3]||(visible[0]?.[0]||'dashboard').toLowerCase().replaceAll(' ','-'));
+  page(shopLabel(wantedShop)?wantedShop:defaultShopPage);
   if(state.readOnly||state.licenseExpired)readOnlyNotice()
 }
 
@@ -6238,7 +6366,8 @@ document.addEventListener('click',e=>{
 document.addEventListener('keydown',e=>{if(e.key==='Escape')drawerClose()});
 addEventListener('resize',()=>{if(window.innerWidth>960)drawerClose()});
 
-let initialVerifyToken=getVerifyToken();if(initialVerifyToken){verificationPage(initialVerifyToken)}else if(new URLSearchParams(location.search).get('page')){publicPage(new URLSearchParams(location.search).get('page'))}else if(signInRoute()){login()}else if(state){scheduleLogout();home()}else login();
+/* Boot: one resolver for every URL (see URL ROUTES above). */
+bootView();
 
 /* ===== Premium Add-Ons ===== */
 let addonCart=[],addonCoupon=null;

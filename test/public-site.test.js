@@ -55,6 +55,7 @@ function mount({ plans = PLANS, posts = [], pages = {}, invoice = null } = {}) {
     showAuth: mode => calls.push('showAuth:' + mode),
     showEmsLogin: () => calls.push('showEmsLogin'),
     register: () => calls.push('register'),
+    navigate: path => calls.push('navigate:' + path),
     app: dom.window.document.getElementById('app')
   });
   return {
@@ -86,7 +87,7 @@ test('Landing page states the positioning, keeps every required section and labe
     assert.equal(doc.querySelectorAll('.pub-plan').length, PLANS.length, 'one card per published plan');
     assert.match(doc.querySelector('.pub-preview-note').textContent, /sample data/i);
     assert.match(text, /Powered by|powered by/i);
-    assert.equal(doc.querySelector('a[href="/?page=privacy"]').getAttribute('href'), '/?page=privacy');
+    assert.equal(doc.querySelector('.pub-foot-col a[href="/privacy"]').textContent.trim(), 'Privacy Policy', 'public pages use path URLs');
   } finally { env.restore(); }
 });
 
@@ -154,10 +155,9 @@ test('Blog listing, article and contact form keep their routes and submit behavi
     const doc = env.dom.window.document;
     assert.equal(doc.querySelectorAll('.pub-blog-featured').length, 1);
     assert.equal(doc.querySelectorAll('.pub-post-card').length, 1);
-    assert.match(doc.querySelector('.pub-blog-featured a').getAttribute('href'), /page=blog-post&id=1/);
+    assert.equal(doc.querySelector('.pub-blog-featured a').getAttribute('href'), '/blog/1', 'articles link to /blog/<id>');
 
-    env.dom.window.history.replaceState({}, '', '/?page=blog-post&id=1');
-    await env.site.renderPage('blog-post');
+    await env.site.renderPage('blog-post', { id: '1' });
     await new Promise(resolve => setTimeout(resolve, 10));
     assert.match(doc.querySelector('.pub-article-body').textContent, /Body one/);
 
@@ -219,7 +219,7 @@ test('Invoice verification renders verified, failed and loading states from the 
   } finally { bad.restore(); }
 });
 
-test('Public navigation exposes the sign-in paths without crowding the primary links', async () => {
+test('Public navigation exposes the sign-in paths as path links, never buttons', async () => {
   const env = mount();
   try {
     await env.site.renderLanding();
@@ -228,23 +228,30 @@ test('Public navigation exposes the sign-in paths without crowding the primary l
     const navLinks = [...doc.querySelectorAll('.pubnav-links a')].map(a => a.textContent.trim());
     assert.deepEqual(navLinks, ['Features', 'How it works', 'Pricing', 'About', 'Blog', 'Contact']);
 
-    // staff/admin sign-in are still buttons handled by the app's modal layer
-    const drawer = doc.getElementById('pubDrawer');
-    assert.ok(drawer.querySelector('[data-pub-auth="admin"]'), 'administrator login reachable from the drawer');
-    assert.ok(drawer.querySelector('[data-pub-auth="shop"]'), 'shop login reachable from the drawer');
-
-    // the platform owner signs in through a plain path link, never a button
-    assert.equal(doc.querySelectorAll('[data-pub-auth="owner"]').length, 0, 'no owner sign-in button anywhere');
-    const ownerLinks = [...doc.querySelectorAll('a[href="/owner"]')];
-    assert.equal(ownerLinks.length, 4, 'nav, drawer, footer and access-levels card link to /owner');
+    // Every sign-in entry point is a real link, so it works without JS, survives a
+    // refresh and produces a shareable URL: /administrator, /shop and /owner.
+    const find = (scope, selector) => [...doc.querySelectorAll(scope + ' ' + selector)];
+    assert.equal(doc.querySelector('.pubnav-actions a[href="/administrator"]').dataset.pubAuth, 'admin');
+    assert.equal(doc.querySelector('.pubnav-actions a[href="/shop"]').dataset.pubAuth, 'shop');
     assert.equal(doc.querySelector('.pubnav-actions a[href="/owner"]').textContent.trim(), 'Owner login');
+    assert.equal(doc.querySelectorAll('[data-pub-auth="owner"]').length, 0, 'the owner is never a button');
+    assert.equal(find('#pubDrawer', 'a[href="/administrator"]').length, 1);
+    assert.equal(find('.pub-foot-col', 'a[href="/owner"]').length, 1);
+    assert.equal(doc.querySelectorAll('a[href="/owner"]').length, 4, 'nav, drawer, footer and the access-levels card');
 
-    const footerLinks = [...doc.querySelectorAll('.pub-foot-col button')].map(b => b.dataset.pubAuth).sort();
-    assert.deepEqual(footerLinks, ['admin', 'shop']);
+    // no sign-in control is a <button> any more
+    const signInButtons = [...doc.querySelectorAll('button')].filter(b => ['admin', 'shop', 'owner'].includes(b.dataset.pubAuth));
+    assert.deepEqual(signInButtons, [], 'sign-in controls are links, not buttons');
 
-    doc.querySelector('.pubnav-actions [data-pub-auth="admin"]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true }));
+    doc.querySelector('.pubnav-actions a[href="/administrator"]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }));
     doc.querySelector('.pubnav-actions [data-pub-register]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true }));
     assert.ok(env.calls.includes('showAuth:admin'));
     assert.ok(env.calls.includes('register'));
+    assert.ok(env.calls.includes('navigate:/administrator'), 'the address bar follows the click');
+
+    // the owner link opens its modal in place too, and keeps the URL
+    doc.querySelector('.pubnav-signin a[href="/owner"]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }));
+    assert.ok(env.calls.includes('showEmsLogin'));
+    assert.ok(env.calls.includes('navigate:/owner'));
   } finally { env.restore(); }
 });

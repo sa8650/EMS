@@ -345,6 +345,87 @@ body {
 }
 .authmodal .tabs { padding-right: 24px; }
 
+/* The auth layer belongs to every surface, so its controls are styled here
+   directly instead of inheriting the public element rules above — those stop
+   applying the moment a console puts body.ob-on / body.adm-on / body.shp-on on
+   the document, which used to leave an open sign-in modal unstyled. */
+.authlayer .authmodal h2 { font: 700 20px/1.25 inherit; margin: 0 0 18px; color: var(--navy); }
+.authlayer .authmodal p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.authlayer label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+.authlayer input,
+.authlayer select,
+.authlayer textarea {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.authlayer input:focus,
+.authlayer select:focus,
+.authlayer textarea:focus {
+  border-color: var(--blue);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(15,118,110,.16);
+}
+.authlayer button {
+  cursor: pointer;
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 16px;
+  background: var(--blue);
+  color: #fff;
+  font: inherit;
+  font-weight: 650;
+  transition: background .15s ease, opacity .15s ease;
+}
+.authlayer button:hover { background: var(--theme-button-hover, #0b5f59); }
+.authlayer button:disabled { opacity: .45; cursor: not-allowed; }
+.authlayer button.linkbutton {
+  background: transparent;
+  color: var(--blue);
+  padding: 4px;
+  text-align: left;
+  font-weight: 600;
+}
+.authlayer .tabs { display: flex; gap: 8px; margin-bottom: 22px; }
+.authlayer .tabs button { background: #eaf3f1; color: var(--navy); }
+.authlayer .tabs button.on { background: var(--blue); color: #fff; }
+.authlayer .close {
+  position: absolute;
+  right: 15px;
+  top: 11px;
+  background: transparent;
+  color: var(--text);
+  font-size: 24px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+}
+.authlayer .close:hover { background: #eaf3f1; color: var(--navy); }
+.authlayer .fields { display: grid; gap: 13px; }
+.authlayer .grid2 { display: grid; gap: 13px; grid-template-columns: 1fr 1fr; }
+.authlayer .muted { color: var(--muted); font-weight: 400; font-size: 13px; }
+.authlayer .eyebrow {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--blue);
+}
+
 #toast.haloHost {
   position: fixed; z-index: 2147483647; top: 18px; right: 18px; width: min(380px, calc(100vw - 24px));
   display: grid; gap: 10px; pointer-events: none;

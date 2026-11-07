@@ -492,36 +492,43 @@ Rendered by `assets/js/public_site.js`, styled by `assets/css/public.css`
 |---|---|---|
 | `/` | `renderLanding()` | Hero + audience strip + bento operations + steps + roles + multi-store split + services + pricing + FAQ + CTA |
 | `/?page=about` | `renderPage('about')` | Editorial: page head, CMS prose + sticky fact card, values strip, CTA |
-| `/?page=terms` | `renderPage('terms')` | Long-form: page head, 74ch measure, document meta aside |
-| `/?page=privacy` | `renderPage('privacy')` | Long-form (built-in page — no CMS slug needed) |
-| `/?page=blog` | `renderPage('blog')` | Featured article split + card grid |
-| `/?page=blog-post&id=…` | `renderPage('blog-post')` | 760px article column |
-| `/?page=contact` | `renderPage('contact')` | Split: editorial copy + form card |
-| `/?page=app-store` | `renderPage('app-store')` | Page head + `.pub-store-shell` wrapping `mountAppStore()` |
-| `/owner` · `/admin` · `/shop` | `signInRoute()` → landing + modal | Path-based sign-in links (`_redirects` rewrites them to the app shell) |
+| `/terms` | `renderPage('terms')` | Long-form: page head, 74ch measure, document meta aside |
+| `/privacy` | `renderPage('privacy')` | Long-form (built-in page — no CMS slug needed) |
+| `/blog` | `renderPage('blog')` | Featured article split + card grid |
+| `/blog/<id>` | `renderPage('blog-post', { id })` | 760px article column |
+| `/contact` | `renderPage('contact')` | Split: editorial copy + form card |
+| `/app-store` | `renderPage('app-store')` | Page head + `.pub-store-shell` wrapping `mountAppStore()` |
+| `/owner` · `/administrator` · `/shop` | `bootView()` → landing + modal | Path-based sign-in links (`_redirects` rewrites them to the app shell) |
+| `/ownerconsole/<page>` · `/administratorconsole/<page>` · `/shopconsole/<page>` | `bootView()` → `home()` → panel page | Refresh keeps you in the console; the path follows every sidebar click |
 | `/?verify=<token>` etc. | `renderVerification()` | Verification card (see below) |
 
 ### Public navigation
 
 Links: Features (`/#operations`), How it works (`/#how-it-works`), Pricing
-(`/#pricing`), About, Blog, Contact. Actions: Administrator login, Shop login,
-Owner login, Create account.
+(`/#pricing`), About (`/about`), Blog (`/blog`), Contact (`/contact`). Sign-in
+group: `/administrator`, `/shop`, `/owner` as `.pubnav-signin` text links.
+Primary action: **Create account** (`<button data-pub-register>`, the only nav
+control that is a button, because it only opens a modal).
 
-Two rules that must survive future edits:
+Rules that must survive future edits:
 
-1. **Sign-in controls are buttons only where they open a modal.** Administrator
-   and shop sign-in are `<button data-pub-auth>`; "Create account" is
-   `<button data-pub-register>`. They are wired once in `bindShell()` by
-   delegation on `document`, so they keep working after every re-render.
-2. **The platform owner uses a link, not a button.** Every owner entry point is
-   `<a href="/owner">` (nav, mobile drawer, footer "Access & legal" column,
-   access-levels card). `/owner` renders the landing with the owner modal
-   already open, so the address is shareable and customer sign-up is never
-   confused with platform access.
-
-Modals render into `#authlayer`, created on demand by `authLayer()` in `app.js`
-and appended to `<body>` — never inside `.pubsite`, and never assumed to exist in
-the markup. If a modal does not open, that accessor is the first place to look.
+1. **Sign-in is a link, never a button.** Every sign-in entry point — nav, mobile
+   drawer, footer, access-levels card — is `<a href="/administrator|/shop|/owner">`.
+   Inner pages of the app are paths too (`/about`, `/blog/<id>`, `/ownerconsole/licenses`),
+   so refresh, back and shared links all work. `_redirects` must list every new
+   path or Cloudflare Pages will answer with a 404.
+2. **Clicks are intercepted, links are not.** `bindShell()` delegates on
+   `document`: a click on `[data-pub-auth]` prevents the navigation, pushes the
+   path with `navigate()` and opens the modal in place, so the URL and the modal
+   never disagree. The `href` is the no-JS and share-link fallback.
+3. **The modal is a component, not a global.** Modals render into `#authlayer`,
+   created on demand by `authLayer()` and appended to `<body>`. It is hidden and
+   emptied by `closeAuthLayer()` on every successful sign-in and by
+   `dismissSignIn()` (close button, Escape) which also releases the sign-in URL.
+   Its controls are styled under `.authlayer` in `app.css`, never by the
+   theme-scoped element rules, so it renders identically over the public site and
+   over a dark Owner Console. If a modal looks unstyled or stays open, start at
+   those three functions.
 
 ### Hero composition
 
@@ -643,6 +650,16 @@ Rules:
   transition to `0.001ms`, stops infinite shimmer/pulse loops and cancels hover
   transforms. Panels implement the same guard per stylesheet.
 - Never autoplay video, never animate a background behind body copy.
+
+### Sign-in layer lifecycle
+
+| Event | Result |
+|---|---|
+| Click a sign-in link (`/administrator`, `/shop`, `/owner`) | path pushed, modal opens over the current page |
+| Successful sign-in or registration | layer hidden **and** emptied, URL becomes the console |
+| Close button or `Escape` | layer hidden and emptied; a sign-in path returns to `/` |
+| Sign-in path with a live session | straight to that console — no dialog |
+| Refresh inside a console | same console page, no dialog (`_redirects` + `bootView()`) |
 
 ---
 
