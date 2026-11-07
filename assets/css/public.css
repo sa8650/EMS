@@ -419,6 +419,7 @@
   font-size: 13.5px;
   font-weight: 600;
   letter-spacing: -0.005em;
+  white-space: nowrap;   /* flex items shrink; the labels must not wrap */
   transition: color 0.14s ease, background 0.14s ease;
 }
 .pubsite .pubnav-links a:hover { color: var(--pub-ink); background: var(--pub-inset2); }
@@ -429,6 +430,7 @@
 .pubsite .pubnav-signin a {
   display: inline-flex;
   align-items: center;
+  white-space: nowrap;
   padding: 7px 9px;
   border-radius: 9px;
   font-size: 12.6px;
@@ -1890,7 +1892,9 @@
   .pub-hero-copy { max-width: none; }
   .pub-preview-wrap { max-width: 660px; }
   .pub-preview-float { right: 0; bottom: -12px; }
-  .pub-preview-note { margin-bottom: 8px; max-width: 100%; }
+  /* Keep the sample-data label on one line: wrapping it splits the sentence
+     across two rows and reads like two separate labels. */
+  .pub-preview-note { margin-bottom: 8px; max-width: 100%; font-size: 8px; letter-spacing: 0.05em; white-space: nowrap; }
   .pub-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pub-step:nth-child(4) { border-left: 0; padding-left: 0; }
   .pub-step:nth-child(4)::before { left: 0; }

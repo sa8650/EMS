@@ -15,7 +15,10 @@ const PAGES = [
   ['/privacy', 'privacy'],
   ['/blog', 'blog list'],
   ['/contact', 'contact'],
-  ['/app-store', 'app store']
+  ['/app-store', 'app store'],
+  ['/scanner/', 'mobile scanner'],
+  ['/verify/abc123', 'verify (unknown token)'],
+  ['/pricing', 'catch-all path']
 ];
 
 const problems = [];
@@ -30,7 +33,15 @@ for (const [path, label] of PAGES) {
   const failedRequests = [];
   const badResponses = [];
 
-  page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+  /* "Failed to load resource" is the browser narrating a non-2xx response. The
+     audit already inspects every non-API response below, and API failures are
+     asserted by their rendered state, so only real JS errors are collected here.
+     Otherwise an on-purpose 404 (an unknown TrueBill token) reads as a bug. */
+  page.on('console', msg => {
+    if (msg.type() !== 'error') return;
+    if (/Failed to load resource/i.test(msg.text())) return;
+    consoleErrors.push(msg.text());
+  });
   page.on('pageerror', err => consoleErrors.push('PAGEERROR: ' + err.message));
   page.on('requestfailed', req => {
     const url = req.url();
