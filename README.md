@@ -12,6 +12,11 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 > This repository contains **only the EMS application**. It is fully standalone —
 > the site root (`/`) is the EMS landing page and app.
 >
+> **Design reference:** [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) — the permanent
+> design system for every EMS surface (brand, Agent Bento Grid, tokens,
+> components, public website, panels, accessibility and rules for future
+> contributors). Read it before changing any UI.
+>
 > **Related docs:** [`OWNER-CONSOLE.md`](OWNER-CONSOLE.md) — the EMS Owner
 > Console guide (pages, workflow and a full explanation of how its Agent Bento
 > Grid CSS/theme system works) · [`admin.md`](admin.md) — the Administrator
@@ -34,9 +39,10 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 5. [Operating sequence](#operating-sequence)
 6. [Important security model](#important-security-model)
 7. [Local start](#local-start)
-8. [Deploy to Cloudflare Pages](#deploy-to-cloudflare-pages)
-9. [Payments](#payments)
-10. [Staff Salary system](#staff-salary-system)
+8. [Tests](#tests)
+9. [Deploy to Cloudflare Pages](#deploy-to-cloudflare-pages)
+10. [Payments](#payments)
+11. [Staff Salary system](#staff-salary-system)
 
 ---
 
@@ -46,11 +52,14 @@ It is a static single-page app served by **Cloudflare Pages**, powered by a
 
 ```
 Browser (single-page app)
-  assets/js/app.js  ── all UI, rendering, routing
-  assets/css/app.css── public site + shared document styles
-  assets/css/owner.css ─ Owner Console theme (own design system, scoped to body.ob-on)
-  assets/css/admin.css ─ Administrator Panel theme (own design system, scoped to body.adm-on)
-  assets/css/shop.css  ─ Shop Panel theme (own design system, scoped to body.shp-on)
+  assets/js/app.js        ── session, routing, panels, API access, modals, toasts
+  assets/js/public_site.js── public website renderer (landing, About, Terms,
+                             Privacy, Blog, Contact, App Store, verification)
+  assets/css/app.css      ── shared shells: auth, toast, skeletons, documents
+  assets/css/public.css   ── public website design system (scoped to .pubsite)
+  assets/css/owner.css    ── Owner Console theme (own design system, scoped to body.ob-on)
+  assets/css/admin.css    ── Administrator Panel theme (own design system, scoped to body.adm-on)
+  assets/css/shop.css     ── Shop Panel theme (own design system, scoped to body.shp-on)
         │
         ▼  fetch('/api/…')  with Bearer token
 Cloudflare Pages Functions
@@ -65,6 +74,11 @@ Supabase PostgreSQL
 - **One page, four apps.** `index.html` boots `assets/js/app.js`, which decides
   what to render from the URL and the saved session: the public website, the
   Owner Console, the Administrator Panel or the Shop Panel.
+- **One design language.** All four surfaces use the Agent Bento Grid visual
+  system documented in [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md). The public
+  renderer receives `api`, `esc`, `lucide`, `toast`, `showAuth`, `showEmsLogin`,
+  `register` and `mountAppStore` from `app.js` through
+  `createPublicSite()` — it never re-implements authentication or API access.
 - **All data access goes through the API.** The browser never talks to Supabase
   directly and never sees the service-role key.
 - **The App Store is public.** `/?page=app-store` and the read-only published
@@ -89,7 +103,7 @@ Supabase PostgreSQL
 
 | Role | Who they are | Where they sign in | What they get |
 |---|---|---|---|
-| **Owner** | The platform owner (you, hosting EMS) | `EMS login` on the landing page | The **Owner Console** — platform-wide control (see [`OWNER-CONSOLE.md`](OWNER-CONSOLE.md)) |
+| **Owner** | The platform owner (you, hosting EMS) | `EMS owner login` (mobile drawer / site footer) | The **Owner Console** — platform-wide control (see [`OWNER-CONSOLE.md`](OWNER-CONSOLE.md)) |
 | **Administrator** | A business using your platform | `Administrator login` | Administrator Panel: profile, stores, licenses, devices, HelpDesk, Premium Add-Ons |
 | **Staff** | An employee of a store | `Shop login` (Store ID + User ID + password) | Shop Panel: only the modules their permissions allow |
 
@@ -99,13 +113,30 @@ Supabase PostgreSQL
 
 ### 1 · Public website (`/`)
 
-The marketing site and entry point: landing page with features and pricing,
-About, Terms, Blog (+ single posts) and a Contact form. Also hosts:
+The marketing site and entry point, rendered by `assets/js/public_site.js` and
+styled by `assets/css/public.css`. EMS is positioned as a **complete multi-store
+retail business management platform**.
 
-- **Invoice verification** — every invoice can carry a TrueBill QR code;
-  scanning it opens `/?verify=<token>` and shows the authentic EMS record.
-- The three login buttons: **Administrator login**, **Shop login** and
-  **EMS login** (owner only).
+| Route | Page |
+|---|---|
+| `/` | Landing: hero + live product preview, business operations bento, how EMS works, access levels, multi-store, premium services, live pricing from `public/license-plans`, FAQ, final CTA |
+| `/?page=about` | Editorial About page (CMS body from Owner Console → Website pages) |
+| `/?page=terms` | Long-form Terms of Service (CMS body, with a built-in summary when empty) |
+| `/?page=privacy` | Built-in Privacy Policy page |
+| `/?page=blog` · `/?page=blog-post&id=…` | Blog listing and article |
+| `/?page=contact` | Contact page + message form (`public/contact`) |
+| `/?page=app-store` | Public App Store (no login) |
+| `/?verify=<token>` · `/verify/<token>` · `/?invoice/<token>` | TrueBill verification for invoices, return slips and exchange invoices |
+
+- **Invoice verification** — a scanned TrueBill QR code opens the public
+  verification route and renders the authentic EMS record (verified, loading and
+  failure states are all designed).
+- **Sign-in paths** — **Administrator login** and **Shop login** are in the
+  primary navigation; the **EMS owner login** sits in the mobile drawer and the
+  footer so customer registration is never confused with platform access.
+- **Plans are read from the API.** The pricing section renders whatever
+  `public/license-plans` returns — no hardcoded prices — and its CTA enters the
+  existing administrator licence flow.
 
 ### 2 · Owner Console (owner role)
 
@@ -266,6 +297,22 @@ Access also requires that the administrator purchased Vaultium at least once. Th
 2. Create a Supabase project. In SQL Editor run `supabase/migrations/001_ems_schema.sql`, `supabase/migrations/002_invoice_rpc.sql`, `supabase/migrations/003_platform_owner.sql`, `supabase/migrations/004_license_plans_and_capacity.sql`, `supabase/migrations/005_shop_id.sql`, `supabase/migrations/006_license_plan_flexible_values.sql`, `supabase/migrations/007_free_license_payment_method.sql`, `supabase/migrations/008_administrator_id.sql`, `supabase/migrations/009_business_short_ids.sql`, then `supabase/migrations/010_invoice_number_preview.sql`, `supabase/migrations/011_safe_invoice_delete.sql`, `supabase/migrations/012_due_recovery.sql`, `supabase/migrations/013_invoice_verification_qr.sql`, `supabase/migrations/014_custom_invoice_party.sql`, then `supabase/migrations/015_connectx_v1.sql`, then the remaining migrations in numbered order (`016` … `033_staff_salary.sql`).
 3. Copy `.dev.vars.example` to `.dev.vars`, insert the three real secrets, and generate `SESSION_SECRET` with `openssl rand -base64 48`.
 4. Run `npm run dev`. Register the first administrator at `/`.
+
+## Tests
+
+`npm test` runs every suite in `test/` (node's built-in test runner + jsdom — no
+browser or database needed).
+
+- `test/public-site.test.js` renders the public website through the real
+  `createPublicSite()` renderer: landing composition, API-driven pricing, CMS
+  pages, blog, contact form, App Store mount, TrueBill verification, and the
+  sign-in entry points.
+- `test/styles.test.js` parses every stylesheet with `css-tree` and asserts the
+  `index.html` cascade order and the `DESIGN_SYSTEM.md` sections, so a broken
+  brace or a dropped token fails the build instead of the page.
+
+The `D1:` suites require `better-sqlite3`; three of them fail on upstream `main`
+before any of the public-website work, so treat only new failures as regressions.
 
 ## Deploy to Cloudflare Pages
 

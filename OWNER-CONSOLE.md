@@ -1,5 +1,9 @@
 # EMS Owner Console — Guide & Design System Documentation
 
+> **Design system:** the visual language of this console is documented once, for
+> every EMS surface, in [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md). Read it before
+> changing any UI; this file documents the Owner Console's pages and behaviour.
+
 This document explains the **EMS Owner Console**: what it is, how to use every
 page, and — in full detail — how its independent **Agent Bento Grid** CSS
 system works (layout grids, colors, theming, components and the complete

@@ -1,5 +1,9 @@
 # Administrator Panel — Design System & Working Process
 
+> **Design system:** tokens, card composition, tones, interaction and
+> accessibility rules shared by every EMS surface are in
+> [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md). Read it before changing any UI.
+
 > **Scope of the redesign:** the Administrator Panel only. Skin only —
 > logic, functions, routes, APIs and the database are untouched. The public
 > website, the Owner Console and the Shop Panel are pixel-identical to what

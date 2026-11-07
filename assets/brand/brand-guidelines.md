@@ -16,7 +16,7 @@ Four modular corner forms link diagonally into a rounded-diamond core. The four 
 | `ems-wordmark.svg` | Outlined EMS wordmark, standalone |
 | `ems-logo-horizontal.svg` | Primary horizontal lockup for headers and documents |
 | `ems-logo-stacked.svg` | Stacked lockup for square/vertical placements |
-| `ems-landing-banner.svg` | Public website's dashboard hero illustration (not a logo master) |
+| `ems-landing-banner.svg` | Retired hero illustration, kept as source art (the public hero now composes a live product preview in markup — not a logo master) |
 | `variants/ems-mark-black.svg`, `-white.svg`, `-mono-0f766e.svg` | One-colour/reversed symbol variants |
 | `variants/ems-mark-favicon.svg`, `-app-icon.svg` | Transparent favicon and teal-tile app icon |
 | `variants/ems-logo-horizontal-*` / `ems-logo-stacked-*` | One-colour lockup variants |

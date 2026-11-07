@@ -1,5 +1,9 @@
 # Shop Panel — Design System & Working Process
 
+> **Design system:** tokens, card composition, tones, interaction and
+> accessibility rules shared by every EMS surface are in
+> [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md). Read it before changing any UI.
+
 > **Design-history note:** sections 1–12 document the original Shop Panel visual pass, which was skin-focused. The Pharmacy Console was subsequently added as its own permission-filtered workflow and now uses aggregate Pharmacy stock; see section 13 for its current behavior. The original screenshot and regression notes below describe that earlier visual pass, not the later Pharmacy data-model work.
 
 The Shop Panel is the workspace of a *store*: the staff members who run the
