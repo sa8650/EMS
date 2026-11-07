@@ -105,8 +105,16 @@ test('Shared PC Scanner preserves Pharmacy checkout and bundled phone assets wit
  assert.match(pc,/ctx\.api\('pharmacy\/checkout'/);
  assert.match(pc,/scanner\.finish\(\)/);
  assert.doesNotMatch(api,/rpc\/pharmacy_post_invoice|POST.*pharmacy\/checkout/);
+ // The service worker must refuse mutations and API answers, and the decoder
+ // must stay bundled with the app (a CDN import would fail on a shop LAN).
  assert.match(sw,/!=='GET'/);assert.match(sw,/\/api\//);
- assert.match(readFileSync(new URL('../scanner/scanner.js',import.meta.url),'utf8'),/import\('\/scanner\/zxing-fallback\.js'\)/);
+ const shell=readFileSync(new URL('../scanner/scanner.js',import.meta.url),'utf8');
+ const engine=readFileSync(new URL('../scanner/engine.js',import.meta.url),'utf8');
+ assert.match(engine,/import\('\/scanner\/zxing-fallback\.js'\)/, 'decoder is bundled, not remote');
+ assert.doesNotMatch(shell+engine,/https?:\/\/(?:unpkg|cdn|jsdelivr|cdnjs)/, 'no CDN dependency in the scanner');
+ // The decoder and the ZXing chunk must both be part of the offline shell.
+ assert.ok((sw.match(/ems-scanner-shell-v\d+/)||[])[0], 'shell cache is versioned');
+ assert.match(readFileSync(new URL('../scanner/index.html',import.meta.url),'utf8'),/modulepreload|type="module"/);
 });
 
 test('D1: scanner does not post stock; existing Pharmacy checkout alone posts invoice, finish verifies operation',async()=>{

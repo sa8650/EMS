@@ -1,118 +1,1334 @@
-import {truebillCode,truebillSummary} from './truebill.js';
-import {truebillDetails} from './truebill_view.js';
-const $=s=>document.querySelector(s), safe=x=>String(x??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const app=$('#app');
-const model={token:sessionStorage.getItem('ems.scanner.token')||'',user:sessionStorage.getItem('ems.scanner.user')||'',store:sessionStorage.getItem('ems.scanner.store')||'',storeId:sessionStorage.getItem('ems.scanner.storeId')||'',userId:sessionStorage.getItem('ems.scanner.userId')||'',shopType:sessionStorage.getItem('ems.scanner.shopType')||'',paired:sessionStorage.getItem('ems.scanner.paired')==='1',profile:null,draft:null,draftKind:'sale',binding:null,locked:false,items:[],events:[],view:'dashboard',poll:0,reader:null,controls:null,stream:null,raf:0,decoding:false,lastCode:'',lastAt:0,qrLast:'',qrAt:0,qrBusy:false,online:navigator.onLine};
-let toastTimer=0,audioContext=null;
-function scanFeedback(){try{audioContext||=new (window.AudioContext||window.webkitAudioContext)();if(audioContext.state==='suspended')void audioContext.resume();const o=audioContext.createOscillator(),g=audioContext.createGain(),at=audioContext.currentTime;o.type='sine';o.frequency.setValueAtTime(900,at);o.frequency.exponentialRampToValueAtTime(1250,at+.085);g.gain.setValueAtTime(.001,at);g.gain.exponentialRampToValueAtTime(.085,at+.01);g.gain.exponentialRampToValueAtTime(.001,at+.15);o.connect(g);g.connect(audioContext.destination);o.start(at);o.stop(at+.16);navigator.vibrate?.(32)}catch{}const frame=$('.barcode-viewfinder');if(frame){frame.classList.remove('scan-hit');void frame.offsetWidth;frame.classList.add('scan-hit');setTimeout(()=>frame.classList.remove('scan-hit'),520)}}
-function message(text,type='info'){const n=$('#notice');if(!n)return;clearTimeout(toastTimer);n.textContent=String(text||'');n.dataset.type=type;n.hidden=!text;if(text)toastTimer=setTimeout(()=>{if(n.isConnected)n.hidden=true},type==='error'?7000:4300)}
+/* EMS Mobile Scanner — application shell.
+ *
+ * Responsibilities kept here: session state, routing between views, and the
+ * scan → send → acknowledge flow. Networking lives in link.js, the camera in
+ * engine.js, and presentation primitives in ui.js.
+ *
+ * Hard rules this file must keep (enforced by test/mobile-scanner.test.js):
+ *   · A scan is only ever *sent*. No invoice, stock or report row is written
+ *     from the phone; the existing PC endpoints remain authoritative.
+ *   · The PC must acknowledge an item before the phone calls it "added".
+ *   · Offline or unbound means nothing is queued silently.
+ */
+import { truebillCode, truebillSummary } from './truebill.js';
+import { truebillDetails } from './truebill_view.js';
+import { ScannerLink } from './link.js';
+import { ScanSession, loadZxing, nativeSupport } from './engine.js';
+import { Toaster, esc, icon, money, clockTime, shortId, eventState, LINK_LABEL, tile, empty, actionRow } from './ui.js';
 
-async function api(path,opt={}){const r=await fetch('/api/'+path,{cache:'no-store',...opt,headers:{'content-type':'application/json',...(model.token?{authorization:'Bearer '+model.token}:{}),...opt.headers}});const x=await r.json().catch(()=>({error:'Server unavailable'}));if(!r.ok){const e=Error(x.error||`HTTP ${r.status}`);e.status=r.status;throw e}return x}
-function remember(x,paired=false){model.token=x.token;model.user=x.user?.name||'Scanner user';model.store=x.store?.name||'EMS shop';model.storeId=x.store?.id||'';model.userId=x.user?.id||'';model.shopType=x.store?.shop_type||'';model.paired=paired;sessionStorage.setItem('ems.scanner.token',model.token);sessionStorage.setItem('ems.scanner.user',model.user);sessionStorage.setItem('ems.scanner.store',model.store);sessionStorage.setItem('ems.scanner.storeId',model.storeId);sessionStorage.setItem('ems.scanner.userId',model.userId);sessionStorage.setItem('ems.scanner.shopType',model.shopType);sessionStorage.setItem('ems.scanner.paired',paired?'1':'0')}
-function logout(){stopCamera();for(let i=sessionStorage.length-1;i>=0;i--){const key=sessionStorage.key(i);if(key?.startsWith('ems.scanner.events.'))sessionStorage.removeItem(key)}sessionStorage.removeItem('ems.scanner.storeId');sessionStorage.removeItem('ems.scanner.userId');sessionStorage.removeItem('ems.scanner.shopType');sessionStorage.removeItem('ems.scanner.token');sessionStorage.removeItem('ems.scanner.user');sessionStorage.removeItem('ems.scanner.store');sessionStorage.removeItem('ems.scanner.paired');model.token='';model.userId='';model.storeId='';model.shopType='';model.events=[];model.profile=null;model.draft=null;model.binding=null;model.view='dashboard';render()}
-function frame(title,body){app.innerHTML=`<header class="top"><button id="drawerToggle" aria-label="Open menu">☰</button><div><small>EMS · SCANNER</small><b>${safe(title)}</b></div><span class="connection ${model.online?'on':'off'}">${model.online?'● Online':'● Offline'}</span></header><nav id="drawer" class="drawer" hidden><b>EMS Mobile Scanner</b>${model.token?'<button data-view="dashboard">⌂ Dashboard</button>':''}${model.token?'<button data-view="camera">▣ Camera scanner</button><button data-view="catalog">⌕ Catalog search</button><button data-view="labels">▤ Internal codes & labels</button>':''}<button data-view="verify">✓ Verify with TrueBill</button>${model.token?'<button data-view="profile">◉ My profile</button>':''}<button data-view="install">↧ Installation help</button><hr>${model.token?'<button id="signout">Sign out</button>':'<button id="signInNav">Sign in</button>'}</nav><main>${body}</main><div id="notice" class="notice" hidden role="status"></div><footer class="tabs">${model.token?'<button data-view="dashboard">Home</button><button data-view="camera">Scan</button><button data-view="catalog">Catalog</button><button data-view="labels">Labels</button>':''}<button data-view="verify">Verify</button>${model.token?'<button data-view="profile">Profile</button>':''}</footer>`;
- $('#drawerToggle').onclick=()=>{$('#drawer').hidden=!$('#drawer').hidden};if($('#signout'))$('#signout').onclick=logout;if($('#signInNav'))$('#signInNav').onclick=()=>{model.view='dashboard';render()};
- document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{model.view=b.dataset.view;stopCamera();render()});
-}
-function statusLabel(s){return {pending:'Waiting for PC',applied:'Added by PC',rejected:'Not added',sending:'Sending…',error:'Not sent · retry'}[s]||s}
-const eventKey=()=>`ems.scanner.events.${model.storeId}.${model.userId}.${model.draft||'none'}`;
-function saveEvents(){if(model.draft)sessionStorage.setItem(eventKey(),JSON.stringify(model.events.slice(0,80)))}
-function restoreEvents(){try{model.events=JSON.parse(sessionStorage.getItem(eventKey())||'[]')}catch{model.events=[]}}
-function activeRequired(){if(!model.draft||!model.binding){message('Select a sale or purchase on Home before sending items. Nothing was added.','error');return false}if(model.locked){message('That PC bill closed. Choose a new sale or purchase on Home.','error');return false}if(!model.online){message('Offline. Nothing was sent. Reconnect and retry.','error');return false}return true}
-async function refreshDrafts(){try{const drafts=await api('scanner/drafts');if(model.draft&&!drafts.some(d=>d.draft_id===model.draft)){let stillActive=false;try{stillActive=(await api(`scanner/drafts/${model.draft}/status?binding_id=${model.binding}`)).connected}catch{};if(!stillActive){model.draft=null;model.binding=null;model.locked=true;message('PC bill closed or expired. Scanning disabled; choose another active bill.','error');drawEvents()}}
-  const list=$('#draftList');if(list)list.innerHTML=drafts.length?drafts.map(d=>`<article class="draft ${model.draft===d.draft_id?'selected':''}"><div><small>${d.kind==='purchase'?'PURCHASE':'SALE'} · PC ${safe(d.terminal_label)}</small><b>Draft ${safe(d.draft_id.slice(0,8))}</b><small>${model.draft===d.draft_id?'Selected · ':''}${d.kind==='purchase'?'Purchase invoice':'Sales invoice'}</small></div><button data-select="${safe(d.draft_id)}" >${model.draft===d.draft_id?'Selected':'Select'}</button></article>`).join(''):'<p class="muted">No active PC bills. Open the shop Sales or Purchase invoice form on a PC.</p>';
-  document.querySelectorAll('[data-select]').forEach(b=>b.onclick=()=>selectDraft(b.dataset.select));
-  if(model.draft){const el=$('#selectedDraft');if(el)el.textContent='Active draft '+model.draft.slice(0,8)+' · '+(model.online?'Connected':'Offline')}
- }catch(e){message('Could not check PC drafts: '+e.message,'error')}}
-async function selectDraft(id){try{const x=await api(`scanner/drafts/${id}/bind`,{method:'POST',body:'{}'});model.draft=id;model.binding=x.binding_id;model.draftKind=x.kind||'sale';model.locked=false;model.events=[];restoreEvents();render()}catch(e){message('Selection failed: '+e.message,'error')}}
-let syncing=false;
-async function refreshEvents(){if(syncing||!model.draft||!model.binding||!model.online)return;syncing=true;const selected=model.draft;try{const status=await api(`scanner/drafts/${model.draft}/sync?binding_id=${model.binding}`),remote=status.events||[];if(selected!==model.draft)return;
-  model.draftKind=status.kind||'sale';model.locked=!status.connected;if(!status.connected){stopCamera();message(`PC draft ${status.status}. No more scans can be sent.`,'error')}
-  for(const event of model.events){const row=remote.find(r=>r.id===event.id);if(row){event.status=row.status;event.reason=row.reason||''}}
-  saveEvents();drawEvents();const badge=$('#selectedDraft');if(badge)badge.textContent=`Draft ${model.draft.slice(0,8)} · ${status.connected?'PC connected':status.status}`;
- }catch(e){message('Connection/acknowledgment check failed: '+e.message,'error')}finally{syncing=false}}
-function drawEvents(){const host=$('#eventList');if(!host)return;host.innerHTML=model.events.length?model.events.slice(0,30).map(e=>`<li><div><b>${safe(e.name)}</b><small>${safe(new Date(e.at).toLocaleTimeString())} · ${safe(statusLabel(e.status))}${e.reason?' · '+safe(e.reason):''}</small></div>${e.status==='error'?`<button data-retry="${safe(e.id)}">Retry</button>`:['applied','rejected'].includes(e.status)?`<button data-repeat="${safe(e.id)}">${e.status==='rejected'?'Try as a new scan':'+1 again'}</button>`:''}</li>`).join(''):'<li class="muted">Scans and PC acknowledgments appear here.</li>';
- host.querySelectorAll('[data-retry]').forEach(b=>b.onclick=()=>sendEvent(model.events.find(e=>e.id===b.dataset.retry)));host.querySelectorAll('[data-repeat]').forEach(b=>b.onclick=()=>{const e=model.events.find(x=>x.id===b.dataset.repeat);if(e)void add({id:e.productId,name:e.name})})}
-async function sendEvent(e){if(!e||!activeRequired())return;e.status='sending';saveEvents();drawEvents();try{const r=await api(`scanner/drafts/${model.draft}/events`,{method:'POST',body:JSON.stringify({event_id:e.id,product_id:e.productId,binding_id:model.binding})});e.status=r.status;e.reason=r.reason||'';message(r.status==='applied'?'PC already added this scan.':'Sent to the PC. Waiting for it to add the item…');await refreshEvents()}catch(err){e.status='error';e.reason=err.message;message('Could not send this item: '+err.message+'. Tap Retry; it will not add a duplicate.','error')}saveEvents();drawEvents()}
-async function add(p){if(!p||!activeRequired())return;const e={id:crypto.randomUUID(),productId:p.id,name:p.name+(p.strength?' · '+p.strength:''),at:new Date().toISOString(),status:'sending',reason:''};model.events.unshift(e);saveEvents();drawEvents();await sendEvent(e)}
-async function catalog(q=''){try{const route=model.draft&&model.binding?`scanner/drafts/${model.draft}/catalog?binding_id=${model.binding}&q=${encodeURIComponent(q)}`:`scanner/catalog?q=${encodeURIComponent(q)}`;model.items=await api(route);drawCatalog()}catch(e){model.items=[];drawCatalog();message('Catalog unavailable: '+e.message,'error')}}
-function drawCatalog(){const root=$('#catalogList');if(!root)return;root.innerHTML=model.items.length?model.items.map(p=>`<article class="product"><div><b>${safe(p.name)} ${safe(p.strength||'')}</b><small>${safe(p.dosage_form||'')} · ${safe(p.sku||'No SKU')} · ${safe(p.barcode||'No barcode')} · ${safe(p.available_stock)} ${safe(p.base_unit||'')} in stock</small></div><button data-add="${safe(p.id)}" ${(model.draftKind==='sale'&&Number(p.available_stock)<=0)||!model.draft||!model.binding||model.locked?'disabled':''}>${!model.draft?'Select draft first':'Add to PC'}</button></article>`).join(''):'<p class="muted">No matching items found.</p>';root.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>add(model.items.find(p=>p.id===b.dataset.add)))}
-async function decoded(code,manual=false){code=String(code||'').trim();if(!code||!activeRequired())return;const now=Date.now();if(!manual&&(code===model.lastCode||now-model.lastAt<650))return;model.lastCode=code;model.lastAt=now;
- try{const rows=await api(`scanner/drafts/${model.draft}/catalog?binding_id=${model.binding}&q=${encodeURIComponent(code)}`);const exact=rows.filter(p=>p.barcode?.toLowerCase()===code.toLowerCase()||p.sku?.toLowerCase()===code.toLowerCase());if(exact.length!==1){message(exact.length?'Multiple exact matches. Choose a medicine in Catalog.':`Unknown code ${code}. Search Catalog or assign an internal code.`,'error');return}scanFeedback();await add(exact[0])}catch(e){message('Item lookup failed; not sent: '+e.message,'error')}}
-async function verifyInvoice(raw,source='manual'){
- const value=String(raw||'').trim(),printed=/^(?:PUR|SAL)-[A-Z0-9-]{3,74}$/i.test(value),box=$('#verifyResult');if(!box)return;
- if(source==='manual'&&!printed)return message('Enter an invoice number starting with PUR- or SAL-.','error');
- const code=source==='qr'?truebillCode(value):null;
- if(source==='qr'&&!code)return message('This is not an EMS TrueBill invoice QR.','error');
- if(!model.online)return message('Connect to the internet to check the invoice.','error');
- stopCamera();box.innerHTML='<div class="verify-loading"><span class="spinner"></span>Checking invoice…</div>';
- try{const result=source==='qr'?await api('public/invoice/'+encodeURIComponent(code)):await api('public/invoice/lookup',{method:'POST',body:JSON.stringify({invoice_number:value})});
-  if(!result?.verified)throw Error('The record was not verified.');
-  if(source==='manual'){
-   if(result.details_available!==false||!result.invoice_number||!['sale','purchase'].includes(result.kind))throw Error('Invalid verification response.');
-   box.innerHTML=`<article class="tb-limited" role="status"><span class="tb-limited-icon" aria-hidden="true">✓</span><div><b>Invoice number found</b><p>${safe(result.invoice_number)} · ${result.kind==='purchase'?'Purchase':'Sale'}</p><small>For the full invoice, scan its TrueBill QR.</small></div></article>`;
-   message('Invoice number found in EMS. Scan the QR for details.','success');
-  }else{
-   if(!truebillSummary(result))throw Error('Invalid verification response.');
-   box.innerHTML=truebillDetails(result);message('Invoice verified by EMS TrueBill.','success');
+const app = document.getElementById('app');
+
+/** randomUUID with a fallback: old Android WebViews and jsdom lack it. */
+const uuid = () =>
+  globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, ch => {
+        const r = (Math.random() * 16) | 0;
+        return (ch === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+      });
+
+/* ── Session ─────────────────────────────────────────────────────────────── */
+
+const KEYS = ['token', 'user', 'store', 'storeId', 'userId', 'shopType', 'paired'];
+const readSession = () => {
+  const get = key => sessionStorage.getItem('ems.scanner.' + key) || '';
+  return {
+    token: get('token'),
+    user: get('user'),
+    store: get('store'),
+    storeId: get('storeId'),
+    userId: get('userId'),
+    shopType: get('shopType'),
+    paired: get('paired') === '1'
+  };
+};
+
+const state = {
+  ...readSession(),
+  online: typeof navigator === 'undefined' ? true : navigator.onLine !== false,
+  view: 'home',
+  profile: null,
+  draft: null,
+  binding: null,
+  draftKind: 'sale',
+  locked: false,
+  items: [],
+  drafts: [],
+  draftsError: '',
+  events: [],
+  busy: '',
+  draftsLoading: false,
+  catalogQuery: '',
+  signInTab: 'account',
+  camera: null,
+  scanSession: null,
+  cameraError: '',
+  torch: false,
+  installPrompt: null
+};
+
+const toaster = new Toaster(document.getElementById('toast'));
+
+const link = new ScannerLink({
+  getToken: () => state.token,
+  onStatus: online => {
+    state.online = online;
+    paintLink();
+    if (!online) toaster.warn('Offline. Scans will not send until the connection is back.', { topic: 'link' });
   }
- }catch(e){const missing=e.status===404;box.innerHTML=missing?'<div class="verify-invalid"><b>No invoice found</b><p>Check the invoice number and try again.</p></div>':'<div class="verify-invalid"><b>Unable to check right now</b><p>Try again when your connection is working.</p></div>';message(missing?'No matching invoice number found.':'Verification could not be completed.','error')}
+});
+
+const api = (path, options = {}) => link.request(path, options);
+const saveSession = () => KEYS.forEach(key => sessionStorage.setItem('ems.scanner.' + key, key === 'paired' ? (state.paired ? '1' : '0') : state[key] || ''));
+const clearSession = () => {
+  KEYS.forEach(key => sessionStorage.removeItem('ems.scanner.' + key));
+  for (let i = sessionStorage.length - 1; i >= 0; i -= 1) {
+    const key = sessionStorage.key(i);
+    if (key?.startsWith('ems.scanner.events.')) sessionStorage.removeItem(key);
+  }
+};
+
+/* ── Scan event buffer ───────────────────────────────────────────────────── */
+
+const eventKey = () => `ems.scanner.events.${state.storeId}.${state.userId}.${state.draft || 'none'}`;
+const saveEvents = () => {
+  if (!state.draft) return;
+  try {
+    sessionStorage.setItem(eventKey(), JSON.stringify(state.events.slice(0, 60)));
+  } catch {
+    /* storage full — the list is a convenience, not the source of truth */
+  }
+};
+const restoreEvents = () => {
+  try {
+    state.events = JSON.parse(sessionStorage.getItem(eventKey()) || '[]');
+  } catch {
+    state.events = [];
+  }
+};
+
+/* ── Feedback ────────────────────────────────────────────────────────────── */
+
+let audioContext = null;
+function haptic(kind = 'ok') {
+  try {
+    navigator.vibrate?.(kind === 'ok' ? 30 : [18, 60, 18]);
+  } catch {
+    /* unsupported */
+  }
 }
-function qrLoginCode(value){try{const u=new URL(String(value||''));if(u.origin!==location.origin||u.pathname.replace(/\/$/,'')!=='/scanner')return null;const code=new URLSearchParams(u.hash.slice(1)).get('login');return /^[a-f0-9]{64}$/i.test(code||'')?code:null}catch{return null}}
-async function signInWithQr(code){if(!code)return message('That is not an EMS Scanner sign-in QR. Open the Scanner QR on your shop PC.','error');
- try{const x=await api('scanner/login/consume',{method:'POST',body:JSON.stringify({token:code})});stopCamera();remember(x,true);model.draft=null;model.binding=null;model.events=[];model.locked=false;model.view='dashboard';render();message('Signed in. Select the PC sale or purchase you want to scan into.','success')}
- catch(e){message('QR sign-in failed: '+e.message,'error')}
+function beep(kind = 'ok') {
+  try {
+    audioContext ||= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') void audioContext.resume();
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
+    const at = audioContext.currentTime;
+    osc.type = 'sine';
+    if (kind === 'ok') {
+      osc.frequency.setValueAtTime(880, at);
+      osc.frequency.exponentialRampToValueAtTime(1240, at + 0.08);
+    } else {
+      osc.frequency.setValueAtTime(320, at);
+      osc.frequency.exponentialRampToValueAtTime(200, at + 0.16);
+    }
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.07, at + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + (kind === 'ok' ? 0.14 : 0.2));
+    osc.connect(gain).connect(audioContext.destination);
+    osc.start(at);
+    osc.stop(at + (kind === 'ok' ? 0.15 : 0.22));
+  } catch {
+    /* audio blocked before a user gesture */
+  }
 }
-async function handleQr(value,purpose){if(model.qrBusy)return;const now=Date.now();if(model.qrLast===value&&now-model.qrAt<2500)return;model.qrLast=value;model.qrAt=now;model.qrBusy=true;
- try{if(purpose==='login')await signInWithQr(qrLoginCode(value));else await verifyInvoice(value,'qr')}finally{model.qrBusy=false}}
-async function startQrCamera(purpose){if(purpose==='verify'&&!model.online)return message('TrueBill verification needs an internet connection.','error');stopCamera();const video=$('#qrVideo');if(!video)return;model.qrLast='';
- try{if('BarcodeDetector'in window&&typeof BarcodeDetector.getSupportedFormats==='function'&&(await BarcodeDetector.getSupportedFormats()).includes('qr_code')){
-   const reader=new BarcodeDetector({formats:['qr_code']});const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});if(!video.isConnected){stream.getTracks().forEach(t=>t.stop());return}model.stream=stream;video.srcObject=model.stream;await video.play();video.closest('.viewfinder')?.classList.add('scanning');
-   const loop=async()=>{if(!model.stream)return;if(!model.decoding){model.decoding=true;try{const codes=await reader.detect(video);if(codes[0])await handleQr(codes[0].rawValue,purpose)}catch{}finally{model.decoding=false}}if(model.stream)model.raf=requestAnimationFrame(loop)};void loop();
-  }else{const {BrowserMultiFormatReader}=await import('/scanner/zxing-fallback.js');model.reader=new BrowserMultiFormatReader();model.controls=await model.reader.decodeFromVideoDevice(undefined,video,(result)=>{if(result&&Number(result.getBarcodeFormat())===11)void handleQr(result.getText(),purpose)});if(!video.isConnected){model.controls?.stop();return}}
-  message(purpose==='login'?'QR camera ready. Point it at your shop PC sign-in QR.':'QR camera ready. Point it at the invoice TrueBill QR.');
- }catch(e){stopCamera();message('QR camera unavailable: '+e.message+'. Check camera permission or enter the code manually.','error')}
+function scanFeedback(kind = 'ok') {
+  beep(kind);
+  haptic(kind);
+  const frame = document.querySelector('.scanner-frame');
+  if (frame) {
+    frame.classList.remove('hit');
+    void frame.offsetWidth;
+    frame.classList.add('hit');
+    setTimeout(() => frame.classList.remove('hit'), 520);
+  }
 }
-function stopCamera(){cancelAnimationFrame(model.raf);model.raf=0;try{model.controls?.stop()}catch{}model.controls=null;model.stream?.getTracks().forEach(t=>t.stop());model.stream=null;for(const selector of ['#cameraVideo','#qrVideo']){const v=$(selector);if(v){v.srcObject=null;v.closest('.viewfinder')?.classList.remove('scanning')}}model.decoding=false}
-async function startCamera(){if(!activeRequired())return;stopCamera();model.lastCode='';const v=$('#cameraVideo');if(!v)return;try{
-  if('BarcodeDetector'in window&&typeof BarcodeDetector.getSupportedFormats==='function'){const supported=await BarcodeDetector.getSupportedFormats();if(supported.some(f=>['code_128','ean_13','ean_8','upc_a','upc_e','itf','code_39'].includes(f))){
-    const detector=new BarcodeDetector({formats:supported.filter(f=>['code_128','ean_13','ean_8','upc_a','upc_e','itf','code_39'].includes(f))});
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});if(!v.isConnected){stream.getTracks().forEach(t=>t.stop());return}model.stream=stream;v.srcObject=model.stream;await v.play();v.closest('.viewfinder')?.classList.add('scanning');
-    const loop=async()=>{if(!model.stream)return;if(!model.decoding){model.decoding=true;try{for(const hit of await detector.detect(v)){await decoded(hit.rawValue);break}}catch{}finally{model.decoding=false}}model.raf=requestAnimationFrame(loop)};loop();message('Barcode camera ready. Hold a medicine barcode inside the frame.');return;
-  }}
-  // Local, bundled ZXing: Safari/iPhone and browsers without BarcodeDetector work offline without a CDN.
-  const {BrowserMultiFormatReader}=await import('/scanner/zxing-fallback.js');model.reader=new BrowserMultiFormatReader();
-  model.controls=await model.reader.decodeFromVideoDevice(undefined,v,(result,error)=>{if(result&&Number(result.getBarcodeFormat())!==11)void decoded(result.getText())});if(!v.isConnected){model.controls?.stop();return}v.closest('.viewfinder')?.classList.add('scanning');
-  message('Barcode camera ready. Hold an item barcode in the frame.');
- }catch(e){stopCamera();message('Camera unavailable: '+e.message+'. Enter the code manually or try again.','error')}}
-function installMarkup(){return `<section class="card"><h2>Install EMS Scanner</h2><p>The installation QR opens this app; it never pairs you to a bill. After installation sign in with your account or scan the one-use Scanner sign-in QR from your shop PC top bar.</p><h3>Android · Chrome</h3><p>Open this page in Chrome, tap ⋮ then <b>Add to Home screen</b> or <b>Install app</b>.</p><h3>iPhone · Safari</h3><p>Open this page in Safari, tap Share (square with arrow), then <b>Add to Home Screen</b>. Camera access requires HTTPS and permission.</p><p class="muted">No APK, no separate database, and no offline invoice posting. Scans require a live PC and server acknowledgment.</p></section>`}
-function render(){stopCamera();document.body.classList.toggle('scanner-auth',!model.token);if(model.view==='verify'){
-  frame('TrueBill',`<section class="page-heading clean-heading">${model.token?'':'<button id="verifyBack" class="verify-back" type="button">← Sign in</button>'}<h1>Verify invoice</h1><p>Scan the QR for full details, or check an invoice number.</p></section><section class="card verify-form-card"><div class="verify-qr-row"><span class="verify-qr-glyph" aria-hidden="true">▦</span><div><b>TrueBill QR</b><small>Full invoice details</small></div><button id="verifyCamera" type="button">Scan QR</button></div><div class="viewfinder qr-viewfinder" id="verifyQrFrame" hidden><video id="qrVideo" muted playsinline autoplay></video><div class="qr-corners"></div><button id="verifyStop" class="camera-close" type="button" aria-label="Close camera">×</button></div><form id="verifyForm" class="verify-search"><label for="verifyInput">Invoice number</label><div class="verify-input-row"><input id="verifyInput" placeholder="e.g. SAL-000123" autocomplete="off" required><button type="submit">Check</button></div><small>Number search confirms the record only. Scan its QR to see details.</small></form></section><div id="verifyResult" aria-live="polite"></div>`);
-  if($('#verifyBack'))$('#verifyBack').onclick=()=>{model.view='dashboard';render()};
-  $('#verifyCamera').onclick=()=>{$('#verifyQrFrame').hidden=false;void startQrCamera('verify')};
-  $('#verifyStop').onclick=()=>{stopCamera();$('#verifyQrFrame').hidden=true};
-  $('#verifyForm').onsubmit=e=>{e.preventDefault();void verifyInvoice($('#verifyInput').value)};return}
-   if(!model.token){app.innerHTML=`<main class="signin one-screen"><div class="login-top"><span class="logo">▣</span><span class="eyebrow">EMS SCANNER</span></div><h1>Sign in</h1><p>Scan items into your PC invoice.</p><div class="login-switch" role="group" aria-label="Sign-in method"><button id="accountTab" class="on" type="button" aria-pressed="true">Shop account</button><button id="qrTab" type="button" aria-pressed="false">PC QR code</button></div><section id="accountMode"><form id="login"><label>Shop ID<input name="storeId" required autocomplete="organization" placeholder="Enter shop ID"></label><label>User ID or email<input name="userId" required autocomplete="username" placeholder="Enter user ID"></label><label>Password<input name="password" type="password" required autocomplete="current-password" placeholder="Enter password"></label><button type="submit" class="primary wide">Sign in</button></form></section><section id="qrMode" hidden><p>On your shop PC, open <b>Scanner</b> in the top bar. Scan its sign-in QR below.</p><div class="viewfinder qr-viewfinder" id="loginQrFrame" hidden><video id="qrVideo" muted playsinline autoplay></video><div class="qr-corners"></div><button id="loginQrStop" class="camera-close" type="button" aria-label="Close camera">×</button></div><button id="loginQrStart" class="qr-launch" type="button">▦ &nbsp; Scan sign-in QR</button></section><button id="openVerifyPublic" class="login-verify" type="button"><span>✓</span><span><b>Verify an invoice</b><small>No sign-in required</small></span><span aria-hidden="true">→</span></button><div id="notice" class="notice" role="status" hidden></div></main>`;
-  const tab=mode=>{stopCamera();$('#accountMode').hidden=mode!=='account';$('#qrMode').hidden=mode!=='qr';$('#loginQrFrame').hidden=true;for(const [id,on] of [['accountTab',mode==='account'],['qrTab',mode==='qr']]){const b=$('#'+id);b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on))}};
-  $('#accountTab').onclick=()=>tab('account');$('#qrTab').onclick=()=>tab('qr');
-  $('#loginQrStart').onclick=()=>{$('#loginQrFrame').hidden=false;void startQrCamera('login')};$('#loginQrStop').onclick=()=>{stopCamera();$('#loginQrFrame').hidden=true};
-  $('#login').onsubmit=async ev=>{ev.preventDefault();const b=Object.fromEntries(new FormData(ev.target));try{const x=await api('auth/shop/login',{method:'POST',body:JSON.stringify(b)});if(!['pharmacy','electronics'].includes(x.store?.shop_type))throw Error('Scanner billing supports Pharmacy and Electronics shops. Invoice verification is open to everyone.');remember(x);model.view='dashboard';render()}catch(e){message(e.message,'error')}};
-  $('#openVerifyPublic').onclick=()=>{model.view='verify';render()};return}
-   if(model.view==='profile'){frame('My profile',`<section class="hero"><small>SIGNED IN</small><h1>${safe(model.user)}</h1><p>${safe(model.store)} · ${model.paired?'QR sign-in session':'Shop account'}</p></section><section class="card"><h2>Account & shop</h2><div id="profileDetails" class="profile-details"><p class="muted">Loading your account details…</p></div><button id="profileSignout" type="button">Sign out</button></section>`);$('#profileSignout').onclick=logout;void (async()=>{try{model.profile=await api('scanner/profile');const p=model.profile,box=$('#profileDetails');if(!box)return;box.innerHTML=`<div><small>Name</small><b>${safe(p.user.name||model.user)}</b></div><div><small>User ID / login</small><b>${safe(p.user.user_id||'—')}</b></div><div><small>Email</small><b>${safe(p.user.email||'—')}</b></div><div><small>Role</small><b>${safe(p.user.role)}</b></div><div><small>Shop</small><b>${safe(p.shop.name)} · ${safe(p.shop.code)}</b></div><div><small>Scanner access</small><b>${p.canScan?'Ready to select a PC draft':'Billing or catalog permission unavailable'}</b></div><div><small>Sign-in method</small><b>${p.paired?'One-use PC sign-in QR':'Shop ID and password'}</b></div>`}catch(e){message('Profile unavailable: '+e.message,'error')}})();return}
- if(model.view==='install'){frame('Install guide',installMarkup());return}
- if(model.view==='dashboard'){frame('Scanner home',`<section class="home-heading"><small>${model.shopType==='electronics'?'ELECTRONICS':'PHARMACY'} WORKSPACE</small><h1>One scan. The right bill.</h1><p>Signed in as ${safe(model.user)} · ${safe(model.store)}</p></section><section class="card home-drafts"><div class="row"><div><small class="eyebrow">BILL DESTINATION</small><h2>Select your PC bill</h2></div><button id="refreshDrafts" class="refresh-icon" aria-label="Refresh PC bills">↻</button></div><p id="selectedDraft" class="selection-hint">${model.draft?'Selected '+safe(model.draft.slice(0,8)):'Choose a sale or purchase before scanning'}</p><div id="draftList" class="stack"></div></section><section class="card recent-card"><div class="row"><h2>Recent scans</h2><button data-view="camera" class="primary">Scan barcode →</button></div><ul id="eventList" class="events"></ul></section>`);$('#refreshDrafts').onclick=refreshDrafts;$('.recent-card [data-view]').onclick=()=>{model.view='camera';render()};drawEvents();void refreshDrafts()}
-  else if(model.view==='camera'){frame('Scan item',`<section class="card scan-card"><div class="scan-context">${model.draft?`<span>${model.draftKind==='purchase'?'Purchase':'Sale'} · ${safe(model.draft.slice(0,8))}</span>`:'<span>Choose a PC bill to send scans</span>'}<button id="scanChoose" type="button">${model.draft?'Change':'Choose'}</button></div><div class="viewfinder barcode-viewfinder"><video id="cameraVideo" muted playsinline autoplay></video><div class="target"></div><div class="scan-beam"></div><div class="camera-caption">Align item barcode</div></div><div class="scan-controls"><button id="startCam" class="primary">Scan</button><button id="stopCam">Stop</button><button id="scanAgain" title="Allow another scan of the same code">Again</button></div><form id="manual" class="scan-manual"><label>Barcode or SKU<input name="code" autocomplete="off" placeholder="Enter barcode or SKU" required></label><button type="submit">Add</button></form></section><section class="card"><h2>Recent scans</h2><ul id="eventList" class="events"></ul></section>`);$('#scanChoose').onclick=()=>{model.view='dashboard';render()};$('#startCam').onclick=()=>startCamera();$('#stopCam').onclick=stopCamera;$('#scanAgain').onclick=()=>{model.lastCode='';message('Ready to scan this barcode again.')};$('#manual').onsubmit=e=>{e.preventDefault();void decoded(e.target.elements.namedItem('code').value,true);e.target.reset()};drawEvents();void refreshEvents()}
- else if(model.view==='catalog'){frame('Catalog',`<section class="card"><p>Search name or item code.</p><form id="searchForm" class="row"><input id="searchText" placeholder="Name or item code" aria-label="Search items"><button>Search</button></form><div id="catalogList" class="stack"></div></section><section class="card"><h2>Recent scans</h2><ul id="eventList" class="events"></ul></section>`);$('#searchForm').onsubmit=e=>{e.preventDefault();void catalog($('#searchText').value)};drawEvents();void catalog()}
- else if(model.view==='labels'){frame('Internal codes',`<section class="card"><h2>Internal barcode labels</h2><p>Print an item code, or assign an internal barcode to a Pharmacy medicine.</p><form id="labelSearch" class="row"><input name="q" placeholder="Search item name" aria-label="Search item"><button>Search</button></form><div id="catalogList" class="stack"></div><p class="muted">Printing uses your browser print dialog. Keep labels dry and verify a sample scan.</p></section>`);
-  $('#labelSearch').onsubmit=async e=>{e.preventDefault();await catalog(e.target.q.value);const root=$('#catalogList');root.innerHTML=model.items.map(p=>`<article class="product"><div><b>${safe(p.name)} ${safe(p.strength||'')}</b><small>${safe(p.barcode||'No barcode assigned')}</small></div><button data-label="${safe(p.id)}" ${!p.barcode&&(!model.draft||!model.binding)?'disabled':''}>${p.barcode?'Print':'Assign & print'}</button></article>`).join('')||'<p>No matching medicine.</p>';root.querySelectorAll('[data-label]').forEach(b=>b.onclick=async()=>{try{const p=model.items.find(x=>x.id===b.dataset.label);if(p.barcode){printLabel(p.name,p.barcode);return}const x=await api(`scanner/drafts/${model.draft}/code`,{method:'POST',body:JSON.stringify({binding_id:model.binding,product_id:p.id})});printLabel(p.name,x.barcode)}catch(err){message(err.message,'error')}})};
- }
+
+/* ── Routing ─────────────────────────────────────────────────────────────── */
+
+const TABS = [
+  { view: 'home', label: 'Home', iconName: 'home', auth: true },
+  { view: 'camera', label: 'Scan', iconName: 'scan', auth: true },
+  { view: 'catalog', label: 'Catalog', iconName: 'search', auth: true },
+  { view: 'verify', label: 'Verify', iconName: 'verify', auth: false }
+];
+
+function go(view) {
+  if (view !== 'verify' && !state.token) view = 'home';
+  stopCamera();
+  const changed = view !== state.view;
+  state.view = view;
+  render();
+  // A new view starts at its top. Without this, switching tabs on a short
+  // landscape screen left the operator halfway down the previous page.
+  if (changed) window.scrollTo({ top: 0, behavior: 'instant' in window ? 'instant' : 'auto' });
 }
-function printLabel(name,code){if(!code)return message('No code assigned.','error');const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');try{window.JsBarcode(svg,code,{format:'CODE128',width:2,height:72,displayValue:true,margin:12})}catch(e){return message('Barcode rendering unavailable: '+e.message,'error')}
- const w=window.open('','_blank');if(!w)return message('Allow print pop-ups or use the code '+code,'error');w.document.write(`<!doctype html><title>EMS barcode label</title><style>body{font:14px system-ui;padding:18px;max-width:360px;text-align:center}.label{border:1px dashed #333;padding:12px}svg{max-width:100%}@media print{button{display:none}}</style><div class="label"><b id="name"></b><div>${svg.outerHTML}</div></div><button onclick="print()">Print label</button>`);w.document.querySelector('#name').textContent=name;w.document.close()}
-window.addEventListener('online',()=>{model.online=true;render()});window.addEventListener('offline',()=>{model.online=false;stopCamera();render();message('Offline. New scans cannot be sent.','error')});document.addEventListener('visibilitychange',()=>{if(document.hidden)stopCamera()});
-if('serviceWorker'in navigator)navigator.serviceWorker.register('/scanner/sw.js',{scope:'/scanner/'}).catch(()=>{});
-const params=new URLSearchParams(location.hash.slice(1));const loginCode=params.get('login');const oldPair=params.get('pair');
-if(loginCode||oldPair){history.replaceState(null,'','/scanner/');render();if(oldPair)message('This older draft QR is retired. Use your shop PC top-bar sign-in QR.','error');else void signInWithQr(loginCode)}
-else render();
-model.poll=setInterval(()=>{if(model.token&&model.draft&&model.online&&model.events.some(e=>['pending','sending'].includes(e.status)))void refreshEvents()},350);
-setInterval(()=>{if(model.token&&model.draft&&model.online&&!model.events.some(e=>['pending','sending'].includes(e.status)))void refreshEvents()},3300);
+
+function targetLabel() {
+  if (!state.draft) return 'Choose a sale or purchase';
+  return `${state.locked ? 'Closed' : 'Active'} draft · ${state.draftKind === 'purchase' ? 'Purchase' : 'Sale'} ${shortId(state.draft)}`;
+}
+
+/* ── Camera orchestration ────────────────────────────────────────────────── */
+
+function stopCamera() {
+  state.scanSession?.stop();
+  state.scanSession = null;
+  state.camera = null;
+  state.torch = false;
+}
+
+async function startCamera(kind, video, onCode) {
+  stopCamera();
+  state.cameraError = '';
+  const session = new ScanSession({
+    kind,
+    cooldown: kind === 'qr' ? 1800 : 1100,
+    onCode: code => {
+      scanFeedback('ok');
+      onCode(code);
+    },
+    onState: () => paintCameraChrome()
+  });
+  state.scanSession = session;
+  state.camera = kind;
+  paintCameraChrome();
+  try {
+    await session.start(video);
+  } catch (error) {
+    state.cameraError = error.message;
+    state.camera = null;
+    state.scanSession = null;
+    paintCameraChrome();
+    toaster.bad(error.message, { topic: 'camera' });
+  }
+}
+
+/** Update only the camera chrome, never re-render the whole view under the video. */
+function paintCameraChrome() {
+  const active = !!state.scanSession?.active;
+  // An idle "Stop" is a dead control: it appears only once a stream is running,
+  // and then it is the primary way out of the camera.
+  document.querySelectorAll('.cam-actions [data-cam="stop"], .qr-row-copy [data-cam="stop"]').forEach(button => {
+    button.hidden = !active;
+  });
+  const frame = document.querySelector('.scanner-frame:not(.qr-thumb)');
+  if (!frame) return;
+  frame.classList.toggle('live', active);
+  const status = frame.querySelector('.frame-status');
+  if (status) {
+    status.textContent = active ? 'Scanning' : state.cameraError ? 'Camera unavailable' : 'Camera off';
+    status.dataset.state = active ? 'ok' : state.cameraError ? 'bad' : 'idle';
+  }
+  const caps = state.scanSession?.capabilities();
+  const torch = document.querySelector('[data-cam="torch"]');
+  if (torch) {
+    torch.hidden = !active || !caps?.torch;
+    torch.setAttribute('aria-pressed', String(!!state.scanSession?.torchOn));
+  }
+  const hint = frame.querySelector('.frame-hint');
+  if (hint) hint.textContent = active ? (state.camera === 'qr' ? 'Hold the TrueBill QR inside the frame' : 'Hold the barcode across the frame') : '';
+}
+
+function paintLink() {
+  const badge = document.querySelector('.link-badge');
+  if (!badge) return;
+  const health = link.health();
+  const info = LINK_LABEL[health] || LINK_LABEL.good;
+  badge.dataset.tone = info.tone;
+  badge.querySelector('b').textContent = info.text;
+  badge.title = link.latency ? `${link.latency} ms round trip` : 'Measuring connection…';
+}
+
+/* ── Drafts (the PC bills this phone can scan into) ──────────────────────── */
+
+async function loadDrafts() {
+  if (!state.token) return;
+  state.draftsLoading = true;
+  paintDrafts();
+  try {
+    const drafts = await api('scanner/drafts');
+    state.drafts = drafts;
+    if (state.draft && !drafts.some(d => d.draft_id === state.draft)) {
+      let active = false;
+      try {
+        active = (await api(`scanner/drafts/${state.draft}/status?binding_id=${state.binding}`)).connected;
+      } catch {
+        /* treat as gone */
+      }
+      if (!active) detachDraft('That PC bill closed. Choose another one.');
+    }
+  } catch (error) {
+    state.draftsError = error.message;
+  } finally {
+    state.draftsLoading = false;
+    paintDrafts();
+  }
+}
+
+function detachDraft(message) {
+  state.draft = null;
+  state.binding = null;
+  state.draftKind = 'sale';
+  state.locked = true;
+  state.events = [];
+  if (message) toaster.warn(message, { topic: 'draft' });
+}
+
+async function selectDraft(id) {
+  state.busy = 'bind';
+  render();
+  try {
+    const result = await api(`scanner/drafts/${id}/bind`, { method: 'POST', body: {} });
+    state.draft = id;
+    state.binding = result.binding_id;
+    state.draftKind = result.kind || 'sale';
+    state.locked = false;
+    state.events = [];
+    state.catalogAt = 0; // a different bill may carry different stock
+    restoreEvents();
+    toaster.ok('Linked to ' + targetLabel(), { topic: 'draft' });
+    state.poller?.kick();
+    go('camera');
+  } catch (error) {
+    toaster.bad('Could not link that bill: ' + error.message, { topic: 'draft' });
+  } finally {
+    state.busy = '';
+    render();
+  }
+}
+
+/* ── Sending ─────────────────────────────────────────────────────────────── */
+
+function canSend() {
+  if (!state.token) return 'Sign in first.';
+  if (!state.draft || !state.binding) return 'Choose a PC bill first.';
+  if (state.locked) return 'That PC bill closed. Choose another.';
+  if (!state.online) return 'You are offline. Reconnect to send.';
+  return '';
+}
+
+async function sendEvent(event) {
+  const blocked = canSend();
+  if (blocked) {
+    toaster.bad(blocked, { topic: 'send' });
+    return;
+  }
+  event.status = 'sending';
+  saveEvents();
+  paintEvents();
+  try {
+    await api(`scanner/drafts/${state.draft}/events`, {
+      method: 'POST',
+      keepalive: true, // a scan already leaving must survive a screen lock
+      body: { event_id: event.id, product_id: event.productId, binding_id: state.binding }
+    });
+    // The POST response is an acknowledgement of receipt, not of application:
+    // the PC decides whether the item can be added. Show it as pending until
+    // the next /sync reports what the PC actually did.
+    event.status = 'pending';
+    event.reason = '';
+    state.lastSendAt = Date.now();
+    toaster.ok(`${event.name} sent`, { topic: 'send' });
+    // A burst of scans must not keep one bubble alive indefinitely: each new
+    // item refreshes the timeout rather than inheriting the first one.
+    toaster.arm(toaster.current.get('send'), 2400, 'ok');
+    state.poller?.kick();
+  } catch (error) {
+    event.status = 'error';
+    event.reason = error.message;
+    toaster.bad(`${event.name} was not sent. ${error.message}`, { topic: 'send' });
+  }
+  saveEvents();
+  paintEvents();
+}
+
+async function addItem(product) {
+  const blocked = canSend();
+  if (blocked) {
+    toaster.bad(blocked, { topic: 'send' });
+    return;
+  }
+  const event = {
+    id: uuid(),
+    productId: product.id,
+    name: product.name + (product.strength ? ' · ' + product.strength : ''),
+    at: new Date().toISOString(),
+    status: 'sending',
+    reason: ''
+  };
+  state.events.unshift(event);
+  if (state.events.length > 60) state.events.length = 60;
+  saveEvents();
+  paintEvents();
+  await sendEvent(event);
+}
+
+/* One round trip per poll: /sync carries the draft state, the binding state and
+   every event status the draft has ever seen. The old loop called /status,
+   /sync and /events separately, and the PC polled /events on its own timer. */
+let syncing = false;
+async function refreshEvents() {
+  if (syncing || !state.draft || !state.binding || !state.online) return false;
+  syncing = true;
+  try {
+    return await syncDraft();
+  } finally {
+    syncing = false;
+  }
+}
+
+async function syncDraft() {
+  const sync = await api(`scanner/drafts/${state.draft}/sync?binding_id=${state.binding}`);
+  const wasLocked = state.locked;
+  state.locked = !sync.connected;
+  if (sync.kind) state.draftKind = sync.kind;
+  if (state.locked && !wasLocked) {
+    stopCamera();
+    toaster.bad('The PC bill closed. No more scans can be sent.', { topic: 'draft' });
+  }
+
+  let changed = false;
+  const byId = new Map((sync.events || []).map(row => [row.id, row]));
+  for (const event of state.events) {
+    const remote = byId.get(event.id);
+    if (!remote) continue;
+    const nextStatus = remote.status === 'error' ? 'error' : remote.status;
+    if (event.status === nextStatus && (event.reason || '') === (remote.reason || '')) continue;
+    const previous = event.status;
+    event.status = nextStatus;
+    event.reason = remote.reason || '';
+    changed = true;
+    if (nextStatus === 'applied' && previous !== 'applied') toaster.ok(`${event.name} added on the PC`, { topic: 'send' });
+    if (nextStatus === 'rejected' && previous !== 'rejected') {
+      toaster.bad(`${event.name} was not added${event.reason ? ': ' + event.reason : ''}`, { topic: 'send' });
+    }
+  }
+  if (changed) saveEvents();
+  paintEvents();
+  paintTarget();
+  /* Stay in the fast cadence only while something is genuinely in flight: an
+     item being posted, or an item sent in the last few seconds that the PC has
+     not acknowledged yet. An item the PC never acknowledges must not keep the
+     phone polling flat out for the rest of the shift. */
+  const inFlight = state.events.some(event => event.status === 'sending');
+  const waiting = state.events.some(event => event.status === 'pending');
+  return inFlight || (waiting && !!state.lastSendAt && Date.now() - state.lastSendAt < 5000);
+}
+
+/* ── Scanner: decode a code and resolve it to one product ────────────────── */
+
+let lastLookup = { code: '', at: 0 };
+
+async function onBarcode(code) {
+  code = String(code || '').trim();
+  if (!code) return;
+  const blocked = canSend();
+  if (blocked) {
+    toaster.bad(blocked, { topic: 'scan' });
+    return;
+  }
+  // The session already debounces the same code; this guards against a second
+  // frame landing while the first lookup is still in flight.
+  if (code === lastLookup.code && Date.now() - lastLookup.at < 900) return;
+  lastLookup = { code, at: Date.now() };
+
+  try {
+    const rows = await api(`scanner/drafts/${state.draft}/catalog?binding_id=${state.binding}&q=${encodeURIComponent(code)}`);
+    const needle = code.toLowerCase();
+    const exact = rows.filter(row => row.barcode?.toLowerCase() === needle || row.sku?.toLowerCase() === needle);
+    if (exact.length === 1) {
+      scanFeedback('ok');
+      await addItem(exact[0]);
+      return;
+    }
+    scanFeedback('bad');
+    if (exact.length > 1) {
+      toaster.warn(`More than one item uses ${code}. Pick it in Catalog.`, { topic: 'scan' });
+      state.catalogQuery = code;
+    } else {
+      toaster.bad(`No item matches ${code}. Search the catalog or assign a code.`, { topic: 'scan' });
+      state.catalogQuery = code;
+    }
+  } catch (error) {
+    scanFeedback('bad');
+    toaster.bad('Lookup failed: ' + error.message, { topic: 'scan' });
+  }
+}
+
+/* ── Catalog ─────────────────────────────────────────────────────────────── */
+
+let catalogRequest = 0;
+async function searchCatalog(query = '') {
+  state.catalogQuery = query;
+  const ticket = ++catalogRequest;
+  paintCatalog({ loading: true });
+  try {
+    const route = state.draft && state.binding
+      ? `scanner/drafts/${state.draft}/catalog?binding_id=${state.binding}&q=${encodeURIComponent(query)}`
+      : `scanner/catalog?q=${encodeURIComponent(query)}`;
+    const rows = await api(route);
+    if (ticket !== catalogRequest) return; // a newer query already won
+    state.items = rows;
+    state.catalogAt = Date.now();
+    paintCatalog();
+  } catch (error) {
+    if (ticket !== catalogRequest) return;
+    state.items = [];
+    paintCatalog({ error: error.message });
+  }
+}
+
+/* ── TrueBill verification ───────────────────────────────────────────────── */
+
+async function verifyInvoice(raw, source = 'manual') {
+  const box = document.getElementById('verifyResult');
+  if (!box) return;
+  const value = String(raw || '').trim();
+  if (source === 'manual' && !/^(?:PUR|SAL)-[A-Z0-9-]{3,74}$/i.test(value)) {
+    toaster.bad('Invoice numbers start with PUR- or SAL-.', { topic: 'verify' });
+    return;
+  }
+  const token = source === 'qr' ? truebillCode(value) : null;
+  if (source === 'qr' && !token) {
+    toaster.bad('That is not an EMS TrueBill QR.', { topic: 'verify' });
+    return;
+  }
+  if (!state.online) {
+    toaster.bad('Verification needs a connection.', { topic: 'verify' });
+    return;
+  }
+  stopCamera();
+  box.innerHTML = '<div class="verify-loading"><span class="spinner" aria-hidden="true"></span><p>Checking…</p></div>';
+  try {
+    const result = source === 'qr'
+      ? await api('public/invoice/' + encodeURIComponent(token), { retries: 1 })
+      : await api('public/invoice/lookup', { method: 'POST', body: { invoice_number: value } });
+    if (!result?.verified) throw new Error('The record was not verified.');
+    if (source === 'manual') {
+      if (result.details_available !== false || !result.invoice_number || !['sale', 'purchase'].includes(result.kind)) {
+        throw new Error('Invalid verification response.');
+      }
+      box.innerHTML = `<article class="verify-limited"><span class="verify-limited-ic">${icon('check', { size: 18 })}</span><div><b>${esc(result.invoice_number)}</b><p>Invoice number found</p><small>${result.kind === 'purchase' ? 'Purchase' : 'Sale'} record · scan its TrueBill QR for the full invoice.</small></div></article>`;
+      toaster.ok('Invoice number found.', { topic: 'verify' });
+    } else {
+      if (!truebillSummary(result)) throw new Error('Invalid verification response.');
+      box.innerHTML = truebillDetails(result);
+      toaster.ok('Verified by EMS TrueBill.', { topic: 'verify' });
+    }
+  } catch (error) {
+    const missing = error.status === 404;
+    box.innerHTML = `<div class="verify-failed"><b>${missing ? 'No invoice found' : 'Could not check right now'}</b><p>${missing ? 'Check the number and try again.' : 'Try again when the connection is working.'}</p></div>`;
+    toaster.bad(missing ? 'No matching invoice found.' : 'Verification could not be completed.', { topic: 'verify' });
+  }
+}
+
+/* ── Sign in ─────────────────────────────────────────────────────────────── */
+
+function qrLoginCode(value) {
+  try {
+    const url = new URL(String(value || ''));
+    if (url.origin !== location.origin || url.pathname.replace(/\/$/, '') !== '/scanner') return null;
+    const code = new URLSearchParams(url.hash.slice(1)).get('login');
+    return /^[a-f0-9]{64}$/i.test(code || '') ? code : null;
+  } catch {
+    return null;
+  }
+}
+
+async function signInWithQr(code) {
+  if (!code) {
+    toaster.bad('That is not an EMS Scanner sign-in QR.', { topic: 'signin' });
+    return;
+  }
+  try {
+    const result = await api('scanner/login/consume', { method: 'POST', body: { token: code } });
+    stopCamera();
+    applySession(result, true);
+    state.view = 'home';
+    render();
+    toaster.ok('Signed in. Choose the PC bill you are scanning into.', { topic: 'signin' });
+  } catch (error) {
+    toaster.bad('QR sign-in failed: ' + error.message, { topic: 'signin' });
+  }
+}
+
+function applySession(result, paired = false) {
+  state.token = result.token;
+  state.user = result.user?.name || 'Scanner user';
+  state.store = result.store?.name || 'EMS shop';
+  state.storeId = result.store?.id || '';
+  state.userId = result.user?.id || '';
+  state.shopType = result.store?.shop_type || '';
+  state.paired = paired;
+  saveSession();
+}
+
+function signOut() {
+  stopCamera();
+  clearSession();
+  Object.assign(state, { token: '', user: '', store: '', storeId: '', userId: '', shopType: '', paired: false, draft: null, binding: null, events: [], items: [], profile: null });
+  state.poller?.stop();
+  state.poller = null;
+  state.view = 'home';
+  toaster.clear();
+  render();
+}
+
+/* ── Views ───────────────────────────────────────────────────────────────── */
+
+function shell(title, body, { back = '', maxWidth = '', backId = '' } = {}) {
+  const tabs = state.token ? TABS : TABS.filter(tab => !tab.auth);
+  app.innerHTML = `
+    <header class="bar">
+      <button type="button" class="bar-btn" ${backId ? `id="${backId}"` : ''} data-nav="${back ? 'back' : 'home'}" aria-label="${back ? 'Back' : 'Home'}">${icon(back ? 'arrow' : 'home', { size: 19 })}</button>
+      <div class="bar-title"><b>${esc(title)}</b></div>
+      <span class="link-badge" data-tone="ok" role="status">${icon('wifi', { size: 12 })}<b>Connected</b></span>
+    </header>
+    <main class="page ${maxWidth}">${body}</main>
+    <nav class="tabbar tabs" aria-label="Sections">
+      ${tabs.map(tab => `<button type="button" class="tab" data-view="${tab.view}" aria-current="${state.view === tab.view ? 'page' : 'false'}">${icon(tab.iconName, { size: 21 })}<span>${tab.label}</span></button>`).join('')}
+    </nav>`;
+
+  app.querySelectorAll('[data-view]').forEach(button => { button.onclick = () => go(button.dataset.view); });
+  app.querySelectorAll('[data-nav]').forEach(button => {
+    button.onclick = () => (button.dataset.nav === 'back' ? history.length > 1 ? history.back() : go('home') : go('home'));
+  });
+  paintLink();
+}
+
+function signInView() {
+  state.signInTab ||= 'account';
+  /* Both panels stay mounted and toggle with [hidden]: the camera element has
+     to exist before the operator taps "Start camera", and switching tabs must
+     never rebuild the video element under an open stream. */
+  app.innerHTML = `
+    <main class="signin">
+      <div class="signin-brand">
+        <span class="signin-mark">${icon('scan', { size: 22 })}</span>
+        <div><b>EMS Scanner</b></div>
+      </div>
+
+      <h1>Sign in</h1>
+
+      <div class="segmented" role="tablist" aria-label="Sign-in method">
+        <button type="button" role="tab" id="accountTab" aria-controls="accountMode" data-signin="account" aria-selected="${state.signInTab === 'account'}">Shop account</button>
+        <button type="button" role="tab" id="qrTab" aria-controls="qrMode" data-signin="qr" aria-selected="${state.signInTab === 'qr'}">PC QR code</button>
+      </div>
+
+      <div id="accountMode" role="tabpanel" aria-labelledby="accountTab" ${state.signInTab === 'account' ? '' : 'hidden'}>
+        <form id="loginForm" class="form" novalidate>
+          <label>Shop ID<input name="storeId" inputmode="numeric" autocomplete="organization" required></label>
+          <label>User ID<input name="userId" autocomplete="username" required></label>
+          <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+          <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+        </form>
+      </div>
+
+      <div id="qrMode" role="tabpanel" aria-labelledby="qrTab" ${state.signInTab === 'qr' ? '' : 'hidden'}>
+        <section class="qr-panel">
+          <div class="scanner-frame qr-frame" id="loginFrame">
+            <video id="loginVideo" muted playsinline autoplay></video>
+            <span class="frame-corner tl"></span><span class="frame-corner tr"></span><span class="frame-corner bl"></span><span class="frame-corner br"></span>
+            <div class="frame-bar"><span class="frame-status" data-state="idle">Camera off</span><span class="frame-hint"></span></div>
+          </div>
+          <div class="cam-actions">
+            <button type="button" class="btn btn-primary" id="loginQrStart" data-cam="start">${icon('qr', { size: 17 })} Scan the code</button>
+            <button type="button" class="btn" data-cam="stop" hidden>Stop</button>
+          </div>
+        </section>
+      </div>
+
+      <button type="button" class="link-row" id="openVerifyPublic" data-view="verify">${icon('verify', { size: 16 })} Verify an invoice without signing in</button>
+    </main>`;
+
+  app.querySelectorAll('[data-signin]').forEach(button => {
+    button.onclick = () => {
+      const tab = button.dataset.signin;
+      if (tab === state.signInTab) return;
+      stopCamera();
+      state.signInTab = tab;
+      signInView();
+    };
+  });
+  app.querySelectorAll('[data-view]').forEach(button => { button.onclick = () => go(button.dataset.view); });
+
+  const form = app.querySelector('#loginForm');
+  if (form) {
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const payload = Object.fromEntries(new FormData(form));
+      if (!payload.storeId || !payload.userId || !payload.password) {
+        toaster.bad('Fill in all three fields.', { topic: 'signin' });
+        return;
+      }
+      const button = form.querySelector('button[type=submit]');
+      button.disabled = true;
+      button.textContent = 'Signing in…';
+      try {
+        const result = await api('auth/login', { method: 'POST', body: payload });
+        const shopType = result.store?.shop_type || result.store?.business_type || '';
+        if (shopType && !['pharmacy', 'electronics'].includes(shopType)) {
+          throw new Error('Scanner billing is for Pharmacy and Electronics shops. Invoice verification is open to everyone.');
+        }
+        applySession(result);
+        state.view = 'home';
+        render();
+      } catch (error) {
+        toaster.bad(error.message, { topic: 'signin' });
+        button.disabled = false;
+        button.textContent = 'Sign in';
+      }
+    };
+  }
+
+  const startBtn = app.querySelector('[data-cam="start"]');
+  if (startBtn) {
+    startBtn.onclick = () => {
+      const video = app.querySelector('#loginVideo');
+      startCamera('qr', video, code => {
+        const login = qrLoginCode(code);
+        if (login) void signInWithQr(login);
+        else toaster.bad('That QR is not a Scanner sign-in code.', { topic: 'signin' });
+      });
+    };
+    app.querySelector('[data-cam="stop"]').onclick = () => { stopCamera(); paintCameraChrome(); };
+  }
+}
+
+function homeView() {
+  const connected = !!state.draft && !state.locked;
+  const counts = {
+    added: state.events.filter(e => e.status === 'applied').length,
+    waiting: state.events.filter(e => e.status === 'pending' || e.status === 'sending').length
+  };
+  const body = `
+    <section class="hero">
+      <div class="hero-copy">
+        <span class="hero-kicker">${esc(state.shopType ? state.shopType.toUpperCase() + ' WORKSPACE' : state.paired ? 'LINKED FROM PC' : 'SIGNED IN')}</span>
+        <h1>${esc(state.store || 'Your shop')}</h1>
+        <p>${esc(state.user)}</p>
+      </div>
+      <button type="button" class="hero-menu" data-sheet="menu" aria-label="More options">${icon('user', { size: 18 })}</button>
+    </section>
+
+    <div class="bento">
+      ${tile({
+        span: 'full',
+        title: 'PC bill',
+        iconName: 'tag',
+        tone: connected ? 'ok' : 'idle',
+        cls: 'tile--draft',
+        value: `<span class="tile-big" id="selectedDraft">${connected
+          ? `Active draft · ${state.draftKind === 'purchase' ? 'Purchase' : 'Sale'} ${shortId(state.draft)}`
+          : 'Choose a sale or purchase'}</span>`,
+        note: connected ? 'Scanning is live on this phone.' : 'Open one on the shop PC first.',
+        action: `<button type="button" class="tile-action" id="refreshDrafts" data-act="refresh" aria-label="Refresh PC bills">${icon('refresh', { size: 15 })}</button>`
+      })}
+      ${tile({
+        span: 'half',
+        title: 'Added',
+        iconName: 'check',
+        tone: counts.added ? 'ok' : 'idle',
+        value: `<span class="tile-num">${counts.added}</span>`,
+        note: 'Confirmed by the PC'
+      })}
+      ${tile({
+        span: 'half',
+        title: 'Waiting',
+        iconName: 'clock',
+        tone: counts.waiting ? 'warn' : 'idle',
+        value: `<span class="tile-num">${counts.waiting}</span>`,
+        note: 'Awaiting PC'
+      })}
+    </div>
+
+    <div class="row-actions">
+      <button type="button" class="btn btn-primary btn-block" data-view="camera">${icon('scan', { size: 18 })} Scan an item</button>
+    </div>
+
+    <section class="panel" id="draftPanel">
+      <header class="panel-head">
+        <h2>Bills on the shop PC</h2>
+        <button type="button" class="panel-link" data-act="refresh">Refresh</button>
+      </header>
+      <div id="draftList" class="list"></div>
+    </section>
+
+    <section class="panel" id="eventPanel">
+      <header class="panel-head"><h2>This bill</h2><span class="badge" id="eventCount"></span></header>
+      <ul id="eventList" class="feed"></ul>
+    </section>`;
+
+  shell('Scanner', body);
+
+  app.querySelectorAll('[data-act="refresh"]').forEach(button => { button.onclick = () => { void loadDrafts(); }; });
+  app.querySelectorAll('[data-view]').forEach(button => { button.onclick = () => go(button.dataset.view); });
+  const menu = app.querySelector('[data-sheet="menu"]');
+  if (menu) menu.onclick = openMenu;
+  paintDrafts();
+  paintEvents();
+  void loadDrafts();
+}
+
+function cameraView() {
+  const blocked = canSend();
+  /* Two states, one layout:
+       · camera off — a tap target that starts it, and the manual entry below;
+       · camera on  — the viewfinder plus a single row of controls.
+     Nothing is reserved for the tab bar (it is fixed) and nothing sits below
+     the fold that the operator needs mid-scan. */
+  const body = `
+    <section class="scan-head">
+      <button type="button" class="target" data-act="choose">
+        <span class="target-dot" data-tone="${state.draft && !state.locked ? 'ok' : 'bad'}"></span>
+        <span class="target-copy"><b id="selectedDraft">${esc(targetLabel())}</b><small>${blocked ? esc(blocked) : 'Ready to scan'}</small></span>
+        ${icon('chevron', { size: 15 })}
+      </button>
+    </section>
+
+    <section class="scan-stage">
+      <button type="button" class="scan-target" id="startCam" data-cam="start">
+        <span class="scan-target-ic">${icon('cam', { size: 22 })}</span>
+        <span>
+          <b>Start camera</b>
+          <small>Point at the barcode. Torch and zoom appear when the camera supports them.</small>
+        </span>
+      </button>
+
+      <div class="scanner-frame is-off" id="scanFrame" hidden>
+        <video id="scanVideo" muted playsinline autoplay></video>
+        <div class="frame-mask" aria-hidden="true">
+          <span class="frame-corner tl"></span><span class="frame-corner tr"></span><span class="frame-corner bl"></span><span class="frame-corner br"></span>
+          <span class="frame-line" aria-hidden="true"></span>
+        </div>
+        <div class="frame-bar">
+          <span class="frame-status" data-state="idle">Starting…</span>
+          <span class="frame-hint"></span>
+        </div>
+      </div>
+
+      <div class="cam-actions" id="camActions" hidden>
+        <button type="button" class="btn" data-cam="again" title="Allow the same code again">${icon('refresh', { size: 16 })}<span>Same again</span></button>
+        <button type="button" class="btn" data-cam="torch" aria-pressed="false" hidden title="Torch">${icon('bolt', { size: 16 })}<span class="sr-only">Torch</span></button>
+        <button type="button" class="btn btn-primary" data-cam="stop">Stop</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head"><h2>Type a code</h2></header>
+      <form id="manualForm" class="inline-form">
+        <input name="code" inputmode="text" autocomplete="off" enterkeyhint="send" placeholder="Barcode or SKU" required>
+        <button type="submit" class="btn" aria-label="Send">${icon('arrow', { size: 16 })}</button>
+      </form>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head"><h2>Scanned</h2><span class="badge" id="eventCount"></span></header>
+      <ul id="eventList" class="feed"></ul>
+    </section>`;
+
+  shell('Scan', body, { back: 'home' });
+
+  app.querySelector('[data-act="choose"]').onclick = () => go('home');
+  app.querySelectorAll('[data-cam]').forEach(button => {
+    button.onclick = async () => {
+      const action = button.dataset.cam;
+      if (action === 'start') {
+        const video = app.querySelector('#scanVideo');
+        revealViewfinder();
+        await startCamera('barcode', video, code => { void onBarcode(code); });
+      } else if (action === 'stop') {
+        stopCamera();
+        hideViewfinder();
+      } else if (action === 'again') {
+        state.scanSession?.resetCooldown();
+        lastLookup = { code: '', at: 0 };
+        toaster.ok('Ready for the same item again.', { topic: 'scan' });
+      } else if (action === 'torch') {
+        const session = state.scanSession;
+        if (!session) return;
+        const ok = await session.setTorch(!session.torchOn);
+        if (!ok) toaster.warn('This camera has no torch.', { topic: 'camera' });
+        paintCameraChrome();
+      }
+    };
+  });
+
+  app.querySelector('#manualForm').onsubmit = event => {
+    event.preventDefault();
+    const input = event.target.elements.namedItem('code');
+    void onBarcode(input.value);
+    input.value = '';
+  };
+
+  paintEvents();
+  paintCameraChrome();
+  if (state.camera) revealViewfinder();
+  void refreshEvents().then(paintEvents).catch(() => {});
+}
+
+/** Swap the start target for the viewfinder without re-rendering the page. */
+function revealViewfinder() {
+  const target = document.querySelector('#startCam');
+  const frame = document.querySelector('#scanFrame');
+  const actions = document.querySelector('#camActions');
+  if (target) target.hidden = true;
+  if (frame) {
+    frame.hidden = false;
+    frame.classList.remove('is-off');
+  }
+  if (actions) actions.hidden = false;
+  paintCameraChrome();
+}
+
+function hideViewfinder() {
+  const target = document.querySelector('#startCam');
+  const frame = document.querySelector('#scanFrame');
+  const actions = document.querySelector('#camActions');
+  if (target) target.hidden = false;
+  if (frame) {
+    frame.hidden = true;
+    frame.classList.add('is-off');
+  }
+  if (actions) actions.hidden = true;
+}
+
+function catalogView() {
+  const body = `
+    <section class="panel">
+      <form id="catalogForm" class="search-form">
+        ${icon('search', { size: 16 })}
+        <input id="catalogInput" name="q" type="search" autocomplete="off" enterkeyhint="search" placeholder="Search name or code" value="${esc(state.catalogQuery)}">
+      </form>
+      <div id="catalogList" class="list"></div>
+    </section>`;
+
+  shell('Catalog', body);
+  app.querySelector('#catalogForm').onsubmit = event => {
+    event.preventDefault();
+    void searchCatalog(event.target.elements.namedItem('q').value.trim());
+  };
+  let debounce = 0;
+  app.querySelector('#catalogInput').addEventListener('input', event => {
+    clearTimeout(debounce);
+    const value = event.target.value.trim();
+    debounce = setTimeout(() => { if (value.length > 1 || value.length === 0) void searchCatalog(value); }, 240);
+  });
+  /* Re-show what is already loaded instead of re-fetching it. The catalog only
+     changes when the shop PC edits it, so a repeat visit within a minute is a
+     cache hit, not a request. */
+  const fresh = state.catalogAt && Date.now() - state.catalogAt < 60_000;
+  if (fresh && state.items.length && !state.catalogQuery) {
+    paintCatalog();
+  } else {
+    void searchCatalog(state.catalogQuery);
+  }
+}
+
+function verifyView() {
+  /* Verification is the one screen a guest can reach, usually while holding a
+     printed bill. It leads with the number field (the common case, and the only
+     one that works without a camera) and offers the QR camera as a compact
+     square that sits in the same panel, so the page never opens on a large
+     black rectangle. */
+  const body = `
+    <section class="verify-top">
+      <h1>Verify invoice</h1>
+    </section>
+
+    <section class="panel">
+      <header class="panel-head"><h2>Invoice number</h2></header>
+      <form id="verifyForm" class="inline-form">
+        <input id="verifyInput" name="code" autocomplete="off" enterkeyhint="search" placeholder="SAL-000123" required>
+        <button type="submit" class="btn">${icon('arrow', { size: 16 })}</button>
+      </form>
+
+      <div class="qr-row">
+        <div class="scanner-frame qr-frame qr-thumb" id="verifyFrame">
+          <video id="verifyVideo" muted playsinline autoplay></video>
+          <span class="frame-corner tl"></span><span class="frame-corner tr"></span><span class="frame-corner bl"></span><span class="frame-corner br"></span>
+          <div class="frame-bar"><span class="frame-status" data-state="idle">Camera off</span></div>
+        </div>
+        <div class="qr-row-copy">
+          <button type="button" class="btn btn-primary" id="verifyCamera" data-cam="start">${icon('qr', { size: 17 })} Scan TrueBill QR</button>
+          <button type="button" class="btn btn-quiet" data-cam="stop" hidden>Stop</button>
+        </div>
+      </div>
+    </section>
+
+    <div id="verifyResult" aria-live="polite"></div>`;
+
+  shell('Verify', body, { back: 'home', backId: 'verifyBack' });
+
+  app.querySelectorAll('[data-cam]').forEach(button => {
+    button.onclick = () => {
+      if (button.dataset.cam === 'start') {
+        const video = app.querySelector('#verifyVideo');
+        startCamera('qr', video, code => { void verifyInvoice(code, 'qr'); });
+      } else {
+        stopCamera();
+        paintCameraChrome();
+      }
+    };
+  });
+  app.querySelector('#verifyForm').onsubmit = event => {
+    event.preventDefault();
+    void verifyInvoice(event.target.elements.namedItem('code').value, 'manual');
+  };
+}
+
+function installView() {
+  const body = `
+    <section class="panel">
+      <header class="panel-head"><h2>Android · Chrome</h2></header>
+      <p class="panel-text">Menu ⋮ → <b>Install app</b>.</p>
+    </section>
+    <section class="panel">
+      <header class="panel-head"><h2>iPhone · Safari</h2></header>
+      <p class="panel-text">Share → <b>Add to Home Screen</b>.</p>
+    </section>
+    ${state.installPrompt ? '<button type="button" class="btn btn-primary btn-block" data-act="install">Install now</button>' : ''}
+    <section class="panel panel-quiet">
+      <p class="panel-text">Scanning needs HTTPS, camera permission and a live bill on the shop PC.</p>
+    </section>`;
+
+  shell('Install', body, { back: 'home' });
+  const install = app.querySelector('[data-act="install"]');
+  if (install) {
+    install.onclick = async () => {
+      const prompt = state.installPrompt;
+      state.installPrompt = null;
+      if (prompt) await prompt.prompt();
+      render();
+    };
+  }
+}
+
+function profileView() {
+  const body = `
+    <section class="hero hero--plain">
+      <div class="hero-copy"><h1>${esc(state.user)}</h1><p>${esc(state.store)}</p></div>
+    </section>
+    <section class="panel">
+      <div id="profileDetails" class="list">${empty({ text: 'Loading…' })}</div>
+    </section>
+    <section class="panel panel-quiet">
+      <div class="row-actions">
+        <button type="button" class="btn" data-view="install">${icon('download', { size: 16 })} Install app</button>
+        <button type="button" class="btn btn-danger" data-act="signout">${icon('power', { size: 16 })} Sign out</button>
+      </div>
+    </section>`;
+
+  shell('Profile', body, { back: 'home' });
+  app.querySelectorAll('[data-view]').forEach(button => { button.onclick = () => go(button.dataset.view); });
+  app.querySelector('[data-act="signout"]').onclick = () => {
+    if (confirm('Sign out of the scanner?')) signOut();
+  };
+
+  void (async () => {
+    const box = document.getElementById('profileDetails');
+    if (!box) return;
+    try {
+      const profile = await api('scanner/profile');
+      state.profile = profile;
+      box.innerHTML = `
+        ${row('Name', profile.user.name || state.user)}
+        ${row('Login', profile.user.user_id || '—')}
+        ${row('Shop', `${profile.shop.name} · ${profile.shop.code}`)}
+        ${row('Role', profile.user.role)}
+        ${row('Scanner', profile.canScan ? 'Ready' : 'Billing permission missing')}
+        ${row('Sign-in', profile.paired ? 'PC QR code' : 'Shop account')}`;
+    } catch (error) {
+      box.innerHTML = empty({ text: 'Profile unavailable: ' + error.message });
+    }
+  })();
+}
+
+const row = (label, value) => `<div class="list-row"><span>${esc(label)}</span><b>${esc(value)}</b></div>`;
+
+/* ── Menus and sheets ────────────────────────────────────────────────────── */
+
+function openMenu() {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet-backdrop';
+  sheet.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Menu">
+      <span class="sheet-grip" aria-hidden="true"></span>
+      ${actionRow({ id: 'sheetProfile', iconName: 'user', label: 'Profile' })}
+      ${actionRow({ id: 'sheetInstall', iconName: 'download', label: 'Install app' })}
+      ${actionRow({ id: 'sheetVerify', iconName: 'verify', label: 'Verify an invoice' })}
+      ${actionRow({ id: 'sheetSignout', iconName: 'power', label: 'Sign out', tone: 'danger' })}
+    </div>`;
+  document.body.append(sheet);
+  const close = () => sheet.remove();
+  sheet.addEventListener('click', event => { if (event.target === sheet) close(); });
+  sheet.querySelector('#sheetProfile').onclick = () => { close(); go('profile'); };
+  sheet.querySelector('#sheetInstall').onclick = () => { close(); go('install'); };
+  sheet.querySelector('#sheetVerify').onclick = () => { close(); go('verify'); };
+  sheet.querySelector('#sheetSignout').onclick = () => { close(); if (confirm('Sign out of the scanner?')) signOut(); };
+  requestAnimationFrame(() => sheet.classList.add('in'));
+}
+
+/**
+ * Shelf/bill label for one item: a CODE128 barcode plus name and price.
+ *
+ * This is the only place JsBarcode is used. It renders into an inline SVG, so
+ * the sheet is crisp at any size and prints without a second request.
+ */
+function openLabel(item) {
+  if (!item?.barcode) {
+    toaster.bad('No barcode assigned to this item.', { topic: 'label' });
+    return;
+  }
+  if (typeof window.JsBarcode !== 'function') {
+    toaster.bad('Barcode rendering is not available offline yet.', { topic: 'label' });
+    return;
+  }
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet-backdrop';
+  sheet.innerHTML = `
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="Print label">
+      <span class="sheet-grip" aria-hidden="true"></span>
+      <div class="label-sheet" id="labelSheet">
+        <b>${esc(state.store || 'EMS')}</b>
+        <span>${esc(item.name)} ${esc(item.strength || '')}</span>
+        <svg id="labelBarcode"></svg>
+        <small>${esc(money(item.selling_price ?? item.price))} · ${esc(item.barcode)}</small>
+      </div>
+      <div class="row-actions">
+        <button type="button" class="btn btn-primary btn-block" data-act="print">${icon('printer', { size: 16 })} Print</button>
+        <button type="button" class="btn" data-act="close">Close</button>
+      </div>
+    </div>`;
+  document.body.append(sheet);
+  const close = () => sheet.remove();
+  sheet.addEventListener('click', event => { if (event.target === sheet) close(); });
+  sheet.querySelector('[data-act="close"]').onclick = close;
+  sheet.querySelector('[data-act="print"]').onclick = () => window.print();
+  requestAnimationFrame(() => sheet.classList.add('in'));
+  try {
+    window.JsBarcode(sheet.querySelector('#labelBarcode'), item.barcode, { format: 'CODE128', width: 2, height: 64, displayValue: true, margin: 8, fontSize: 13 });
+  } catch (error) {
+    toaster.bad('Barcode rendering failed: ' + error.message, { topic: 'label' });
+    close();
+  }
+}
+
+/* ── Partial painters ────────────────────────────────────────────────────── */
+/* These exist so a poll or a keystroke never re-renders the camera video
+   element, which would restart the stream. Only the affected fragment repaints. */
+
+function paintDrafts() {
+  const list = document.getElementById('draftList');
+  if (!list) return;
+  if (state.draftsLoading && !state.drafts?.length) {
+    list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+    return;
+  }
+  const drafts = state.drafts || [];
+  if (!drafts.length) {
+    list.innerHTML = empty({ text: state.draftsError || 'No open bill on the PC. Open a sale or purchase on the shop computer.' });
+    return;
+  }
+  list.innerHTML = drafts.map(draft => {
+    const selected = draft.draft_id === state.draft;
+    return `<button type="button" class="list-item ${selected ? 'is-selected' : ''}" data-draft="${esc(draft.draft_id)}" data-select="${esc(draft.draft_id)}">
+      <span class="list-mark">${icon(draft.kind === 'purchase' ? 'download' : 'tag', { size: 16 })}</span>
+      <span class="list-copy"><b>${draft.kind === 'purchase' ? 'Purchase' : 'Sale'} · ${esc(shortId(draft.draft_id))}</b><small>PC ${esc(shortId(draft.terminal_label))}</small></span>
+      <span class="list-state">${selected ? icon('check', { size: 16 }) : icon('chevron', { size: 15 })}</span>
+    </button>`;
+  }).join('');
+  list.querySelectorAll('[data-draft]').forEach(button => {
+    button.onclick = () => { if (state.busy !== 'bind') void selectDraft(button.dataset.draft); };
+  });
+}
+
+function paintTarget() {
+  const target = document.querySelector('.target');
+  if (!target) return;
+  const blocked = canSend();
+  const connected = !!state.draft && !state.locked;
+  target.querySelector('.target-dot').dataset.tone = connected ? 'ok' : 'bad';
+  target.querySelector('.target-copy b').textContent = targetLabel();
+  target.querySelector('.target-copy small').textContent = blocked || 'Ready to scan';
+  const homeTile = document.querySelector('.tile--draft #selectedDraft');
+  if (homeTile) {
+    homeTile.textContent = connected
+      ? `Active draft · ${state.draftKind === 'purchase' ? 'Purchase' : 'Sale'} ${shortId(state.draft)}`
+      : 'Choose a sale or purchase';
+  }
+}
+
+function paintEvents() {
+  const lists = document.querySelectorAll('#eventList');
+  if (!lists.length) return;
+  const rows = state.events.slice(0, 40);
+  const markup = rows.length
+    ? rows.map(event => {
+        const status = eventState(event.status);
+        return `<li class="feed-row">
+          <span class="feed-mark" data-tone="${status.tone}">${status.tone === 'ok' ? icon('check', { size: 14 }) : status.tone === 'bad' ? icon('x', { size: 14 }) : icon('clock', { size: 14 })}</span>
+          <span class="feed-copy"><b>${esc(event.name)}</b><small>${esc(clockTime(event.at))} · ${esc(status.label)}${event.reason ? ' · ' + esc(event.reason) : ''}</small></span>
+          ${event.status === 'error' ? `<button type="button" class="feed-act" data-retry="${esc(event.id)}">Retry</button>`
+            : event.status === 'applied' || event.status === 'rejected' ? `<button type="button" class="feed-act" data-repeat="${esc(event.id)}">+1</button>` : ''}
+        </li>`;
+      }).join('')
+    : `<li class="feed-empty">${icon('scan', { size: 18 })}<span>No scans yet</span></li>`;
+
+  lists.forEach(list => { list.innerHTML = markup; });
+  document.querySelectorAll('#eventCount').forEach(badge => {
+    badge.textContent = state.events.length ? String(state.events.length) : '';
+    badge.hidden = !state.events.length;
+  });
+  document.querySelectorAll('[data-retry]').forEach(button => {
+    button.onclick = () => { const event = state.events.find(e => e.id === button.dataset.retry); if (event) void sendEvent(event); };
+  });
+  document.querySelectorAll('[data-repeat]').forEach(button => {
+    button.onclick = () => {
+      const event = state.events.find(e => e.id === button.dataset.repeat);
+      if (event) void addItem({ id: event.productId, name: event.name.split(' · ')[0] });
+    };
+  });
+}
+
+function paintCatalog({ loading = false, error = '' } = {}) {
+  const list = document.getElementById('catalogList');
+  if (!list) return;
+  if (loading) {
+    list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+    return;
+  }
+  if (error) {
+    list.innerHTML = empty({ text: error });
+    return;
+  }
+  if (!state.items.length) {
+    list.innerHTML = empty({ text: state.catalogQuery ? `Nothing matches “${state.catalogQuery}”.` : 'No items in this shop yet.' });
+    return;
+  }
+  const canAdd = !!state.draft && !state.locked;
+  list.innerHTML = state.items.map(item => {
+    const out = state.draftKind === 'sale' && Number(item.available_stock) <= 0;
+    return `<div class="list-item list-item--static">
+      <span class="list-copy"><b>${esc(item.name)} ${esc(item.strength || '')}</b>
+        <small>${esc(item.dosage_form || '')}${item.dosage_form ? ' · ' : ''}${esc(item.sku || item.barcode || 'No code')} · ${esc(item.available_stock)} ${esc(item.base_unit || '')}${out ? ' · out of stock' : ''}</small></span>
+      ${item.barcode ? `<button type="button" class="icon-btn" data-label="${esc(item.id)}" aria-label="Print label for ${esc(item.name)}">${icon('printer', { size: 16 })}</button>` : ''}
+      <button type="button" class="btn btn-mini" data-add="${esc(item.id)}" ${!canAdd || out ? 'disabled' : ''}>Add</button>
+    </div>`;
+  }).join('');
+  list.querySelectorAll('[data-add]').forEach(button => {
+    button.onclick = () => { const item = state.items.find(i => i.id === button.dataset.add); if (item) void addItem(item); };
+  });
+  list.querySelectorAll('[data-label]').forEach(button => {
+    button.onclick = () => {
+      const item = state.items.find(i => i.id === button.dataset.label);
+      if (item) openLabel(item);
+    };
+  });
+}
+
+/* ── Boot ────────────────────────────────────────────────────────────────── */
+
+let booted = false;
+function render() {
+  document.body.classList.toggle('is-authed', !!state.token);
+  if (state.token && !state.poller) startPolling();
+  if (!state.token && state.view !== 'verify') {
+    state.view = 'home';
+    signInView();
+    paintLink();
+    return;
+  }
+  if (!booted) {
+    booted = true;
+    document.querySelector('.boot')?.remove();
+  }
+  if (state.view === 'home') return homeView();
+  if (state.view === 'camera') return cameraView();
+  if (state.view === 'catalog') return catalogView();
+  if (state.view === 'verify') return verifyView();
+  if (state.view === 'install') return installView();
+  if (state.view === 'profile') return profileView();
+  return homeView();
+}
+
+/**
+ * Pull the decoder while the operator is still choosing a bill, so the first
+ * scan on a browser without BarcodeDetector does not wait for a 442 KB chunk.
+ *
+ * It is skipped when the browser decodes natively — downloading a decoder the
+ * device will never use is a slow, expensive no-op on exactly the phones that
+ * are already the fastest.
+ */
+async function warmDecoder() {
+  if (state.warmed) return;
+  state.warmed = true;
+  try {
+    const native = await nativeSupport('barcode');
+    if (native) return;
+  } catch {
+    /* if the capability probe fails, warming is the safer bet */
+  }
+  const run = () => {
+    loadZxing().catch(() => {});
+    navigator.serviceWorker?.controller?.postMessage({ type: 'warm' });
+  };
+  if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 2000 });
+  else setTimeout(run, 800);
+}
+
+function startPolling() {
+  warmDecoder();
+  state.poller?.stop();
+  state.poller = link.startPolling(() => refreshEvents());
+}
+
+window.addEventListener('online', () => { link.setOnline(true); state.poller?.kick(); paintLink(); });
+window.addEventListener('offline', () => { link.setOnline(false); stopCamera(); paintLink(); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopCamera();
+  } else if (state.token) {
+    state.poller?.kick();
+  }
+});
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  state.installPrompt = event;
+  if (state.view === 'profile' || state.view === 'install') render();
+});
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/scanner/sw.js', { scope: '/scanner/' }).catch(() => {});
+}
+
+const params = new URLSearchParams(location.hash.slice(1));
+const loginCode = params.get('login');
+const legacyPair = params.get('pair');
+
+if (loginCode || legacyPair) {
+  history.replaceState(null, '', '/scanner/');
+  render();
+  if (legacyPair) {
+    toaster.bad('This older draft QR is retired. Use the PC top-bar sign-in QR.', { topic: 'signin' });
+  } else {
+    void signInWithQr(loginCode);
+  }
+} else {
+  render();
+  if (state.token) startPolling();
+}
+
+/* Exported for the test harness only. */
+export { state, link, verifyInvoice, onBarcode, addItem, refreshEvents, render, startCamera, stopCamera, signInWithQr };

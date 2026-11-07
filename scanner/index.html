@@ -1,1 +1,56 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#123d46"><meta name="description" content="EMS Mobile Scanner for Pharmacy billing and public TrueBill invoice verification"><link rel="manifest" href="/scanner/manifest.webmanifest"><link rel="apple-touch-icon" href="/assets/apple-touch-icon.png"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-title" content="EMS Scanner"><title>EMS Mobile Scanner</title><link rel="stylesheet" href="/scanner/scanner.css"></head><body><div id="app"></div><script src="/scanner/jsbarcode.min.js" defer></script><script type="module" src="/scanner/scanner.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#0f766e" />
+    <meta name="color-scheme" content="light" />
+    <meta name="description" content="EMS Mobile Scanner for Pharmacy billing and public TrueBill invoice verification" />
+    <link rel="manifest" href="/scanner/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="EMS Scanner" />
+    <title>EMS Mobile Scanner</title>
+
+    <!-- The stylesheet is render-blocking by design: it is ~12 KB from the
+         service-worker cache and it is what stops the un-styled flash. The
+         modules below it are fetched in parallel (module graph). -->
+    <link rel="stylesheet" href="/scanner/scanner.css" />
+    <link rel="modulepreload" href="/scanner/scanner.js" />
+    <link rel="modulepreload" href="/scanner/link.js" />
+    <link rel="modulepreload" href="/scanner/ui.js" />
+    <link rel="modulepreload" href="/scanner/engine.js" />
+    <link rel="icon" href="/assets/favicon.ico" sizes="any" />
+    <!-- iOS ignores the manifest for the launch image; these are the sizes the
+         installed app actually uses. -->
+    <link rel="apple-touch-startup-image" href="/assets/apple-splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
+    <link rel="apple-touch-startup-image" href="/assets/apple-splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" />
+    <link rel="apple-touch-startup-image" href="/assets/apple-splash-1290x2796.png" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3)" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- First paint before the module graph evaluates: the mark and a bar of
+           skeleton tiles, matching the real layout so nothing jumps. -->
+      <div class="boot" aria-hidden="true">
+        <div class="boot-brand">
+          <span class="boot-mark"></span>
+          <span class="boot-line"></span>
+        </div>
+        <div class="boot-tiles">
+          <span></span><span></span><span></span>
+        </div>
+      </div>
+    </div>
+    <div id="toast" role="region" aria-label="Notifications"></div>
+    <noscript>
+      <p style="padding: 24px; font: 15px/1.5 system-ui, sans-serif">
+        The EMS Scanner needs JavaScript and a camera-capable browser. Invoice verification is also available from the
+        EMS website. See MOBILE_SCANNER.md in the repository for what the scanner does and does not do.
+      </p>
+    </noscript>
+    <script src="/scanner/jsbarcode.min.js" defer></script>
+    <script type="module" src="/scanner/scanner.js"></script>
+  </body>
+</html>

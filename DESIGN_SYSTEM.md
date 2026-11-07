@@ -623,6 +623,34 @@ Do not restyle another panel to match yours. If a pattern should be shared, prom
 it to `app.css` with a neutral class and document it here; if it is panel-specific,
 keep it behind the panel's body class.
 
+### Mobile Scanner (`/scanner/`)
+
+The phone scanner is the fourth surface of the same language, and the only one
+authored **mobile-first**.
+
+| Item | Value |
+|---|---|
+| Stylesheet | `scanner/scanner.css` (the only theme for this surface) |
+| Canvas | `--canvas: #f4f6f5`, one masked 16px dot grid at ≤16% ink |
+| Cards | white, `--r-card: 20px`, inner `--r-inner: 14px`, ring shadow `--hp` |
+| Grid | six columns; tiles span `full` (6), `half` (3) or `third` (2) and must total six per row |
+| Accent | Evergreen Teal `#0f766e` — the scanner is an action surface, not a status surface |
+| Bars | sticky top bar 54px, fixed tab bar 62px + safe-area inset |
+| Type scale | 21–26px titles, 13–15px UI, 11–12px labels; inputs are 16px so iOS does not zoom on focus |
+
+Rules specific to this surface:
+
+- **Reachability beats symmetry.** The scan controls and the manual code field
+  must sit inside the viewport on a 360×640 phone and in a 390px-tall landscape
+  viewport. The visual pass in `test/browser/shots-scanner.mjs` fails the build
+  if they do not.
+- **Tones tint a chip and a number, never a tile background** — the same rule as
+  §2, applied literally because a phone screen has no room for a second accent.
+- **Toasts replaced inline messages.** One stack above the tab bar (top of the
+  screen in landscape), one toast per topic, errors announced with `role="alert"`.
+- `scanner.css` is intentionally **not** covered by the `--xxx-` token-prefix test
+  in `test/styles.test.js`: it is its own scoped surface, like the panel themes.
+
 ---
 
 ## 9 · Animation and interaction

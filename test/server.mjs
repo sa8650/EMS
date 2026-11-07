@@ -81,6 +81,16 @@ async function serveFile(res, filePath, extraHeaders) {
   }
 }
 
+/** path → request count, for the scanner audit. Never persisted. */
+const apiHits = Object.create(null);
+
+const CATALOG = [
+  { id: 'p1', name: 'Paracetamol', strength: '500 mg', dosage_form: 'Tablet', sku: 'MED-0001', barcode: '2000000000015', available_stock: 240, base_unit: 'tablet', selling_price: 2 },
+  { id: 'p2', name: 'Amoxicillin', strength: '250 mg', dosage_form: 'Capsule', sku: 'MED-0002', barcode: '2000000000022', available_stock: 18, base_unit: 'capsule', selling_price: 7.5 },
+  { id: 'p3', name: 'Salbutamol Inhaler', strength: '100 mcg', dosage_form: 'Inhaler', sku: 'MED-0003', barcode: '2000000000039', available_stock: 0, base_unit: 'piece', selling_price: 320 },
+  { id: 'p4', name: 'Oral Rehydration Salt', strength: '', dosage_form: 'Sachet', sku: 'MED-0004', barcode: '2000000000046', available_stock: 96, base_unit: 'sachet', selling_price: 6 }
+];
+
 /**
  * Minimal read-only API fixtures so the marketing pages render their populated
  * state (pricing table, blog list, CMS pages) instead of their offline
@@ -91,6 +101,26 @@ function mockApi(path) {
   const pathname = path.split('?')[0];
   const ok = body => ({ status: 200, body });
 
+  /* Printed-number lookup is answered below; keep the token rule from
+     swallowing it. A known token returns the full document so the visual pass
+     can render the TrueBill card. */
+  if (pathname === 'public/invoice/12345678-1234-4234-8234-123456789012') {
+    return ok({
+      verified: true, record_type: 'invoice',
+      invoice: {
+        id: '12345678-1234-4234-8234-123456789012', kind: 'sale', invoice_number: 'SAL-4821',
+        invoice_date: '2026-11-06T10:24:00Z', payment_method: 'Cash', status: 'paid',
+        subtotal: 640, discount: 40, paid_amount: 600, total_due: 0,
+        stores: { name: 'Gulshan Branch', address: 'Road 11, Gulshan 1, Dhaka', phone: '01700 000 000' },
+        invoice_lines: [
+          { quantity: 20, unit_price: 2, line_total: 40, inventory_items: { description: 'Paracetamol 500 mg', item_code: 'MED-0001', unit: 'tablet' } },
+          { quantity: 30, unit_price: 20, line_total: 600, inventory_items: { description: 'Antiseptic Solution 100 ml', item_code: 'MED-0114', unit: 'bottle' } }
+        ]
+      },
+      party: { name: 'Walk-in customer' }
+    });
+  }
+  if (pathname === 'public/invoice/lookup') return ok({verified: true, record_type: 'invoice', invoice_number: 'PUR-12034', kind: 'purchase', details_available: false});
   /* TrueBill verification of a token that does not exist. */
   if (pathname.startsWith('public/invoice/')) {
     return { status: 404, body: { error: 'No record matches this verification token.' } };
@@ -135,6 +165,38 @@ function mockApi(path) {
   if (pathname === 'admin/entitlement') {
     return ok({ hasActivatedLicense: true, active: true });
   }
+  /* ── Mobile scanner ──────────────────────────────────────────────────────
+     Enough state for the phone UI to be driven end to end in a browser audit:
+     sign-in by PC QR, a draft list, a binding, a searchable catalog and one
+     applied scan event. Nothing here writes anything — the real routes live in
+     functions/_lib/mobile_scanner.js. */
+  const scanner = (() => {
+    const draft = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const binding = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+    if (pathname === 'scanner/login/consume') {
+      return ok({ token: 'harness-jwt', scannerOnly: true, user: { id: 'u1', name: 'Counter Staff', user_id: '1001', role: 'staff' }, store: { id: 'st1', name: 'Gulshan Branch', shop_type: 'pharmacy', code: 'GUL-01' } });
+    }
+    if (pathname === 'scanner/profile') {
+      return ok({ user: { name: 'Counter Staff', user_id: '1001', role: 'staff' }, shop: { name: 'Gulshan Branch', code: 'GUL-01' }, canScan: true, paired: true });
+    }
+    if (pathname === 'scanner/catalog') return ok(CATALOG);
+    if (pathname === 'scanner/drafts') {
+      return ok([
+        { draft_id: draft, terminal_label: '5f3c9a11', kind: 'sale', status: 'ready' },
+        { draft_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', terminal_label: '91b2e7d0', kind: 'purchase', status: 'ready' }
+      ]);
+    }
+    if (pathname === `scanner/drafts/${draft}/bind`) return ok({ binding_id: binding, kind: 'sale' });
+    if (pathname === `scanner/drafts/${draft}/catalog`) return ok(CATALOG);
+    if (pathname === `scanner/drafts/${draft}/sync`) {
+      return ok({ connected: true, kind: 'sale', events: [{ id: 'e-seeded', status: 'applied', reason: '' }] });
+    }
+    if (pathname === `scanner/drafts/${draft}/events`) return ok({ status: 'pending' });
+    if (pathname === `scanner/drafts/${draft}/status`) return ok({ connected: true, kind: 'sale' });
+    return undefined;
+  })();
+  if (scanner) return scanner;
+
   if (pathname === 'public/page') {
     const slug = new URLSearchParams(path.split('?')[1] || '').get('slug');
     const titles = { about: 'About EMS', terms: 'Terms of Service', privacy: 'Privacy Policy', contact: 'Contact us' };
@@ -152,7 +214,16 @@ createServer(async (req, res) => {
   const pathname = decodeURIComponent(url.pathname);
 
   if (pathname.startsWith('/api/')) {
-    const result = mockApi(pathname.slice(5) + (url.search || ''));
+    // Request counters, used by the scanner browser audit to check that one
+    // poll is one request and that unchanged state is not re-fetched.
+    const key = pathname.slice(5);
+    apiHits[key] = (apiHits[key] || 0) + 1;
+    if (pathname === '/api/__stats') {
+      res.writeHead(200, {'content-type': 'application/json', 'cache-control': 'no-store'});
+      res.end(JSON.stringify(apiHits));
+      return;
+    }
+    const result = mockApi(key + (url.search || ''));
     const status = result === undefined ? 503 : result.status || 200;
     const body = result === undefined ? { error: 'No mock for this API path' } : result.body;
     res.writeHead(status, { 'content-type': 'application/json' });
