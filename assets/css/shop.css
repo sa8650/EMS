@@ -20,7 +20,7 @@
    1 · Design tokens
 --------------------------------------------------------------------- */
 body.shp-on{
-  --shp-font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --shp-font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue", Arial, "Noto Sans Bengali", "Nirmala UI", "Vrinda", "Kohinoor Bangla", "Bangla Sangam MN", "Noto Sans", sans-serif;
   --shp-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
   --shp-bg:#f4f4f5;
   --shp-card:#ffffff;

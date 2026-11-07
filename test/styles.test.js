@@ -97,3 +97,31 @@ test('DESIGN_SYSTEM.md documents all twelve sections', () => {
   assert.match(doc, /body\.adm-on/);
   assert.match(doc, /body\.shp-on/);
 });
+
+/* ── Regression: issue #2 — "Script load failed" after a console refresh ─────
+   The app shell is served by _redirects at nested paths (/ownerconsole/licenses,
+   /administratorconsole/stores, /shopconsole/pharmacy-pos, /blog/7, /verify/x).
+   A relative `assets/js/app.js` resolves against those prefixes and 404s, so the
+   console dies on refresh. Every subresource must be root-absolute. */
+
+test('index.html loads every subresource from the site root', () => {
+  const html = read('index.html');
+  const refs = [...html.matchAll(/<(?:script|link|img)[^>]*?(?:src|href)="([^"]+)"/g)].map(m => m[1]);
+  assert.ok(refs.length >= 10, 'expected the shell to load its assets');
+  const relative = refs.filter(ref => !/^(https?:|data:|mailto:|#|\/)/.test(ref));
+  assert.deepEqual(relative, [], 'these URLs break on every nested route and must start with "/"');
+
+  // The entry script specifically — the file named in the bug report.
+  assert.match(html, /<script type="module" src="\/assets\/js\/app\.js"><\/script>/);
+});
+
+test('nested routes in _redirects are all covered by a rewrite', () => {
+  const redirects = read('_redirects');
+  const rules = redirects.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+  // The catch-all must exist and must be last: it is what serves an unknown or
+  // shallow path the app shell instead of a bare Pages 404.
+  const last = rules[rules.length - 1];
+  assert.match(last, /^\/\*\s+\/index\.html\s+200$/, 'the SPA catch-all must be the final rule');
+  // Assets must never be rewritten to HTML.
+  assert.match(redirects, /^\/assets\/\*\s+\/assets\/:splat\s+404$/m, 'a missing asset must 404, not return the shell');
+});

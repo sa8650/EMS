@@ -47,7 +47,7 @@
   --pub-focus: 0 0 0 3px rgba(13, 148, 136, 0.3);
 
   /* Type */
-  --pub-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --pub-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Bengali", "Nirmala UI", "Vrinda", "Kohinoor Bangla", "Bangla Sangam MN", "Noto Sans", sans-serif;
   --pub-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
   /* Geometry */
@@ -781,19 +781,23 @@
 }
 .pub-preview-float .pub-mini-head { color: var(--pub-muted); }
 
+/* Sits ABOVE the preview card. It used to sit below it inside a 52% column,
+   where it wrapped onto two lines and ran underneath the floating stock-alerts
+   card, so the label that promises "sample data" became the least readable
+   text on the page. */
 .pub-preview-note {
   display: flex;
   align-items: center;
   gap: 7px;
-  margin-top: 26px;
-  max-width: 52%;
+  margin: 0 0 10px;
+  max-width: 100%;
   font-family: var(--pub-mono);
   font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--pub-muted2);
 }
-.pub-preview-note svg { width: 12px; height: 12px; }
+.pub-preview-note svg { width: 12px; height: 12px; flex: none; }
 
 /* Audience strip */
 .pub-audience {
@@ -1886,7 +1890,7 @@
   .pub-hero-copy { max-width: none; }
   .pub-preview-wrap { max-width: 660px; }
   .pub-preview-float { right: 0; bottom: -12px; }
-  .pub-preview-note { margin-top: 22px; max-width: 100%; }
+  .pub-preview-note { margin-bottom: 8px; max-width: 100%; }
   .pub-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .pub-step:nth-child(4) { border-left: 0; padding-left: 0; }
   .pub-step:nth-child(4)::before { left: 0; }

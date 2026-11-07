@@ -251,6 +251,7 @@ export function createPublicSite(deps) {
   function heroPreview() {
     const bars = [46, 62, 54, 78, 66, 92, 74];
     return `<div class="pub-preview-wrap">
+      <p class="pub-preview-note">${GLYPH.info} Illustrative interface preview · sample data, not live figures</p>
       <div class="pub-preview" role="img" aria-label="Preview of the EMS store overview screen showing sales, due recovery, stock alerts and recent invoices. Sample data.">
         <div class="pub-preview-chrome">
           <span class="pub-preview-dots"><i></i><i></i><i></i></span>
@@ -294,7 +295,6 @@ export function createPublicSite(deps) {
           <span class="pub-row-val">${esc(left)}</span>
         </div>`).join('')}
       </div>
-      <p class="pub-preview-note">${GLYPH.info} Illustrative interface preview · sample data, not live figures</p>
     </div>`;
   }
 
