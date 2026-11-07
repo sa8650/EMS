@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import Database from 'better-sqlite3';
 import {pharmacyApi} from '../functions/_lib/pharmacy_api.js';
+/*
+ * The report endpoints reject ranges longer than 366 days, so these tests must
+ * not pin a calendar month: invoices are created with today's date, and a
+ * hardcoded window such as 2026-10 silently stops covering them once the clock
+ * moves past it (three tests failed for exactly that reason in November 2026).
+ * Derive the window from the invoice's own date instead.
+ */
+const windowFor=reference=>{const day=String(reference||new Date().toISOString()).slice(0,10);return `from=${day}&to=${day}`};
+
 const storeId='11111111-1111-4111-8111-111111111111',otherId='22222222-2222-4222-8222-222222222222',admin='33333333-3333-4333-8333-333333333333';
 const session={id:admin,role:'staff',storeId};
 function fixture(){
@@ -122,7 +131,7 @@ test('D1: quarantined customer return can be sent to supplier without reducing s
   const itemId=sqlite.prepare('SELECT inventory_item_id FROM pharmacy_products WHERE id=?').get(product.id).inventory_item_id;
   assert.equal(sqlite.prepare('SELECT total_stock FROM inventory_items WHERE id=?').get(itemId).total_stock,7);
   const after=await json(await route(env,'pharmacy/quarantine'));assert.equal(after[0].available_base,1);
-  const report=await json(await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31'));assert.equal(report.metrics.quarantineRecovery,6);assert.equal(report.sections.purchaseReturns[0].quarantine_recovery,6);
+  const report=await json(await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}`));assert.equal(report.metrics.quarantineRecovery,6);assert.equal(report.sections.purchaseReturns[0].quarantine_recovery,6);
   assert.equal((await route(env,'pharmacy/supplier-returns','POST',{...payload,idempotencyKey:'return-quar-too-many',items:[{invoice_line_id:purchaseLine,quantity_base:2,quarantine_item_id:qId}]})).status,409);
   const rest=await route(env,'pharmacy/supplier-returns','POST',{...payload,idempotencyKey:'return-quar-last',items:[{invoice_line_id:purchaseLine,quantity_base:1,quarantine_item_id:qId}]});assert.equal(rest.status,201);
   assert.deepEqual(await json(await route(env,'pharmacy/quarantine')),[]);
@@ -134,7 +143,7 @@ test('D1: quarantined customer return can be sent to supplier without reducing s
 test('D1: Pharmacy analytics report derives purchases, stock, dues and real chart values from shop records',async()=>{
  const {env,sqlite}=fixture();try{
   const {invoice}=await setup(env);
-  const response=await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31');
+  const response=await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}`);
   assert.equal(response.status,200,JSON.stringify(await response.clone().json()));
   const report=await json(response);
   assert.equal(report.metrics.purchases,30);assert.equal(report.metrics.purchaseDue,20);
@@ -143,7 +152,7 @@ test('D1: Pharmacy analytics report derives purchases, stock, dues and real char
   assert.equal(report.charts.find(x=>x.date===invoice.invoice_date).purchases,30);
   assert.equal(report.sections.expiry.length,0);
   assert.equal(report.sections.sales.length,0);
-  const denied=await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31','GET',undefined,session,()=>false);assert.equal(denied.status,403);
+  const denied=await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}`,'GET',undefined,session,()=>false);assert.equal(denied.status,403);
  }finally{sqlite.close()}
 });
 
@@ -152,12 +161,12 @@ test('D1: report profit uses historical sale COGS, discounts and expense; due re
   const {product,invoice}=await setup(env);
   const sale=await route(env,'pharmacy/checkout','POST',{idempotencyKey:'sale-for-report-01',lines:[{productId:product.id,unitLabel:'ml',quantity:4,unitPrice:5}]});assert.equal(sale.status,201);const sold=await json(sale);
   const stamp=new Date().toISOString();
-  sqlite.prepare('INSERT INTO expenses(id,store_id,expense_code,expense_date,details,total,paid,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',storeId,'EXP-REPORT','2026-10-19','Electricity',7,7,stamp,stamp);
+  sqlite.prepare('INSERT INTO expenses(id,store_id,expense_code,expense_date,details,total,paid,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)').run('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',storeId,'EXP-REPORT',stamp.slice(0,10),'Electricity',7,7,stamp,stamp);
   sqlite.prepare('INSERT INTO due_recoveries(id,store_id,source_type,source_id,amount,payment_method,created_at) VALUES (?,?,?,?,?,?,?)').run('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',storeId,'sale',sold.id,2,'cash',stamp);
   sqlite.prepare('UPDATE invoices SET paid_amount=paid_amount+2,total_due=total_due-2 WHERE id=?').run(sold.id);
   const looked=await json(await route(env,'pharmacy/supplier-returns/lookup?invoice_number='+encodeURIComponent(invoice.invoice_number)));
   const supplierReturn=await route(env,'pharmacy/supplier-returns','POST',{invoice_id:invoice.id,idempotencyKey:'return-report-01',reason:'Broken',settlement_method:'credit',items:[{invoice_line_id:looked.items[0].id,quantity_base:2}]});assert.equal(supplierReturn.status,201);
-  const report=await json(await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31'));
+  const report=await json(await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}`));
   assert.equal(report.metrics.sales,20);assert.equal(report.metrics.netRevenue,20);
   assert.equal(report.metrics.cogs,12);assert.equal(report.metrics.grossProfit,8);
   assert.equal(report.metrics.expenses,7);assert.equal(report.metrics.netProfit,1);
@@ -173,12 +182,13 @@ test('D1: report profit uses historical sale COGS, discounts and expense; due re
 test('D1: report filters and error states do not fabricate missing sales or cross-store data',async()=>{
  const {env,sqlite}=fixture();try{
   await setup(env);
-  const missing=await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31&category=Unlisted');
+  const missing=await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}&category=Unlisted`);
   assert.equal(missing.status,200);const filtered=await json(missing);
   assert.equal(filtered.metrics.purchases,0);assert.equal(filtered.sections.purchases.length,0);
   assert.equal(filtered.metrics.purchaseDue,0);assert.equal(filtered.charts.filter(x=>x.purchases!==0).length,0);
-  const other=await json(await route(env,'pharmacy/reports?from=2026-10-01&to=2026-10-31','GET',undefined,{...session,storeId:otherId}));
+  const other=await json(await route(env,`pharmacy/reports?${windowFor(new Date().toISOString())}`,'GET',undefined,{...session,storeId:otherId}));
   assert.equal(other.metrics.purchases,0);assert.equal(other.metrics.stockValue,0);
-  assert.equal((await route(env,'pharmacy/reports?from=2025-01-01&to=2026-10-31')).status,400);
+  const tooLong=`from=${new Date(Date.now()-400*86400000).toISOString().slice(0,10)}&to=${new Date().toISOString().slice(0,10)}`;
+  assert.equal((await route(env,'pharmacy/reports?'+tooLong)).status,400);
  }finally{sqlite.close()}
 });

@@ -228,16 +228,21 @@ test('Public navigation exposes the sign-in paths as path links, never buttons',
     const navLinks = [...doc.querySelectorAll('.pubnav-links a')].map(a => a.textContent.trim());
     assert.deepEqual(navLinks, ['Features', 'How it works', 'Pricing', 'About', 'Blog', 'Contact']);
 
-    // Every sign-in entry point is a real link, so it works without JS, survives a
-    // refresh and produces a shareable URL: /administrator, /shop and /owner.
+    // Every customer sign-in entry point is a real link, so it works without JS,
+    // survives a refresh and produces a shareable URL: /administrator and /shop.
     const find = (scope, selector) => [...doc.querySelectorAll(scope + ' ' + selector)];
     assert.equal(doc.querySelector('.pubnav-actions a[href="/administrator"]').dataset.pubAuth, 'admin');
     assert.equal(doc.querySelector('.pubnav-actions a[href="/shop"]').dataset.pubAuth, 'shop');
-    assert.equal(doc.querySelector('.pubnav-actions a[href="/owner"]').textContent.trim(), 'Owner login');
-    assert.equal(doc.querySelectorAll('[data-pub-auth="owner"]').length, 0, 'the owner is never a button');
     assert.equal(find('#pubDrawer', 'a[href="/administrator"]').length, 1);
-    assert.equal(find('.pub-foot-col', 'a[href="/owner"]').length, 1);
-    assert.equal(doc.querySelectorAll('a[href="/owner"]').length, 4, 'nav, drawer, footer and the access-levels card');
+    assert.equal(find('.pub-foot-col', 'a[href="/administrator"]').length, 1);
+
+    /* The platform-owner console is internal and must never be advertised on the
+       public site: no link, no button, nowhere in the markup. The /owner route
+       still exists for the team — it is just not published here. */
+    assert.equal(doc.querySelectorAll('a[href="/owner"]').length, 0, 'no owner entry point in the header');
+    assert.equal(doc.querySelectorAll('a[href^="/owner"]').length, 0, 'no owner entry point anywhere (drawer, footer, access cards)');
+    assert.equal(doc.querySelectorAll('[data-pub-auth="owner"]').length, 0, 'the owner is never a button');
+    assert.doesNotMatch(doc.body.innerHTML, /owner login/i, 'no "owner login" copy survives on the public site');
 
     // no sign-in control is a <button> any more
     const signInButtons = [...doc.querySelectorAll('button')].filter(b => ['admin', 'shop', 'owner'].includes(b.dataset.pubAuth));
@@ -249,9 +254,9 @@ test('Public navigation exposes the sign-in paths as path links, never buttons',
     assert.ok(env.calls.includes('register'));
     assert.ok(env.calls.includes('navigate:/administrator'), 'the address bar follows the click');
 
-    // the owner link opens its modal in place too, and keeps the URL
-    doc.querySelector('.pubnav-signin a[href="/owner"]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true, cancelable: true }));
-    assert.ok(env.calls.includes('showEmsLogin'));
-    assert.ok(env.calls.includes('navigate:/owner'));
+    // A public click never reaches the owner sign-in, because no public element
+    // points at it any more.
+    assert.ok(!env.calls.includes('showEmsLogin'), 'nothing on the page can open the owner sign-in');
+    assert.ok(!env.calls.some(call => call === 'navigate:/owner'), 'nothing on the page links to /owner');
   } finally { env.restore(); }
 });

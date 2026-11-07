@@ -85,7 +85,6 @@ export function createPublicSite(deps) {
           <span class="pubnav-signin">
             <a href="/administrator" data-pub-auth="admin">Administrator login</a>
             <a href="/shop" data-pub-auth="shop">Shop login</a>
-            <a href="/owner">Owner login</a>
           </span>
           <button type="button" class="pub-btn pub-btn--sm" data-pub-register>Create account</button>
           <button type="button" class="pub-burger" data-pub-burger aria-label="Open navigation menu" aria-expanded="false" aria-controls="pubDrawer">${icon('menu')}</button>
@@ -103,7 +102,6 @@ export function createPublicSite(deps) {
           <span>Sign in</span>
           <a class="pub-btn pub-btn--secondary pub-btn--block" href="/administrator" data-pub-auth="admin">Administrator login</a>
           <a class="pub-btn pub-btn--secondary pub-btn--block" href="/shop" data-pub-auth="shop">Shop login</a>
-          <a class="pub-link pub-link--block" href="/owner">EMS owner login</a>
         </div>
         <div class="pub-drawer-foot">
           <button type="button" class="pub-btn pub-btn--block" data-pub-register>Create your business account</button>
@@ -150,7 +148,6 @@ export function createPublicSite(deps) {
             <ul>
               <li><a href="/administrator" data-pub-auth="admin">Administrator login</a></li>
               <li><a href="/shop" data-pub-auth="shop">Shop login</a></li>
-              <li><a href="/owner">EMS owner login</a></li>
               <li><a href="/terms">Terms of Service</a></li>
               <li><a href="/privacy">Privacy Policy</a></li>
             </ul>
@@ -210,16 +207,9 @@ export function createPublicSite(deps) {
           return;
         }
       }
-      /* The platform-owner link stays a plain navigation semantically, but it is
-         intercepted like the others so the modal opens without a reload. */
-      const ownerLink = event.target.closest('a[href="/owner"]');
-      if (ownerLink) {
-        event.preventDefault();
-        openDrawer(false);
-        try { go('/owner'); } catch { /* non-visual environment */ }
-        showEmsLogin();
-        return;
-      }
+      /* There is deliberately no platform-owner link on the public site: the
+         owner console is internal and /owner is reached by direct URL only
+         (the route still works, it is simply not advertised here). */
       const anchor = event.target.closest('[data-pub-plan]');
       if (anchor) { openDrawer(false); showAuth('admin'); }
     });
@@ -583,10 +573,10 @@ export function createPublicSite(deps) {
               ? '<button type="button" class="pub-btn pub-btn--secondary pub-btn--sm" data-pub-register>Create your business account</button>'
               : name === 'Shop staff'
                 ? '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/shop" data-pub-auth="shop">Shop login</a>'
-                : '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/owner">EMS owner login</a>'}</div>
+                : '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/contact">Questions? Contact us</a>'}</div>
           </article>`).join('')}
         </div>
-        <div class="pub-note">${GLYPH.info}<span><b>Not sure which one you need?</b> If the business is yours, register as an <b>Administrator</b>. Shop staff accounts are added by that administrator inside each store, and the EMS owner login exists only for the team operating this deployment.</span></div>
+        <div class="pub-note">${GLYPH.info}<span><b>Not sure which one you need?</b> If the business is yours, register as an <b>Administrator</b>. Shop staff accounts are added by that administrator inside each store. The platform-owner account is internal to the team operating this deployment and is not available from this website.</span></div>
       </div>
     </section>`;
   }
