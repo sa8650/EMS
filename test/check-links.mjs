@@ -59,6 +59,9 @@ for (const file of files) {
     const p = m[1];
     // Ignore things that are clearly not files on disk.
     if (/^\/(api|verify|invoice|blog|owner|administrator|admin|shop|about|terms|privacy|contact|app-store)/.test(p) && !p.includes('.')) continue;
+    // OOXML part names (/xl/workbook.xml, /[Content_Types].xml) live inside a
+    // generated .xlsx zip — they are not URLs on this site.
+    if (/^\/(xl|docProps|word|ppt|_rels)\//.test(p) || p.startsWith('/[')) continue;
     if (!absoluteRefs.has(p)) absoluteRefs.set(p, new Set());
     absoluteRefs.get(p).add(rel);
   }

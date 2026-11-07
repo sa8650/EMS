@@ -125,3 +125,12 @@ test('nested routes in _redirects are all covered by a rewrite', () => {
   // Assets must never be rewritten to HTML.
   assert.match(redirects, /^\/assets\/\*\s+\/assets\/:splat\s+404$/m, 'a missing asset must 404, not return the shell');
 });
+
+test('every local URL the app references resolves to a real file', async () => {
+  // Catches a renamed asset, a typo in a path, or a brand snippet that points
+  // at a file which was never copied into the deploy root.
+  const { execFileSync } = await import('node:child_process');
+  const out = execFileSync(process.execPath, [join(root, 'test/check-links.mjs')], { encoding: 'utf8' });
+  assert.match(out, /No broken references/, out);
+  assert.match(out, /relative asset refs\s*:\s*0/, 'no HTML page may load an asset with a relative path');
+});
