@@ -498,15 +498,30 @@ Rendered by `assets/js/public_site.js`, styled by `assets/css/public.css`
 | `/?page=blog-post&id=…` | `renderPage('blog-post')` | 760px article column |
 | `/?page=contact` | `renderPage('contact')` | Split: editorial copy + form card |
 | `/?page=app-store` | `renderPage('app-store')` | Page head + `.pub-store-shell` wrapping `mountAppStore()` |
+| `/owner` · `/admin` · `/shop` | `signInRoute()` → landing + modal | Path-based sign-in links (`_redirects` rewrites them to the app shell) |
 | `/?verify=<token>` etc. | `renderVerification()` | Verification card (see below) |
 
 ### Public navigation
 
 Links: Features (`/#operations`), How it works (`/#how-it-works`), Pricing
 (`/#pricing`), About, Blog, Contact. Actions: Administrator login, Shop login,
-Create account. The EMS owner login is intentionally *not* in the desktop nav — it
-appears in the mobile drawer and the footer's "Access & legal" column so customer
-sign-up is never confused with platform access.
+Owner login, Create account.
+
+Two rules that must survive future edits:
+
+1. **Sign-in controls are buttons only where they open a modal.** Administrator
+   and shop sign-in are `<button data-pub-auth>`; "Create account" is
+   `<button data-pub-register>`. They are wired once in `bindShell()` by
+   delegation on `document`, so they keep working after every re-render.
+2. **The platform owner uses a link, not a button.** Every owner entry point is
+   `<a href="/owner">` (nav, mobile drawer, footer "Access & legal" column,
+   access-levels card). `/owner` renders the landing with the owner modal
+   already open, so the address is shareable and customer sign-up is never
+   confused with platform access.
+
+Modals render into `#authlayer`, created on demand by `authLayer()` in `app.js`
+and appended to `<body>` — never inside `.pubsite`, and never assumed to exist in
+the markup. If a modal does not open, that accessor is the first place to look.
 
 ### Hero composition
 
@@ -768,6 +783,8 @@ it needs new behaviour it gets another injected helper from `app.js`.
 7. **Preserve behaviour.** Existing routes, CMS content, verification workflows,
    download actions, auth modals and payment/license flows must keep working. The
    public renderer receives its capabilities from `app.js` — do not duplicate them.
+   Sign-in controls call the injected `showAuth` / `showEmsLogin` / `register`; they
+   must never navigate away or reimplement a form.
 8. **Keep the brand.** Evergreen Teal `#0F766E`, Core Teal `#0D9488`, Deep Ink
    `#132A27`, Soft Mint `#F4F8F7`, `ems-mark.svg`, "Powered by Dexter Studio".
 9. **Accessibility is part of "done".** Keyboard path, visible focus, labels,

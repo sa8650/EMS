@@ -219,7 +219,7 @@ test('Invoice verification renders verified, failed and loading states from the 
   } finally { bad.restore(); }
 });
 
-test('Public navigation exposes the three sign-in paths without crowding the primary links', async () => {
+test('Public navigation exposes the sign-in paths without crowding the primary links', async () => {
   const env = mount();
   try {
     await env.site.renderLanding();
@@ -227,10 +227,21 @@ test('Public navigation exposes the three sign-in paths without crowding the pri
     const doc = env.dom.window.document;
     const navLinks = [...doc.querySelectorAll('.pubnav-links a')].map(a => a.textContent.trim());
     assert.deepEqual(navLinks, ['Features', 'How it works', 'Pricing', 'About', 'Blog', 'Contact']);
+
+    // staff/admin sign-in are still buttons handled by the app's modal layer
     const drawer = doc.getElementById('pubDrawer');
-    assert.ok(drawer.querySelector('[data-pub-auth="owner"]'), 'owner login reachable from the drawer');
-    const footerLinks = [...doc.querySelectorAll('.pub-foot-col button')].map(b => b.dataset.pubAuth);
-    assert.deepEqual(footerLinks.sort(), ['admin', 'owner', 'shop']);
+    assert.ok(drawer.querySelector('[data-pub-auth="admin"]'), 'administrator login reachable from the drawer');
+    assert.ok(drawer.querySelector('[data-pub-auth="shop"]'), 'shop login reachable from the drawer');
+
+    // the platform owner signs in through a plain path link, never a button
+    assert.equal(doc.querySelectorAll('[data-pub-auth="owner"]').length, 0, 'no owner sign-in button anywhere');
+    const ownerLinks = [...doc.querySelectorAll('a[href="/owner"]')];
+    assert.equal(ownerLinks.length, 4, 'nav, drawer, footer and access-levels card link to /owner');
+    assert.equal(doc.querySelector('.pubnav-actions a[href="/owner"]').textContent.trim(), 'Owner login');
+
+    const footerLinks = [...doc.querySelectorAll('.pub-foot-col button')].map(b => b.dataset.pubAuth).sort();
+    assert.deepEqual(footerLinks, ['admin', 'shop']);
+
     doc.querySelector('.pubnav-actions [data-pub-auth="admin"]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true }));
     doc.querySelector('.pubnav-actions [data-pub-register]').dispatchEvent(new env.dom.window.MouseEvent('click', { bubbles: true }));
     assert.ok(env.calls.includes('showAuth:admin'));

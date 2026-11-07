@@ -83,7 +83,7 @@ export function createPublicSite(deps) {
         <div class="pubnav-actions">
           <button type="button" class="pub-btn pub-btn--quiet pub-btn--hide-sm" data-pub-auth="admin">Administrator login</button>
           <button type="button" class="pub-btn pub-btn--quiet pub-btn--hide-sm" data-pub-auth="shop">Shop login</button>
-          <button type="button" class="pub-btn pub-btn--quiet pub-btn--hide-sm" data-pub-auth="owner">Owner login</button>
+          <a class="pub-btn pub-btn--quiet pub-btn--hide-sm" href="/owner">Owner login</a>
           <button type="button" class="pub-btn pub-btn--sm" data-pub-register>Create account</button>
           <button type="button" class="pub-burger" data-pub-burger aria-label="Open navigation menu" aria-expanded="false" aria-controls="pubDrawer">${icon('menu')}</button>
         </div>
@@ -100,7 +100,7 @@ export function createPublicSite(deps) {
           <span>Sign in</span>
           <button type="button" class="pub-btn pub-btn--secondary pub-btn--block" data-pub-auth="admin">Administrator login</button>
           <button type="button" class="pub-btn pub-btn--secondary pub-btn--block" data-pub-auth="shop">Shop login</button>
-          <button type="button" class="pub-btn pub-btn--ghost pub-btn--block" data-pub-auth="owner">EMS owner login</button>
+          <a class="pub-btn pub-btn--ghost pub-btn--block" href="/owner">EMS owner login</a>
         </div>
         <div class="pub-drawer-foot">
           <button type="button" class="pub-btn pub-btn--block" data-pub-register>Create your business account</button>
@@ -147,7 +147,7 @@ export function createPublicSite(deps) {
             <ul>
               <li><button type="button" data-pub-auth="admin">Administrator login</button></li>
               <li><button type="button" data-pub-auth="shop">Shop login</button></li>
-              <li><button type="button" data-pub-auth="owner">EMS owner login</button></li>
+              <li><a href="/owner">EMS owner login</a></li>
               <li><a href="/?page=terms">Terms of Service</a></li>
               <li><a href="/?page=privacy">Privacy Policy</a></li>
             </ul>
@@ -562,7 +562,7 @@ export function createPublicSite(deps) {
               ? '<button type="button" class="pub-btn pub-btn--secondary pub-btn--sm" data-pub-register>Create your business account</button>'
               : name === 'Shop staff'
                 ? '<button type="button" class="pub-btn pub-btn--ghost pub-btn--sm" data-pub-auth="shop">Shop login</button>'
-                : '<button type="button" class="pub-btn pub-btn--ghost pub-btn--sm" data-pub-auth="owner">EMS owner login</button>'}</div>
+                : '<a class="pub-btn pub-btn--ghost pub-btn--sm" href="/owner">EMS owner login</a>'}</div>
           </article>`).join('')}
         </div>
         <div class="pub-note">${GLYPH.info}<span><b>Not sure which one you need?</b> If the business is yours, register as an <b>Administrator</b>. Shop staff accounts are added by that administrator inside each store, and the EMS owner login exists only for the team operating this deployment.</span></div>

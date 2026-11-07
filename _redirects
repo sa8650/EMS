@@ -1,0 +1,7 @@
+# Cloudflare Pages rewrites — these paths are handled by the client-side router in
+# assets/js/app.js, so they must serve the app shell instead of a 404.
+
+# Sign-in entry points (path-based links, e.g. https://your-domain/owner)
+/owner    /    200
+/admin    /    200
+/shop     /    200
